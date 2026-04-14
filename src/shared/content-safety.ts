@@ -1,4 +1,5 @@
 export const MAX_FIELD_LENGTH = 8192;
+export const MAX_HOOK_CONTENT_LENGTH = MAX_FIELD_LENGTH;
 
 export const UNTRUSTED_PREAMBLE = [
   '## System Instructions (TRUSTED)',
@@ -42,6 +43,20 @@ export function assertContentLength(
       `${field} exceeds MAX_FIELD_LENGTH (${value.length} > ${max}). Split the content or truncate it before saving.`,
     );
   }
+}
+
+export function truncateContent(
+  value: string,
+  field: string,
+  max: number = MAX_HOOK_CONTENT_LENGTH,
+): string {
+  if (typeof value !== 'string' || value.length <= max) {
+    return typeof value === 'string' ? value : '';
+  }
+  process.stderr.write(
+    `WARN: ${field} truncated from ${value.length} to ${max} chars\n`,
+  );
+  return value.slice(0, max);
 }
 
 export interface InjectionMarker {
