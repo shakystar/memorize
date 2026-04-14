@@ -1,41 +1,51 @@
 import type { StartupContextPayload } from '../../domain/entities.js';
+import {
+  UNTRUSTED_PREAMBLE,
+  wrapUntrusted,
+} from '../../shared/content-safety.js';
 
 export function renderClaudeStartupContext(
   payload: StartupContextPayload,
 ): string {
-  const parts = ['# Memorize context', '', `Project: ${payload.projectSummary}`];
+  const untrustedLines: string[] = [];
+
+  untrustedLines.push(`Project: ${payload.projectSummary}`);
 
   if (payload.projectRules.length > 0) {
-    parts.push('Rules:');
+    untrustedLines.push('Rules:');
     for (const rule of payload.projectRules) {
-      parts.push(`- ${rule}`);
+      untrustedLines.push(`- ${rule}`);
     }
   }
 
   if (payload.workstreamSummary) {
-    parts.push(`Workstream: ${payload.workstreamSummary}`);
+    untrustedLines.push(`Workstream: ${payload.workstreamSummary}`);
   }
 
   if (payload.task) {
-    parts.push(`Task: ${payload.task.title}`);
-    parts.push(`Goal: ${payload.task.goal}`);
-    parts.push(`Status: ${payload.task.status}`);
+    untrustedLines.push(`Task: ${payload.task.title}`);
+    untrustedLines.push(`Goal: ${payload.task.goal}`);
+    untrustedLines.push(`Status: ${payload.task.status}`);
   }
 
   if (payload.latestHandoff) {
     const handoff = payload.latestHandoff;
-    parts.push(`Latest handoff: ${handoff.fromActor} → ${handoff.toActor}`);
+    untrustedLines.push(`Latest handoff: ${handoff.fromActor} → ${handoff.toActor}`);
     if (handoff.fromActor === 'user') {
-      parts.push(
+      untrustedLines.push(
         '(user-authored intent — verify code/test state independently before trusting claims)',
       );
     }
-    parts.push(`Handoff summary: ${handoff.summary}`);
-    parts.push(`Next action: ${handoff.nextAction}`);
+    untrustedLines.push(`Handoff summary: ${handoff.summary}`);
+    untrustedLines.push(`Next action: ${handoff.nextAction}`);
     if (handoff.remainingItems.length > 0) {
-      parts.push(`Remaining: ${handoff.remainingItems.join('; ')}`);
+      untrustedLines.push(`Remaining: ${handoff.remainingItems.join('; ')}`);
     }
   }
 
-  return parts.join('\n');
+  const body = wrapUntrusted(untrustedLines.join('\n'), {
+    source: 'memorize.startup',
+  });
+
+  return ['# Memorize context', '', UNTRUSTED_PREAMBLE, '', body].join('\n');
 }

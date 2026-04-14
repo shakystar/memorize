@@ -21,8 +21,42 @@ import {
   createTask as createTaskEntity,
 } from '../domain/entities.js';
 import type { Checkpoint, Handoff, Task } from '../domain/entities.js';
+import {
+  assertContentLength,
+  detectInjectionMarkers,
+  warnInjectionMarkers,
+  type InjectionMarker,
+} from '../shared/content-safety.js';
+
+function guardField(
+  value: string | undefined,
+  field: string,
+  collected: InjectionMarker[],
+): void {
+  if (value === undefined) return;
+  assertContentLength(value, field);
+  collected.push(...detectInjectionMarkers(value, field));
+}
+
+function guardStringList(
+  values: string[] | undefined,
+  field: string,
+  collected: InjectionMarker[],
+): void {
+  if (!values) return;
+  values.forEach((value, index) =>
+    guardField(value, `${field}[${index}]`, collected),
+  );
+}
 
 export async function createTask(input: CreateTaskInput): Promise<Task> {
+  const markers: InjectionMarker[] = [];
+  guardField(input.title, 'task.title', markers);
+  guardField(input.description, 'task.description', markers);
+  guardField(input.goal, 'task.goal', markers);
+  guardStringList(input.acceptanceCriteria, 'task.acceptanceCriteria', markers);
+  warnInjectionMarkers(markers);
+
   const task = createTaskEntity(input);
   await appendEvent({
     type: 'task.created',
@@ -54,6 +88,19 @@ export async function updateTask(
 }
 
 export async function createHandoff(input: CreateHandoffInput): Promise<Handoff> {
+  const markers: InjectionMarker[] = [];
+  guardField(input.summary, 'handoff.summary', markers);
+  guardField(input.nextAction, 'handoff.nextAction', markers);
+  guardStringList(input.doneItems, 'handoff.doneItems', markers);
+  guardStringList(input.remainingItems, 'handoff.remainingItems', markers);
+  guardStringList(input.warnings, 'handoff.warnings', markers);
+  guardStringList(
+    input.unresolvedQuestions,
+    'handoff.unresolvedQuestions',
+    markers,
+  );
+  warnInjectionMarkers(markers);
+
   const handoff = createHandoffEntity(input);
   await appendEvent({
     type: 'handoff.created',
@@ -81,6 +128,18 @@ export async function createHandoff(input: CreateHandoffInput): Promise<Handoff>
 export async function createCheckpoint(
   input: CreateCheckpointInput,
 ): Promise<Checkpoint> {
+  const markers: InjectionMarker[] = [];
+  guardField(input.summary, 'checkpoint.summary', markers);
+  guardStringList(input.taskUpdates, 'checkpoint.taskUpdates', markers);
+  guardStringList(input.projectUpdates, 'checkpoint.projectUpdates', markers);
+  guardStringList(input.deferredItems, 'checkpoint.deferredItems', markers);
+  guardStringList(
+    input.discardableItems,
+    'checkpoint.discardableItems',
+    markers,
+  );
+  warnInjectionMarkers(markers);
+
   const checkpoint = createCheckpointEntity(input);
   await appendEvent({
     type: 'checkpoint.created',

@@ -1,16 +1,18 @@
 import type { StartupContextPayload } from '../../domain/entities.js';
+import {
+  UNTRUSTED_PREAMBLE,
+  wrapUntrusted,
+} from '../../shared/content-safety.js';
 
 export function renderCodexStartupContext(
   payload: StartupContextPayload,
 ): string {
-  const sections = [
-    '# Memorize startup context',
-    '',
-    `## Project summary\n${payload.projectSummary}`,
-  ];
+  const untrustedSections: string[] = [];
+
+  untrustedSections.push(`## Project summary\n${payload.projectSummary}`);
 
   if (payload.projectRules.length > 0) {
-    sections.push(
+    untrustedSections.push(
       `## Project rules\n${payload.projectRules
         .map((rule) => `- ${rule}`)
         .join('\n')}`,
@@ -18,11 +20,11 @@ export function renderCodexStartupContext(
   }
 
   if (payload.workstreamSummary) {
-    sections.push(`## Workstream summary\n${payload.workstreamSummary}`);
+    untrustedSections.push(`## Workstream summary\n${payload.workstreamSummary}`);
   }
 
   if (payload.task) {
-    sections.push(
+    untrustedSections.push(
       `## Current task\n- Title: ${payload.task.title}\n- Goal: ${payload.task.goal}\n- Status: ${payload.task.status}`,
     );
   }
@@ -51,8 +53,18 @@ export function renderCodexStartupContext(
     if (handoff.warnings.length > 0) {
       handoffLines.push(`- Warnings: ${handoff.warnings.join('; ')}`);
     }
-    sections.push(handoffLines.join('\n'));
+    untrustedSections.push(handoffLines.join('\n'));
   }
 
-  return sections.join('\n\n');
+  const body = wrapUntrusted(untrustedSections.join('\n\n'), {
+    source: 'memorize.startup',
+  });
+
+  return [
+    '# Memorize startup context',
+    '',
+    UNTRUSTED_PREAMBLE,
+    '',
+    body,
+  ].join('\n');
 }
