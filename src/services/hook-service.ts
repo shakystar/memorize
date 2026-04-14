@@ -1,6 +1,6 @@
 import fs from 'node:fs/promises';
 
-import { prepareLaunch } from '../adapters/launch.js';
+import { prepareLaunch } from './launch-service.js';
 import { getBoundProjectId, readProject } from './project-service.js';
 import { setupProject } from './setup-service.js';
 import { createCheckpoint, createHandoff } from './task-service.js';

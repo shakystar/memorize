@@ -1,7 +1,7 @@
 import path from 'node:path';
 import process from 'node:process';
 
-import { launchAgent } from '../adapters/launch.js';
+import { launchAgent } from '../services/launch-service.js';
 import { loadStartContext } from '../services/context-service.js';
 import {
   installClaudeIntegration,
