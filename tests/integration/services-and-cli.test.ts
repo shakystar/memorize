@@ -149,6 +149,38 @@ describe('phase 2 services and cli', () => {
     expect(syncState?.syncStatus).toBe('idle');
   });
 
+  it('accepts literal values that start with dashes and --flag=value syntax', () => {
+    expect(runCli(['project', 'init']).status).toBe(0);
+    expect(runCli(['task', 'create', 'Parser edge task']).status).toBe(0);
+
+    const dashSummary = runCli([
+      'task',
+      'checkpoint',
+      '--summary',
+      '--force path needed for legacy tool',
+    ]);
+    expect(dashSummary.status).toBe(0);
+    expect(dashSummary.stdout).toContain('Created checkpoint');
+
+    const equalsForm = runCli([
+      'task',
+      'checkpoint',
+      '--summary=equals-form works too',
+    ]);
+    expect(equalsForm.status).toBe(0);
+    expect(equalsForm.stdout).toContain('Created checkpoint');
+
+    const missingValue = runCli([
+      'task',
+      'checkpoint',
+      '--summary',
+      '--session',
+      'abc',
+    ]);
+    expect(missingValue.status).not.toBe(0);
+    expect(missingValue.stderr).toContain('--summary requires a value');
+  });
+
   it('lists tasks with optional status filter', () => {
     expect(runCli(['project', 'init']).status).toBe(0);
     expect(runCli(['task', 'create', 'Alpha task']).status).toBe(0);
