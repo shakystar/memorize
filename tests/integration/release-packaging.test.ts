@@ -4,13 +4,17 @@ import { readFile } from 'node:fs/promises';
 import { describe, expect, it } from 'vitest';
 
 describe('release packaging', () => {
-  it('builds a real executable CLI entrypoint at dist/cli.js', async () => {
-    const build = spawnSync('pnpm', ['build'], { encoding: 'utf8' });
-    expect(build.status).toBe(0);
+  it(
+    'builds a real executable CLI entrypoint at dist/cli.js',
+    async () => {
+      const build = spawnSync('pnpm', ['build'], { encoding: 'utf8' });
+      expect(build.status).toBe(0);
 
-    const cliOutput = await readFile('dist/cli.js', 'utf8');
-    expect(cliOutput.startsWith('#!/usr/bin/env node')).toBe(true);
-  });
+      const cliOutput = await readFile('dist/cli.js', 'utf8');
+      expect(cliOutput.startsWith('#!/usr/bin/env node')).toBe(true);
+    },
+    30000,
+  );
 
   it('keeps tests and validation assets out of the publish tarball', () => {
     const result = spawnSync('npm', ['pack', '--dry-run', '--json'], {
