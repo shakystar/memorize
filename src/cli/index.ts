@@ -33,8 +33,10 @@ import {
   createCheckpoint,
   createHandoff,
   createTask,
+  listTasks,
   readTask,
 } from '../services/task-service.js';
+import type { Task } from '../domain/entities.js';
 import { runWorkflow } from '../workflows/macros/run.js';
 import { parseIntent } from '../workflows/router.js';
 
@@ -126,6 +128,7 @@ export function renderScaffoldUsage(): string {
     '- launch claude',
     '- launch codex',
     '- task create',
+    '- task list',
     '- task resume',
     '- task checkpoint',
     '- task handoff',
@@ -315,6 +318,40 @@ async function main(): Promise<void> {
         if (!taskId) throw new Error('Task id is required.');
         const task = await readTask(projectId, taskId);
         console.log(JSON.stringify(task, null, 2));
+        return;
+      }
+      if (subcommand === 'list') {
+        const flags = parseFlags(args.slice(1), {
+          single: ['status', 'workstream'],
+        });
+        const status = flags.single.status as Task['status'] | undefined;
+        const allowedStatuses: Task['status'][] = [
+          'todo',
+          'in_progress',
+          'blocked',
+          'handoff_ready',
+          'done',
+        ];
+        if (status && !allowedStatuses.includes(status)) {
+          throw new Error(
+            `--status must be one of ${allowedStatuses.join('|')}.`,
+          );
+        }
+        const tasks = await listTasks(projectId, {
+          ...(status ? { status } : {}),
+          ...(flags.single.workstream
+            ? { workstreamId: flags.single.workstream }
+            : {}),
+        });
+        if (tasks.length === 0) {
+          console.log('No tasks found.');
+          return;
+        }
+        for (const task of tasks) {
+          console.log(
+            `${task.id}\t${task.status}\t${task.priority}\t${task.title}`,
+          );
+        }
         return;
       }
       if (subcommand === 'resume' || subcommand === 'start') {

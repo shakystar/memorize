@@ -148,4 +148,28 @@ describe('phase 2 services and cli', () => {
     expect(syncState?.syncEnabled).toBe(false);
     expect(syncState?.syncStatus).toBe('idle');
   });
+
+  it('lists tasks with optional status filter', () => {
+    expect(runCli(['project', 'init']).status).toBe(0);
+    expect(runCli(['task', 'create', 'Alpha task']).status).toBe(0);
+    expect(runCli(['task', 'create', 'Beta task']).status).toBe(0);
+
+    const listAll = runCli(['task', 'list']);
+    expect(listAll.status).toBe(0);
+    expect(listAll.stdout).toContain('Alpha task');
+    expect(listAll.stdout).toContain('Beta task');
+    expect(listAll.stdout).toContain('todo');
+
+    const listTodo = runCli(['task', 'list', '--status', 'todo']);
+    expect(listTodo.status).toBe(0);
+    expect(listTodo.stdout).toContain('Alpha task');
+
+    const listDone = runCli(['task', 'list', '--status', 'done']);
+    expect(listDone.status).toBe(0);
+    expect(listDone.stdout).toContain('No tasks found');
+
+    const invalid = runCli(['task', 'list', '--status', 'unknown']);
+    expect(invalid.status).not.toBe(0);
+    expect(invalid.stderr).toContain('--status must be one of');
+  });
 });

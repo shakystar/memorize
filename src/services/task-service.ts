@@ -1,8 +1,12 @@
+import fs from 'node:fs/promises';
+import path from 'node:path';
+
 import { appendEvent } from '../storage/event-store.js';
 import { readJson } from '../storage/fs-utils.js';
 import {
   getCheckpointFile,
   getHandoffFile,
+  getProjectRoot,
   getTaskFile,
 } from '../storage/path-resolver.js';
 import { rebuildProjectProjection } from '../storage/projection-store.js';
@@ -107,6 +111,41 @@ export async function readTask(
   taskId: string,
 ): Promise<Task | undefined> {
   return readJson<Task>(getTaskFile(projectId, taskId));
+}
+
+export interface ListTasksFilters {
+  status?: Task['status'];
+  workstreamId?: string;
+}
+
+export async function listTasks(
+  projectId: string,
+  filters: ListTasksFilters = {},
+): Promise<Task[]> {
+  const tasksDir = path.join(getProjectRoot(projectId), 'tasks');
+  let entries: string[];
+  try {
+    entries = (await fs.readdir(tasksDir)).filter((entry) =>
+      entry.endsWith('.json'),
+    );
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+      return [];
+    }
+    throw error;
+  }
+
+  const tasks = await Promise.all(
+    entries.map((entry) => readJson<Task>(path.join(tasksDir, entry))),
+  );
+  return tasks
+    .filter((task): task is Task => Boolean(task))
+    .filter(
+      (task) =>
+        (!filters.status || task.status === filters.status) &&
+        (!filters.workstreamId || task.workstreamId === filters.workstreamId),
+    )
+    .sort((left, right) => (left.createdAt < right.createdAt ? -1 : 1));
 }
 
 export async function readHandoff(
