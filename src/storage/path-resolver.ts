@@ -1,6 +1,8 @@
 import os from 'node:os';
 import path from 'node:path';
 
+import { assertValidId } from '../domain/common.js';
+
 export function getMemorizeRoot(): string {
   return process.env.MEMORIZE_ROOT ?? path.join(os.homedir(), '.memorize');
 }
@@ -9,12 +11,37 @@ export function getProjectsRoot(): string {
   return path.join(getMemorizeRoot(), 'projects');
 }
 
+function ensureWithinRoot(candidate: string, root: string): string {
+  const candidateAbs = path.resolve(candidate);
+  const rootAbs = path.resolve(root);
+  if (
+    candidateAbs !== rootAbs &&
+    !candidateAbs.startsWith(rootAbs + path.sep)
+  ) {
+    throw new Error(
+      `Path escapes expected root: ${candidateAbs} is outside ${rootAbs}`,
+    );
+  }
+  return candidateAbs;
+}
+
+const DATE_KEY_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
+
+function assertValidDateKey(value: string): void {
+  if (!DATE_KEY_PATTERN.test(value)) {
+    throw new Error(`Invalid events date key: ${JSON.stringify(value)}`);
+  }
+}
+
 export function getProjectRoot(projectId: string): string {
-  return path.join(getProjectsRoot(), projectId);
+  assertValidId(projectId, 'projectId');
+  const projectsRoot = getProjectsRoot();
+  return ensureWithinRoot(path.join(projectsRoot, projectId), projectsRoot);
 }
 
 export function getProjectFile(projectId: string): string {
-  return path.join(getProjectRoot(projectId), 'project.json');
+  const projectRoot = getProjectRoot(projectId);
+  return ensureWithinRoot(path.join(projectRoot, 'project.json'), projectRoot);
 }
 
 export function getProjectBindingsFile(): string {
@@ -22,67 +49,105 @@ export function getProjectBindingsFile(): string {
 }
 
 export function getMemoryIndexFile(projectId: string): string {
-  return path.join(getProjectRoot(projectId), 'memory-index.json');
+  const projectRoot = getProjectRoot(projectId);
+  return ensureWithinRoot(
+    path.join(projectRoot, 'memory-index.json'),
+    projectRoot,
+  );
 }
 
 export function getEventsFile(projectId: string, dateKey: string): string {
-  return path.join(getProjectRoot(projectId), 'events', `${dateKey}.ndjson`);
+  assertValidDateKey(dateKey);
+  const projectRoot = getProjectRoot(projectId);
+  return ensureWithinRoot(
+    path.join(projectRoot, 'events', `${dateKey}.ndjson`),
+    projectRoot,
+  );
 }
 
 export function getTaskFile(projectId: string, taskId: string): string {
-  return path.join(getProjectRoot(projectId), 'tasks', `${taskId}.json`);
+  assertValidId(taskId, 'taskId');
+  const projectRoot = getProjectRoot(projectId);
+  return ensureWithinRoot(
+    path.join(projectRoot, 'tasks', `${taskId}.json`),
+    projectRoot,
+  );
 }
 
 export function getWorkstreamFile(
   projectId: string,
   workstreamId: string,
 ): string {
-  return path.join(
-    getProjectRoot(projectId),
-    'workstreams',
-    `${workstreamId}.json`,
+  assertValidId(workstreamId, 'workstreamId');
+  const projectRoot = getProjectRoot(projectId);
+  return ensureWithinRoot(
+    path.join(projectRoot, 'workstreams', `${workstreamId}.json`),
+    projectRoot,
   );
 }
 
 export function getHandoffFile(projectId: string, handoffId: string): string {
-  return path.join(getProjectRoot(projectId), 'handoffs', `${handoffId}.json`);
+  assertValidId(handoffId, 'handoffId');
+  const projectRoot = getProjectRoot(projectId);
+  return ensureWithinRoot(
+    path.join(projectRoot, 'handoffs', `${handoffId}.json`),
+    projectRoot,
+  );
 }
 
 export function getCheckpointFile(
   projectId: string,
   checkpointId: string,
 ): string {
-  return path.join(
-    getProjectRoot(projectId),
-    'checkpoints',
-    `${checkpointId}.json`,
+  assertValidId(checkpointId, 'checkpointId');
+  const projectRoot = getProjectRoot(projectId);
+  return ensureWithinRoot(
+    path.join(projectRoot, 'checkpoints', `${checkpointId}.json`),
+    projectRoot,
   );
 }
 
 export function getTopicsDir(projectId: string): string {
-  return path.join(getProjectRoot(projectId), 'topics');
+  const projectRoot = getProjectRoot(projectId);
+  return ensureWithinRoot(path.join(projectRoot, 'topics'), projectRoot);
 }
 
 export function getTopicFile(projectId: string, topicId: string): string {
-  return path.join(getTopicsDir(projectId), `${topicId}.md`);
+  assertValidId(topicId, 'topicId');
+  const topicsDir = getTopicsDir(projectId);
+  return ensureWithinRoot(path.join(topicsDir, `${topicId}.md`), topicsDir);
 }
 
 export function getRuleFile(projectId: string, ruleId: string): string {
-  return path.join(getProjectRoot(projectId), 'rules', `${ruleId}.json`);
+  assertValidId(ruleId, 'ruleId');
+  const projectRoot = getProjectRoot(projectId);
+  return ensureWithinRoot(
+    path.join(projectRoot, 'rules', `${ruleId}.json`),
+    projectRoot,
+  );
 }
 
 export function getSyncFile(projectId: string): string {
-  return path.join(getProjectRoot(projectId), 'sync', 'remote.json');
+  const projectRoot = getProjectRoot(projectId);
+  return ensureWithinRoot(
+    path.join(projectRoot, 'sync', 'remote.json'),
+    projectRoot,
+  );
 }
 
 export function getSyncInboundFile(projectId: string): string {
-  return path.join(getProjectRoot(projectId), 'sync', 'inbound.ndjson');
+  const projectRoot = getProjectRoot(projectId);
+  return ensureWithinRoot(
+    path.join(projectRoot, 'sync', 'inbound.ndjson'),
+    projectRoot,
+  );
 }
 
 export function getConflictFile(projectId: string, conflictId: string): string {
-  return path.join(
-    getProjectRoot(projectId),
-    'conflicts',
-    `${conflictId}.json`,
+  assertValidId(conflictId, 'conflictId');
+  const projectRoot = getProjectRoot(projectId);
+  return ensureWithinRoot(
+    path.join(projectRoot, 'conflicts', `${conflictId}.json`),
+    projectRoot,
   );
 }
