@@ -46,4 +46,21 @@ describe('do command', () => {
     expect(summaryResult.status).toBe(0);
     expect(summaryResult.stdout).toContain('Workflow: summarize_project_status');
   });
+
+  it('routes checkpoint and handoff sentences to task workflows', () => {
+    runCli(['do', 'Set this project up for Claude and Codex collaboration']);
+    runCli(['do', 'Create a task for auth cleanup']);
+
+    const checkpointResult = runCli([
+      'do',
+      'Checkpoint progress on auth cleanup',
+    ]);
+    expect(checkpointResult.status).toBe(0);
+    expect(checkpointResult.stdout).toContain('Created checkpoint');
+
+    const handoffResult = runCli(['do', 'Hand off the work to Codex']);
+    expect(handoffResult.status).toBe(0);
+    expect(handoffResult.stdout).toContain('Created handoff');
+    expect(handoffResult.stdout).toContain('codex');
+  });
 });

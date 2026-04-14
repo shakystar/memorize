@@ -21,8 +21,21 @@ export function parseIntent(input: string): ResolvedIntent {
           raw: input,
         };
   }
-  if (normalized.includes('hand') && normalized.includes('codex')) {
-    return { intent: 'task.handoff', raw: input, targetActor: 'codex' };
+  if (
+    normalized.includes('hand off') ||
+    normalized.includes('handoff') ||
+    normalized.includes('hand over')
+  ) {
+    const targetActor = normalized.includes('codex')
+      ? 'codex'
+      : normalized.includes('claude')
+        ? 'claude'
+        : undefined;
+    return {
+      intent: 'task.handoff',
+      raw: input,
+      ...(targetActor ? { targetActor } : {}),
+    };
   }
   if (normalized.includes('task') || normalized.includes('create')) {
     return { intent: 'task.create', raw: input };

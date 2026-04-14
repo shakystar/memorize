@@ -75,6 +75,10 @@ export function getSyncFile(projectId: string): string {
   return path.join(getProjectRoot(projectId), 'sync', 'remote.json');
 }
 
+export function getSyncInboundFile(projectId: string): string {
+  return path.join(getProjectRoot(projectId), 'sync', 'inbound.ndjson');
+}
+
 export function getConflictFile(projectId: string, conflictId: string): string {
   return path.join(
     getProjectRoot(projectId),

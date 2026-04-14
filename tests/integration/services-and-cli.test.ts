@@ -84,6 +84,58 @@ describe('phase 2 services and cli', () => {
     expect(syncResult.stdout).toContain('Project sync state');
   });
 
+  it('records task checkpoint and handoff via cli', () => {
+    const init = runCli(['project', 'init']);
+    expect(init.status).toBe(0);
+
+    const createTaskResult = runCli(['task', 'create', 'Finish', 'wiring']);
+    expect(createTaskResult.status).toBe(0);
+
+    const checkpoint = runCli([
+      'task',
+      'checkpoint',
+      '--summary',
+      'Halfway through wiring',
+      '--task-update',
+      'flag parser added',
+      '--deferred',
+      'polish error messages',
+    ]);
+    expect(checkpoint.status).toBe(0);
+    expect(checkpoint.stdout).toContain('Created checkpoint');
+
+    const handoff = runCli([
+      'task',
+      'handoff',
+      '--summary',
+      'Ready for codex',
+      '--next',
+      'Continue from handoff notes',
+      '--done',
+      'cli stubs replaced',
+      '--remaining',
+      'add golden tests',
+      '--confidence',
+      'high',
+    ]);
+    expect(handoff.status).toBe(0);
+    expect(handoff.stdout).toContain('Created handoff');
+  });
+
+  it('rejects task handoff when required flags are missing', () => {
+    runCli(['project', 'init']);
+    runCli(['task', 'create', 'Missing flags test']);
+
+    const missingNext = runCli([
+      'task',
+      'handoff',
+      '--summary',
+      'no next action',
+    ]);
+    expect(missingNext.status).not.toBe(0);
+    expect(missingNext.stderr).toContain('--next is required');
+  });
+
   it('creates a project-scoped sync metadata file during initialization', async () => {
     const project = await createProject({
       title: 'Memorize',
