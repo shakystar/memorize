@@ -59,14 +59,110 @@ export async function installClaudeIntegration(cwd: string): Promise<string> {
   return settingsPath;
 }
 
+const CODEX_START_MARKER = '<!-- memorize:bootstrap v=1 start -->';
+const CODEX_END_MARKER = '<!-- memorize:bootstrap v=1 end -->';
+const LEGACY_CODEX_START_MARKER = '<!-- Memorize:START -->';
+const LEGACY_CODEX_END_MARKER = '<!-- Memorize:END -->';
+
+const CODEX_BLOCK_BODY = [
+  '# Memorize-managed bootstrap guidance',
+  '',
+  '- Prefer launching Codex via `memorize launch codex` for shared context bootstrap.',
+  '- Memorize will generate and refresh bootstrap context under `.memorize/bootstrap/`.',
+  '- Keep AGENTS override short; treat Memorize as the source for launch-time context injection.',
+] as const;
+
+function assertCodexBodySafe(): void {
+  for (const line of CODEX_BLOCK_BODY) {
+    if (
+      line.includes(CODEX_START_MARKER) ||
+      line.includes(CODEX_END_MARKER) ||
+      line.includes(LEGACY_CODEX_START_MARKER) ||
+      line.includes(LEGACY_CODEX_END_MARKER)
+    ) {
+      throw new Error(
+        'Codex bootstrap body contains a marker sentinel; aborting to protect file integrity.',
+      );
+    }
+  }
+}
+
+interface BlockBounds {
+  startIndex: number;
+  afterEndIndex: number;
+}
+
+function locateBlock(
+  source: string,
+  startMarker: string,
+  endMarker: string,
+): BlockBounds | undefined {
+  const startIndex = source.indexOf(startMarker);
+  if (startIndex === -1) return undefined;
+  const endMarkerIndex = source.indexOf(endMarker, startIndex + startMarker.length);
+  if (endMarkerIndex === -1) return undefined;
+  return {
+    startIndex,
+    afterEndIndex: endMarkerIndex + endMarker.length,
+  };
+}
+
+function stripLegacyBlock(source: string): string {
+  const bounds = locateBlock(
+    source,
+    LEGACY_CODEX_START_MARKER,
+    LEGACY_CODEX_END_MARKER,
+  );
+  if (!bounds) return source;
+  const before = source.slice(0, bounds.startIndex).trimEnd();
+  const after = source.slice(bounds.afterEndIndex).replace(/^\n+/, '');
+  if (before.length === 0 && after.length === 0) return '';
+  if (before.length === 0) return `${after}\n`;
+  if (after.length === 0) return `${before}\n`;
+  return `${before}\n\n${after}\n`;
+}
+
+function renderWithBlock(
+  base: string,
+  managedBlock: string,
+): string {
+  const trimmed = base.trim();
+  if (trimmed.length === 0) {
+    return `${managedBlock}\n`;
+  }
+  return `${trimmed}\n\n${managedBlock}\n`;
+}
+
+function upsertCodexBlock(existing: string, managedBlock: string): string {
+  const withoutLegacy = stripLegacyBlock(existing);
+  const bounds = locateBlock(withoutLegacy, CODEX_START_MARKER, CODEX_END_MARKER);
+
+  if (!bounds) {
+    return renderWithBlock(withoutLegacy, managedBlock);
+  }
+
+  const before = withoutLegacy.slice(0, bounds.startIndex).trimEnd();
+  const after = withoutLegacy.slice(bounds.afterEndIndex).replace(/^\n+/, '');
+
+  const parts: string[] = [];
+  if (before.length > 0) {
+    parts.push(before, '');
+  }
+  parts.push(managedBlock);
+  if (after.length > 0) {
+    parts.push('', after.trimEnd());
+  }
+  return `${parts.join('\n')}\n`;
+}
+
 export async function installCodexIntegration(cwd: string): Promise<string> {
+  assertCodexBodySafe();
+
   const overridePath = path.join(cwd, 'AGENTS.override.md');
-  const content = [
-    '# Memorize-managed bootstrap guidance',
-    '',
-    '- Prefer launching Codex via `memorize launch codex` for shared context bootstrap.',
-    '- Memorize will generate and refresh bootstrap context under `.memorize/bootstrap/`.',
-    '- Keep AGENTS override short; treat Memorize as the source for launch-time context injection.',
+  const managedBlock = [
+    CODEX_START_MARKER,
+    ...CODEX_BLOCK_BODY,
+    CODEX_END_MARKER,
   ].join('\n');
 
   let existing = '';
@@ -78,25 +174,7 @@ export async function installCodexIntegration(cwd: string): Promise<string> {
     }
   }
 
-  const startMarker = '<!-- Memorize:START -->';
-  const endMarker = '<!-- Memorize:END -->';
-  const managedBlock = `${startMarker}\n${content}\n${endMarker}`;
-
-  let next = existing;
-  const startIndex = existing.indexOf(startMarker);
-  const endIndex = existing.indexOf(endMarker);
-  if (startIndex !== -1 && endIndex !== -1 && endIndex > startIndex) {
-    next =
-      existing.slice(0, startIndex).trimEnd() +
-      '\n\n' +
-      managedBlock +
-      '\n';
-  } else if (existing.trim().length > 0) {
-    next = `${existing.trimEnd()}\n\n${managedBlock}\n`;
-  } else {
-    next = `${managedBlock}\n`;
-  }
-
+  const next = upsertCodexBlock(existing, managedBlock);
   await fs.writeFile(overridePath, next, 'utf8');
   return overridePath;
 }

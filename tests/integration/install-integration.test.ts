@@ -117,4 +117,71 @@ describe('install integration', () => {
       override.match(/Memorize-managed bootstrap guidance/g)?.length ?? 0,
     ).toBe(1);
   });
+
+  it('preserves content placed after the managed block on re-install', async () => {
+    // First install starts from empty file.
+    runCli(['install', 'codex']);
+
+    // User edits the file to append content AFTER the managed block.
+    const afterFirst = await readFile(
+      join(sandbox, 'AGENTS.override.md'),
+      'utf8',
+    );
+    await writeFile(
+      join(sandbox, 'AGENTS.override.md'),
+      `${afterFirst.trimEnd()}\n\n# Local overrides\n\n- custom rule\n`,
+      'utf8',
+    );
+
+    // Second install must preserve the "Local overrides" content that sits
+    // after the managed block.
+    const second = runCli(['install', 'codex']);
+    expect(second.status).toBe(0);
+
+    const override = await readFile(
+      join(sandbox, 'AGENTS.override.md'),
+      'utf8',
+    );
+    expect(override).toContain('# Local overrides');
+    expect(override).toContain('- custom rule');
+    expect(override).toContain('Memorize-managed bootstrap guidance');
+    expect(
+      override.match(/Memorize-managed bootstrap guidance/g)?.length ?? 0,
+    ).toBe(1);
+  });
+
+  it('migrates legacy Memorize markers to the versioned format', async () => {
+    await writeFile(
+      join(sandbox, 'AGENTS.override.md'),
+      [
+        '# Header',
+        '',
+        '<!-- Memorize:START -->',
+        '# old managed block',
+        '- ancient guidance',
+        '<!-- Memorize:END -->',
+        '',
+        '# Footer section',
+        'keep me too',
+        '',
+      ].join('\n'),
+      'utf8',
+    );
+
+    const result = runCli(['install', 'codex']);
+    expect(result.status).toBe(0);
+
+    const override = await readFile(
+      join(sandbox, 'AGENTS.override.md'),
+      'utf8',
+    );
+    expect(override).toContain('# Header');
+    expect(override).toContain('# Footer section');
+    expect(override).toContain('keep me too');
+    expect(override).toContain('<!-- memorize:bootstrap v=1 start -->');
+    expect(override).toContain('<!-- memorize:bootstrap v=1 end -->');
+    expect(override).not.toContain('<!-- Memorize:START -->');
+    expect(override).not.toContain('<!-- Memorize:END -->');
+    expect(override).not.toContain('ancient guidance');
+  });
 });
