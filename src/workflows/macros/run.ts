@@ -1,6 +1,7 @@
 import type { ResolvedIntent } from '../intents.js';
 import { resolveWorkflow } from '../resolver.js';
 import {
+  bindAdapterWorkflow,
   checkpointTaskWorkflow,
   createTaskWorkflow,
   handoffTaskWorkflow,
@@ -28,7 +29,7 @@ export async function runWorkflow(intent: ResolvedIntent, cwd: string): Promise<
     case 'task.checkpoint':
       return checkpointTaskWorkflow(cwd, intent.raw);
     case 'project.bind_adapter':
-      return `Workflow ${workflow.name} is not yet implemented.`;
+      return bindAdapterWorkflow(cwd, intent.targetActor);
     default:
       return `Workflow ${workflow.name} is not yet implemented.`;
   }

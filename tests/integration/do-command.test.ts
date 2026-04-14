@@ -63,4 +63,16 @@ describe('do command', () => {
     expect(handoffResult.stdout).toContain('Created handoff');
     expect(handoffResult.stdout).toContain('codex');
   });
+
+  it('routes bind adapter sentences through the install service', () => {
+    runCli(['do', 'Set this project up for Claude and Codex collaboration']);
+
+    const bindClaude = runCli(['do', 'Bind the Claude adapter']);
+    expect(bindClaude.status).toBe(0);
+    expect(bindClaude.stdout).toContain('Bound Claude adapter');
+
+    const bindCodex = runCli(['do', 'Install the Codex adapter']);
+    expect(bindCodex.status).toBe(0);
+    expect(bindCodex.stdout).toContain('Bound Codex adapter');
+  });
 });

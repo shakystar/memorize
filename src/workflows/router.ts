@@ -6,6 +6,18 @@ export function parseIntent(input: string): ResolvedIntent {
   if (normalized.includes('set') && normalized.includes('collaboration')) {
     return { intent: 'project.init', raw: input };
   }
+  if (
+    (normalized.includes('bind') || normalized.includes('install')) &&
+    (normalized.includes('claude') || normalized.includes('codex')) &&
+    (normalized.includes('adapter') || normalized.includes('integration'))
+  ) {
+    const targetActor = normalized.includes('claude') ? 'claude' : 'codex';
+    return {
+      intent: 'project.bind_adapter',
+      raw: input,
+      targetActor,
+    };
+  }
   if (normalized.includes('resume')) {
     return { intent: 'task.resume', raw: input };
   }
