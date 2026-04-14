@@ -22,16 +22,7 @@ export function parseIntent(input: string): ResolvedIntent {
     return { intent: 'task.resume', raw: input };
   }
   if (normalized.includes('checkpoint')) {
-    return normalized.includes('codex')
-      ? {
-          intent: 'task.checkpoint',
-          raw: input,
-          targetActor: 'codex',
-        }
-      : {
-          intent: 'task.checkpoint',
-          raw: input,
-        };
+    return { intent: 'task.checkpoint', raw: input };
   }
   if (
     normalized.includes('hand off') ||
