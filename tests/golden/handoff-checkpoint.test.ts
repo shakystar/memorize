@@ -4,6 +4,8 @@ import { join } from 'node:path';
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
+import { renderClaudeStartupContext } from '../../src/adapters/claude/renderer.js';
+import { renderCodexStartupContext } from '../../src/adapters/codex/renderer.js';
 import { loadStartContext } from '../../src/services/context-service.js';
 import { createProject } from '../../src/services/project-service.js';
 import {
@@ -185,6 +187,19 @@ describe('handoff and checkpoint golden outputs', () => {
     expect(startup.latestHandoff?.toActor).toBe('codex');
     expect(startup.latestHandoff?.nextAction).toBe(
       'Run integration tests against the adapter.',
+    );
+
+    const claudeOutput = renderClaudeStartupContext(startup);
+    expect(claudeOutput).toContain('Latest handoff: claude → codex');
+    expect(claudeOutput).toContain(
+      'Next action: Run integration tests against the adapter.',
+    );
+
+    const codexOutput = renderCodexStartupContext(startup);
+    expect(codexOutput).toContain('## Latest handoff');
+    expect(codexOutput).toContain('- From: claude → codex');
+    expect(codexOutput).toContain(
+      '- Next action: Run integration tests against the adapter.',
     );
   });
 });

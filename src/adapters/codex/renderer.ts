@@ -27,5 +27,25 @@ export function renderCodexStartupContext(
     );
   }
 
+  if (payload.latestHandoff) {
+    const handoff = payload.latestHandoff;
+    const handoffLines = [
+      '## Latest handoff',
+      `- From: ${handoff.fromActor} → ${handoff.toActor}`,
+      `- Summary: ${handoff.summary}`,
+      `- Next action: ${handoff.nextAction}`,
+    ];
+    if (handoff.doneItems.length > 0) {
+      handoffLines.push(`- Done: ${handoff.doneItems.join('; ')}`);
+    }
+    if (handoff.remainingItems.length > 0) {
+      handoffLines.push(`- Remaining: ${handoff.remainingItems.join('; ')}`);
+    }
+    if (handoff.warnings.length > 0) {
+      handoffLines.push(`- Warnings: ${handoff.warnings.join('; ')}`);
+    }
+    sections.push(handoffLines.join('\n'));
+  }
+
   return sections.join('\n\n');
 }

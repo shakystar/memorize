@@ -22,5 +22,15 @@ export function renderClaudeStartupContext(
     parts.push(`Status: ${payload.task.status}`);
   }
 
+  if (payload.latestHandoff) {
+    const handoff = payload.latestHandoff;
+    parts.push(`Latest handoff: ${handoff.fromActor} → ${handoff.toActor}`);
+    parts.push(`Handoff summary: ${handoff.summary}`);
+    parts.push(`Next action: ${handoff.nextAction}`);
+    if (handoff.remainingItems.length > 0) {
+      parts.push(`Remaining: ${handoff.remainingItems.join('; ')}`);
+    }
+  }
+
   return parts.join('\n');
 }
