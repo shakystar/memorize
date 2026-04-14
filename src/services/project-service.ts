@@ -3,7 +3,7 @@ import { bindProject, resolveProjectIdForPath } from '../storage/bindings-store.
 import { getProjectFile, getWorkstreamFile } from '../storage/path-resolver.js';
 import { readJson } from '../storage/fs-utils.js';
 import { writeJson } from '../storage/fs-utils.js';
-import { rebuildProjectProjection } from '../storage/projection-store.js';
+import { rebuildProjectProjection } from './projection-store.js';
 import type { CreateProjectInput } from '../domain/commands.js';
 import { createProject as createProjectEntity, createWorkstream } from '../domain/entities.js';
 import type { Project, ProjectSyncState, Workstream } from '../domain/entities.js';

@@ -9,7 +9,7 @@ import {
   getProjectRoot,
   getTaskFile,
 } from '../storage/path-resolver.js';
-import { rebuildProjectProjection } from '../storage/projection-store.js';
+import { rebuildProjectProjection } from './projection-store.js';
 import type {
   CreateCheckpointInput,
   CreateHandoffInput,

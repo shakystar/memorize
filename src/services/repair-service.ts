@@ -7,7 +7,7 @@ import {
   getMemoryIndexFile,
   getProjectRoot,
 } from '../storage/path-resolver.js';
-import { rebuildProjectProjection } from '../storage/projection-store.js';
+import { rebuildProjectProjection } from './projection-store.js';
 import { getBoundProjectId, readProject } from './project-service.js';
 
 export async function inspectProject(cwd: string): Promise<string> {

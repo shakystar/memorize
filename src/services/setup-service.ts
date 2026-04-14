@@ -4,7 +4,7 @@ import path from 'node:path';
 import type { Project, Rule } from '../domain/entities.js';
 import { createConflict, createRule } from '../domain/entities.js';
 import { appendEvent } from '../storage/event-store.js';
-import { rebuildProjectProjection } from '../storage/projection-store.js';
+import { rebuildProjectProjection } from './projection-store.js';
 import {
   createProject,
   getBoundProjectId,

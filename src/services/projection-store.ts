@@ -1,6 +1,6 @@
 import { buildMemoryIndex, reduceProjectState } from '../projections/projector.js';
-import { readEvents } from './event-store.js';
-import { writeJson } from './fs-utils.js';
+import { readEvents } from '../storage/event-store.js';
+import { writeJson } from '../storage/fs-utils.js';
 import {
   getCheckpointFile,
   getConflictFile,
@@ -11,7 +11,7 @@ import {
   getTaskFile,
   getTopicFile,
   getWorkstreamFile,
-} from './path-resolver.js';
+} from '../storage/path-resolver.js';
 
 export async function rebuildProjectProjection(projectId: string): Promise<void> {
   const state = reduceProjectState(await readEvents(projectId));

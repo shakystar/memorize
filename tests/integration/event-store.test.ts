@@ -14,7 +14,7 @@ import {
   getProjectFile,
   getTaskFile,
 } from '../../src/storage/path-resolver.js';
-import { rebuildProjectProjection } from '../../src/storage/projection-store.js';
+import { rebuildProjectProjection } from '../../src/services/projection-store.js';
 
 let sandbox: string;
 
