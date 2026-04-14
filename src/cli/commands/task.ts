@@ -4,6 +4,7 @@ import {
   getBoundProjectId,
   readProject,
 } from '../../services/project-service.js';
+import { getCurrentSessionId } from '../../services/session-service.js';
 import {
   createCheckpoint,
   createHandoff,
@@ -106,9 +107,11 @@ export async function runTaskCommand(
     const summary = flags.single.summary;
     if (!summary)
       throw new Error('--summary is required for task checkpoint.');
+    const sessionId =
+      flags.single.session ?? (await getCurrentSessionId(ctx.cwd));
     const checkpoint = await createCheckpoint({
       projectId,
-      sessionId: flags.single.session ?? `session_${Date.now()}`,
+      sessionId,
       ...(resolvedTaskId ? { taskId: resolvedTaskId } : {}),
       summary,
       ...(flags.multi['task-update']

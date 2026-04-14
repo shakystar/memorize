@@ -2,6 +2,7 @@ import {
   getBoundProjectId,
   readProject,
 } from '../../services/project-service.js';
+import { getCurrentSessionId } from '../../services/session-service.js';
 import { createCheckpoint } from '../../services/task-service.js';
 
 export interface CheckpointWorkflowOptions {
@@ -26,9 +27,10 @@ export async function checkpointTaskWorkflow(
   const project = await readProject(projectId);
   const activeTaskId = project?.activeTaskIds[0];
 
+  const sessionId = options.sessionId ?? (await getCurrentSessionId(cwd));
   const checkpoint = await createCheckpoint({
     projectId,
-    sessionId: options.sessionId ?? `session_${Date.now()}`,
+    sessionId,
     ...(activeTaskId ? { taskId: activeTaskId } : {}),
     summary: options.summary ?? sentence,
     ...(options.taskUpdates?.length

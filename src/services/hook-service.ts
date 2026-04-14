@@ -2,6 +2,12 @@ import fs from 'node:fs/promises';
 
 import { prepareLaunch } from './launch-service.js';
 import { getBoundProjectId, readProject } from './project-service.js';
+import {
+  SESSION_ENV_VAR,
+  endSession,
+  getCurrentSessionId,
+  startSession,
+} from './session-service.js';
 import { setupProject } from './setup-service.js';
 import { createCheckpoint, createHandoff } from './task-service.js';
 
@@ -42,12 +48,14 @@ export async function runClaudeHook(params: {
       passthroughArgs: [],
     });
     const additionalContext = bootstrap.startupContext;
+    const sessionId = await startSession(params.cwd, 'claude');
 
     const envFile = process.env.CLAUDE_ENV_FILE;
     if (envFile) {
       await persistEnvFile(envFile, {
         MEMORIZE_PROJECT_ID: projectId,
         MEMORIZE_BOOTSTRAP_FILE: bootstrap.bootstrapFilePath,
+        [SESSION_ENV_VAR]: sessionId,
       });
     }
 
@@ -65,9 +73,11 @@ export async function runClaudeHook(params: {
       session_id?: string;
     };
     const activeTaskId = await resolveActiveTaskId(projectId);
+    const sessionId =
+      payload.session_id ?? (await getCurrentSessionId(params.cwd));
     const checkpoint = await createCheckpoint({
       projectId,
-      sessionId: payload.session_id ?? `session_${Date.now()}`,
+      sessionId,
       ...(activeTaskId ? { taskId: activeTaskId } : {}),
       summary: payload.compact_summary ?? 'Compact summary unavailable',
     });
@@ -86,15 +96,18 @@ export async function runClaudeHook(params: {
       session_id?: string;
     };
     const activeTaskId = await resolveActiveTaskId(projectId);
+    const sessionId =
+      payload.session_id ?? (await getCurrentSessionId(params.cwd));
     const handoff = await createHandoff({
       projectId,
-      taskId: activeTaskId ?? (payload.session_id ?? `session_${Date.now()}`),
+      taskId: activeTaskId ?? sessionId,
       fromActor: 'claude',
       toActor: 'next-agent',
       summary:
         payload.last_assistant_message ?? 'No assistant message captured',
       nextAction: 'Continue from the latest Claude output.',
     });
+    await endSession(params.cwd);
 
     return JSON.stringify({
       hookSpecificOutput: {

@@ -10,6 +10,11 @@ import {
 } from '../adapters/launch.js';
 import { loadStartContext } from './context-service.js';
 import { getBoundProjectId, readProject } from './project-service.js';
+import {
+  SESSION_ENV_VAR,
+  getCurrentSessionId,
+  startSession,
+} from './session-service.js';
 import { setupProject } from './setup-service.js';
 import { createCheckpoint } from './task-service.js';
 
@@ -63,10 +68,11 @@ async function captureCodexLastMessage(params: {
     const lastMessage = await fs.readFile(outputFile, 'utf8');
     const project = await readProject(params.projectId);
     const activeTaskId = project?.activeTaskIds[0];
+    const sessionId = await getCurrentSessionId(params.cwd);
     await createCheckpoint({
       projectId: params.projectId,
       ...(activeTaskId ? { taskId: activeTaskId } : {}),
-      sessionId: `codex_${Date.now()}`,
+      sessionId,
       summary: lastMessage.trim() || 'Codex last message unavailable',
     });
   } catch {
@@ -115,9 +121,11 @@ export async function launchAgent(params: {
   passthroughArgs?: string[];
 }): Promise<LaunchResult> {
   const prepared = await prepareLaunch(params);
+  const sessionId = await startSession(params.cwd, params.agent);
 
   process.stdout.write(`Launching ${params.agent} with Memorize bootstrap\n`);
   process.stdout.write(`Bootstrap file: ${prepared.bootstrapFilePath}\n`);
+  process.stdout.write(`Session id: ${sessionId}\n`);
 
   const result = spawnSync(prepared.command, prepared.args, {
     cwd: params.cwd,
@@ -126,6 +134,7 @@ export async function launchAgent(params: {
       MEMORIZE_STARTUP_CONTEXT: prepared.startupContext,
       MEMORIZE_PROJECT_ID: prepared.projectId,
       MEMORIZE_BOOTSTRAP_FILE: prepared.bootstrapFilePath,
+      [SESSION_ENV_VAR]: sessionId,
     },
     stdio: 'inherit',
   });
