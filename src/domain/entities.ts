@@ -284,6 +284,12 @@ export function createHandoff(input: {
   toActor: string;
   summary: string;
   nextAction: string;
+  doneItems?: string[];
+  remainingItems?: string[];
+  requiredContextRefs?: string[];
+  warnings?: string[];
+  unresolvedQuestions?: string[];
+  confidence?: Confidence;
 }): Handoff {
   return {
     ...baseEntity('handoff'),
@@ -293,12 +299,12 @@ export function createHandoff(input: {
     toActor: input.toActor,
     summary: input.summary,
     nextAction: input.nextAction,
-    doneItems: [],
-    remainingItems: [],
-    requiredContextRefs: [],
-    warnings: [],
-    unresolvedQuestions: [],
-    confidence: 'medium',
+    doneItems: input.doneItems ?? [],
+    remainingItems: input.remainingItems ?? [],
+    requiredContextRefs: input.requiredContextRefs ?? [],
+    warnings: input.warnings ?? [],
+    unresolvedQuestions: input.unresolvedQuestions ?? [],
+    confidence: input.confidence ?? 'medium',
   };
 }
 
@@ -307,6 +313,11 @@ export function createCheckpoint(input: {
   sessionId: string;
   summary: string;
   taskId?: string;
+  taskUpdates?: string[];
+  projectUpdates?: string[];
+  promotedDecisions?: string[];
+  deferredItems?: string[];
+  discardableItems?: string[];
 }): Checkpoint {
   return {
     ...baseEntity('checkpoint'),
@@ -314,11 +325,11 @@ export function createCheckpoint(input: {
     ...(input.taskId ? { taskId: input.taskId } : {}),
     sessionId: input.sessionId,
     summary: input.summary,
-    taskUpdates: [],
-    projectUpdates: [],
-    promotedDecisions: [],
-    deferredItems: [],
-    discardableItems: [],
+    taskUpdates: input.taskUpdates ?? [],
+    projectUpdates: input.projectUpdates ?? [],
+    promotedDecisions: input.promotedDecisions ?? [],
+    deferredItems: input.deferredItems ?? [],
+    discardableItems: input.discardableItems ?? [],
   };
 }
 
