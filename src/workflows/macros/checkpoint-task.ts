@@ -1,9 +1,22 @@
-import { getBoundProjectId, readProject } from '../../services/project-service.js';
+import {
+  getBoundProjectId,
+  readProject,
+} from '../../services/project-service.js';
 import { createCheckpoint } from '../../services/task-service.js';
+
+export interface CheckpointWorkflowOptions {
+  summary?: string;
+  sessionId?: string;
+  taskUpdates?: string[];
+  projectUpdates?: string[];
+  deferredItems?: string[];
+  discardableItems?: string[];
+}
 
 export async function checkpointTaskWorkflow(
   cwd: string,
   sentence: string,
+  options: CheckpointWorkflowOptions = {},
 ): Promise<string> {
   const projectId = await getBoundProjectId(cwd);
   if (!projectId) {
@@ -15,9 +28,21 @@ export async function checkpointTaskWorkflow(
 
   const checkpoint = await createCheckpoint({
     projectId,
-    sessionId: `session_${Date.now()}`,
+    sessionId: options.sessionId ?? `session_${Date.now()}`,
     ...(activeTaskId ? { taskId: activeTaskId } : {}),
-    summary: sentence,
+    summary: options.summary ?? sentence,
+    ...(options.taskUpdates?.length
+      ? { taskUpdates: options.taskUpdates }
+      : {}),
+    ...(options.projectUpdates?.length
+      ? { projectUpdates: options.projectUpdates }
+      : {}),
+    ...(options.deferredItems?.length
+      ? { deferredItems: options.deferredItems }
+      : {}),
+    ...(options.discardableItems?.length
+      ? { discardableItems: options.discardableItems }
+      : {}),
   });
 
   return `Created checkpoint ${checkpoint.id}`;

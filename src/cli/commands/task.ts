@@ -11,6 +11,7 @@ import {
   listTasks,
   readTask,
 } from '../../services/task-service.js';
+import { HANDOFF_INTENT_NOTICE } from '../../workflows/macros/handoff-task.js';
 import type { CliContext } from '../context.js';
 import { parseFlags } from '../parse-flags.js';
 import { renderScaffoldUsage } from '../usage.js';
@@ -172,7 +173,7 @@ export async function runTaskCommand(
         : {}),
       ...(confidence ? { confidence } : {}),
     });
-    console.log(`Created handoff ${handoff.id}`);
+    console.log(`Created handoff ${handoff.id}\n\n${HANDOFF_INTENT_NOTICE}`);
     return;
   }
 

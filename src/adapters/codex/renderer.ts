@@ -32,9 +32,16 @@ export function renderCodexStartupContext(
     const handoffLines = [
       '## Latest handoff',
       `- From: ${handoff.fromActor} → ${handoff.toActor}`,
+    ];
+    if (handoff.fromActor === 'user') {
+      handoffLines.push(
+        '- Trust note: user-authored intent. Verify code/test state independently before trusting claims of "done".',
+      );
+    }
+    handoffLines.push(
       `- Summary: ${handoff.summary}`,
       `- Next action: ${handoff.nextAction}`,
-    ];
+    );
     if (handoff.doneItems.length > 0) {
       handoffLines.push(`- Done: ${handoff.doneItems.join('; ')}`);
     }

@@ -9,8 +9,18 @@ import {
   resumeTaskWorkflow,
   summarizeProjectWorkflow,
 } from './index.js';
+import type { CheckpointWorkflowOptions } from './checkpoint-task.js';
+import type { HandoffWorkflowOptions } from './handoff-task.js';
 
-export async function runWorkflow(intent: ResolvedIntent, cwd: string): Promise<string> {
+export interface WorkflowOptions
+  extends HandoffWorkflowOptions,
+    CheckpointWorkflowOptions {}
+
+export async function runWorkflow(
+  intent: ResolvedIntent,
+  cwd: string,
+  options: WorkflowOptions = {},
+): Promise<string> {
   const workflow = resolveWorkflow(intent);
 
   switch (intent.intent) {
@@ -25,9 +35,9 @@ export async function runWorkflow(intent: ResolvedIntent, cwd: string): Promise<
     case 'project.sync':
       return 'Project sync foundation is not yet implemented.';
     case 'task.handoff':
-      return handoffTaskWorkflow(cwd, intent.raw, intent.targetActor);
+      return handoffTaskWorkflow(cwd, intent.raw, intent.targetActor, options);
     case 'task.checkpoint':
-      return checkpointTaskWorkflow(cwd, intent.raw);
+      return checkpointTaskWorkflow(cwd, intent.raw, options);
     case 'project.bind_adapter':
       return bindAdapterWorkflow(cwd, intent.targetActor);
     default:

@@ -25,6 +25,11 @@ export function renderClaudeStartupContext(
   if (payload.latestHandoff) {
     const handoff = payload.latestHandoff;
     parts.push(`Latest handoff: ${handoff.fromActor} → ${handoff.toActor}`);
+    if (handoff.fromActor === 'user') {
+      parts.push(
+        '(user-authored intent — verify code/test state independently before trusting claims)',
+      );
+    }
     parts.push(`Handoff summary: ${handoff.summary}`);
     parts.push(`Next action: ${handoff.nextAction}`);
     if (handoff.remainingItems.length > 0) {

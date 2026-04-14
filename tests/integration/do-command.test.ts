@@ -47,7 +47,7 @@ describe('do command', () => {
     expect(summaryResult.stdout).toContain('Workflow: summarize_project_status');
   });
 
-  it('routes checkpoint and handoff sentences to task workflows', () => {
+  it('routes checkpoint sentences to task workflow', () => {
     runCli(['do', 'Set this project up for Claude and Codex collaboration']);
     runCli(['do', 'Create a task for auth cleanup']);
 
@@ -57,11 +57,60 @@ describe('do command', () => {
     ]);
     expect(checkpointResult.status).toBe(0);
     expect(checkpointResult.stdout).toContain('Created checkpoint');
+  });
+
+  it('returns guidance when handoff sentence is missing structured fields', () => {
+    runCli(['do', 'Set this project up for Claude and Codex collaboration']);
+    runCli(['do', 'Create a task for auth cleanup']);
 
     const handoffResult = runCli(['do', 'Hand off the work to Codex']);
     expect(handoffResult.status).toBe(0);
+    expect(handoffResult.stdout).toContain('Handoff requires --next');
+    expect(handoffResult.stdout).toContain('intent, context, and decisions');
+  });
+
+  it('creates a handoff via "do" when sentence is combined with flags', () => {
+    runCli(['do', 'Set this project up for Claude and Codex collaboration']);
+    runCli(['do', 'Create a task for auth cleanup']);
+
+    const handoffResult = runCli([
+      'do',
+      'Hand off the work to Codex',
+      '--summary',
+      'OAuth refresh scope narrowed',
+      '--next',
+      'Receiving agent verifies refresh token env var and runs integration tests',
+      '--done',
+      'token store schema',
+      '--remaining',
+      'env var doc',
+      '--confidence',
+      'medium',
+    ]);
+    expect(handoffResult.status).toBe(0);
     expect(handoffResult.stdout).toContain('Created handoff');
     expect(handoffResult.stdout).toContain('codex');
+    expect(handoffResult.stdout).toContain(
+      'Handoff records intent, context, and decisions only',
+    );
+  });
+
+  it('launches interactive mode menu when "do" is invoked with no arguments', () => {
+    const result = spawnSync('node', [tsxCliPath, cliEntryPath, 'do'], {
+      cwd: sandbox,
+      encoding: 'utf8',
+      input: 'q\n',
+      env: {
+        ...process.env,
+        MEMORIZE_ROOT: memorizeRoot,
+      },
+    });
+
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain('Memorize interactive mode');
+    expect(result.stdout).toContain('1) handoff');
+    expect(result.stdout).toContain('2) checkpoint');
+    expect(result.stdout).toContain('Cancelled');
   });
 
   it('routes bind adapter sentences through the install service', () => {
