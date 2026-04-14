@@ -1,0 +1,27 @@
+export function renderScaffoldUsage(): string {
+  return [
+    'Memorize CLI scaffold',
+    '',
+    'Available baseline commands (planned):',
+    '- project init',
+    '- project setup',
+    '- project show',
+    '- project inspect',
+    '- projection rebuild',
+    '- memory-index rebuild',
+    '- events validate',
+    '- doctor',
+    '- install claude',
+    '- install codex',
+    '- hook claude SessionStart',
+    '- launch claude',
+    '- launch codex',
+    '- task create',
+    '- task list',
+    '- task resume',
+    '- task checkpoint',
+    '- task handoff',
+    '- conflict list',
+    '- do "<sentence>"',
+  ].join('\n');
+}
