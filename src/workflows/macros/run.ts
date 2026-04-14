@@ -1,0 +1,33 @@
+import type { ResolvedIntent } from '../intents.js';
+import { resolveWorkflow } from '../resolver.js';
+import {
+  createTaskWorkflow,
+  initializeProjectWorkflow,
+  resumeTaskWorkflow,
+  summarizeProjectWorkflow,
+} from './index.js';
+
+export async function runWorkflow(intent: ResolvedIntent, cwd: string): Promise<string> {
+  const workflow = resolveWorkflow(intent);
+
+  switch (intent.intent) {
+    case 'project.init':
+      return `${await initializeProjectWorkflow(cwd)}\nWorkflow: ${workflow.name}`;
+    case 'task.create':
+      return createTaskWorkflow(cwd, intent.raw);
+    case 'task.resume':
+      return resumeTaskWorkflow(cwd);
+    case 'project.summary':
+      return summarizeProjectWorkflow(cwd);
+    case 'project.sync':
+      return 'Project sync foundation is not yet implemented.';
+    case 'task.handoff':
+      return `Workflow ${workflow.name} is not yet implemented.`;
+    case 'task.checkpoint':
+      return `Workflow ${workflow.name} is not yet implemented.`;
+    case 'project.bind_adapter':
+      return `Workflow ${workflow.name} is not yet implemented.`;
+    default:
+      return `Workflow ${workflow.name} is not yet implemented.`;
+  }
+}

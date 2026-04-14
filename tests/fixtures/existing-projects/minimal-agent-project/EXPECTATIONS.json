@@ -1,0 +1,9 @@
+{
+  "fixtureName": "minimal-agent-project",
+  "expectedDiscoveryCount": 1,
+  "expectedImportedRuleCount": 1,
+  "expectedConflictCount": 0,
+  "expectedStartupContains": [
+    "Keep commits small and explicit."
+  ]
+}

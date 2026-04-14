@@ -1,0 +1,8 @@
+{
+  "name": "conflict-basic",
+  "fixture": "conflicted-context-project",
+  "metrics": [
+    "expectedConflictCount",
+    "detectedConflictCount"
+  ]
+}

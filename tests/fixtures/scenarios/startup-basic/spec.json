@@ -1,0 +1,5 @@
+{
+  "name": "startup-basic",
+  "fixture": "mixed-context-project",
+  "metrics": ["projectRuleCount", "startupPayloadBytes", "startupContainsMatches"]
+}

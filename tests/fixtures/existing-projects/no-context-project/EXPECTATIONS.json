@@ -1,0 +1,7 @@
+{
+  "fixtureName": "no-context-project",
+  "expectedDiscoveryCount": 0,
+  "expectedImportedRuleCount": 0,
+  "expectedConflictCount": 0,
+  "expectedStartupContains": []
+}

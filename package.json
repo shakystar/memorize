@@ -1,0 +1,68 @@
+{
+  "name": "@shakystar/memorize",
+  "version": "0.1.0",
+  "license": "MIT",
+  "publishConfig": {
+    "access": "public"
+  },
+  "author": "shakystar",
+  "description": "Local-first shared context system for human and AI collaboration.",
+  "homepage": "https://github.com/shakystar/memorize#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/shakystar/memorize.git"
+  },
+  "bugs": {
+    "url": "https://github.com/shakystar/memorize/issues"
+  },
+  "keywords": [
+    "memorize",
+    "cli",
+    "local-first",
+    "ai",
+    "claude",
+    "codex",
+    "context",
+    "collaboration"
+  ],
+  "type": "module",
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "bin": {
+    "memorize": "dist/cli/index.js"
+  },
+  "scripts": {
+    "dev": "tsx src/cli/index.ts",
+    "build": "rm -rf dist && tsc -p tsconfig.build.json && node scripts/validate/write-cli-shebang.cjs",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "vitest run",
+    "test:unit": "vitest run tests/unit",
+    "test:integration": "vitest run tests/integration",
+    "test:smoke": "vitest run tests/integration/cli-smoke.test.ts",
+    "test:golden": "vitest run tests/golden",
+    "test:watch": "vitest",
+    "lint": "eslint \"src/**/*.ts\" \"tests/**/*.ts\"",
+    "check": "pnpm typecheck && pnpm lint && pnpm test",
+    "qa:quick": "pnpm typecheck && pnpm lint && pnpm test:unit && pnpm test:smoke",
+    "qa:full": "pnpm check && pnpm test:integration && pnpm test:golden",
+    "fixture:reset": "tsx scripts/fixtures/reset-fixture.ts",
+    "benchmark:import": "tsx scripts/benchmarks/run-import-benchmark.ts",
+    "benchmark:startup": "tsx scripts/benchmarks/run-startup-benchmark.ts",
+    "benchmark:handoff": "tsx scripts/benchmarks/run-handoff-benchmark.ts",
+    "benchmark:conflict": "tsx scripts/benchmarks/run-conflict-benchmark.ts",
+    "benchmark:all": "pnpm benchmark:import && pnpm benchmark:startup && pnpm benchmark:handoff && pnpm benchmark:conflict",
+    "pack:check": "tsx scripts/validate/package-dry-run.ts"
+  },
+  "devDependencies": {
+    "@types/node": "^25.6.0",
+    "@typescript-eslint/eslint-plugin": "^8.58.1",
+    "@typescript-eslint/parser": "^8.58.1",
+    "eslint": "^10.2.0",
+    "tsx": "^4.21.0",
+    "typescript": "^6.0.2",
+    "vitest": "^4.1.4"
+  }
+}

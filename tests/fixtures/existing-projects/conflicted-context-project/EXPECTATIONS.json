@@ -1,0 +1,11 @@
+{
+  "fixtureName": "conflicted-context-project",
+  "expectedDiscoveryCount": 3,
+  "expectedImportedRuleCount": 3,
+  "expectedConflictCount": 1,
+  "expectedStartupContains": [
+    "Keep commits small.",
+    "Squash changes into one final commit.",
+    "Update docs on every change."
+  ]
+}

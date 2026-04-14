@@ -1,0 +1,11 @@
+{
+  "fixtureName": "realistic-in-progress-project",
+  "expectedDiscoveryCount": 3,
+  "expectedImportedRuleCount": 3,
+  "expectedConflictCount": 0,
+  "expectedStartupContains": [
+    "Keep architectural changes incremental.",
+    "Prefer explicit migration notes.",
+    "Always update rollout notes when touching auth."
+  ]
+}

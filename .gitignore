@@ -1,0 +1,41 @@
+# OSX
+.DS_Store
+
+# OMX runtime/state
+.omx/
+
+# OMC runtime/state
+.omc/
+
+# Internal design and planning docs (kept local only)
+/docs/
+
+# Claude Code local workflow settings
+/.claude/
+
+# Logs and temp files
+*.log
+*.tmp
+*.swp
+*.swo
+
+# Node / JS
+node_modules/
+dist/
+build/
+coverage/
+.pnpm-store/
+.npm/
+
+# Python
+__pycache__/
+.pytest_cache/
+.venv/
+
+# Env files
+.env
+.env.*
+!.env.example
+
+# Local project link
+.memorize/

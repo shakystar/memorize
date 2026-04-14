@@ -1,0 +1,11 @@
+{
+  "fixtureName": "mixed-context-project",
+  "expectedDiscoveryCount": 3,
+  "expectedImportedRuleCount": 3,
+  "expectedConflictCount": 0,
+  "expectedStartupContains": [
+    "Use small commits and keep handoffs explicit.",
+    "Prioritize architectural consistency.",
+    "Always preserve project memory and update docs."
+  ]
+}

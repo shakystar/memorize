@@ -1,0 +1,6 @@
+{
+  "name": "import-basic",
+  "fixture": "mixed-context-project",
+  "command": ["project", "setup"],
+  "metrics": ["discoveredFiles", "importedRuleCount", "importDurationMs"]
+}

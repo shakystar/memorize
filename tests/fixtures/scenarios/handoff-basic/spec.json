@@ -1,0 +1,9 @@
+{
+  "name": "handoff-basic",
+  "fixture": "realistic-in-progress-project",
+  "metrics": [
+    "doneItemsCount",
+    "remainingItemsCount",
+    "hasNextAction"
+  ]
+}
