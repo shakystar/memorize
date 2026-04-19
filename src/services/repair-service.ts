@@ -50,15 +50,170 @@ export async function validateEvents(cwd: string): Promise<string> {
   return 'Event validation passed';
 }
 
-export async function doctor(cwd: string): Promise<string> {
-  const projectId = await getBoundProjectId(cwd);
+export const DOCTOR_REPORT_VERSION = '1';
+
+export type DoctorStatus = 'ok' | 'warn' | 'error';
+
+export interface DoctorCheck {
+  id: string;
+  label: string;
+  status: DoctorStatus;
+  message: string;
+  fix?: string;
+}
+
+export interface DoctorIssue {
+  id: string;
+  severity: Exclude<DoctorStatus, 'ok'>;
+  fix?: string;
+}
+
+export interface DoctorReport {
+  status: DoctorStatus;
+  checks: DoctorCheck[];
+  issues: DoctorIssue[];
+  version: string;
+}
+
+const REQUIRED_DIRS = ['events', 'tasks', 'workstreams', 'rules', 'sync'] as const;
+
+function aggregateStatus(checks: DoctorCheck[]): DoctorStatus {
+  if (checks.some((check) => check.status === 'error')) return 'error';
+  if (checks.some((check) => check.status === 'warn')) return 'warn';
+  return 'ok';
+}
+
+function gitignoreHasMemorize(gitignore: string): boolean {
+  return gitignore.split('\n').some((raw) => {
+    const commentStripped = raw.split('#', 1)[0] ?? '';
+    const line = commentStripped.trim();
+    if (!line || line.startsWith('!')) return false;
+    return /^\/?\.memorize\/?$/.test(line);
+  });
+}
+
+async function checkGitRedactionRisk(
+  cwd: string,
+): Promise<DoctorCheck | undefined> {
+  try {
+    await fs.access(path.join(cwd, '.git'));
+  } catch {
+    return undefined;
+  }
+
+  let gitignore = '';
+  try {
+    gitignore = await fs.readFile(path.join(cwd, '.gitignore'), 'utf8');
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+  }
+
+  if (gitignoreHasMemorize(gitignore)) {
+    return {
+      id: 'git.ignore.memorize',
+      label: 'Git ignores .memorize/',
+      status: 'ok',
+      message: '.memorize/ is listed in .gitignore',
+    };
+  }
+  return {
+    id: 'git.ignore.memorize',
+    label: 'Git ignores .memorize/',
+    status: 'warn',
+    message:
+      '.memorize/ is not gitignored. Event logs may leak to commits and expose stored prompts or secrets if shared.',
+    fix: "add '.memorize/' to .gitignore",
+  };
+}
+
+export async function doctor(cwd: string): Promise<DoctorReport> {
+  const checks: DoctorCheck[] = [];
+  let projectId: string | undefined;
+  try {
+    projectId = (await getBoundProjectId(cwd)) ?? undefined;
+  } catch (error) {
+    checks.push({
+      id: 'project.bound',
+      label: 'Project bound to current directory',
+      status: 'error',
+      message:
+        error instanceof Error ? error.message : 'Failed to read project binding.',
+      fix: 'memorize project init',
+    });
+  }
+
   if (!projectId) {
-    throw new Error('No project bound to current directory.');
+    if (checks.length === 0) {
+      checks.push({
+        id: 'project.bound',
+        label: 'Project bound to current directory',
+        status: 'error',
+        message: 'No project bound to current directory.',
+        fix: 'memorize project init',
+      });
+    }
+  } else {
+    checks.push({
+      id: 'project.bound',
+      label: 'Project bound to current directory',
+      status: 'ok',
+      message: `Bound to project ${projectId}`,
+    });
+
+    const projectRoot = getProjectRoot(projectId);
+    for (const dirName of REQUIRED_DIRS) {
+      try {
+        await fs.access(path.join(projectRoot, dirName));
+        checks.push({
+          id: `project.storage.${dirName}`,
+          label: `Storage directory: ${dirName}`,
+          status: 'ok',
+          message: 'present',
+        });
+      } catch {
+        checks.push({
+          id: `project.storage.${dirName}`,
+          label: `Storage directory: ${dirName}`,
+          status: 'error',
+          message: `Missing .memorize/${projectId}/${dirName}`,
+          fix: 'memorize project init',
+        });
+      }
+    }
   }
-  const projectRoot = getProjectRoot(projectId);
-  const requiredDirs = ['events', 'tasks', 'workstreams', 'rules', 'sync'];
-  for (const dirName of requiredDirs) {
-    await fs.access(path.join(projectRoot, dirName));
+
+  const gitCheck = await checkGitRedactionRisk(cwd);
+  if (gitCheck) checks.push(gitCheck);
+
+  const issues: DoctorIssue[] = checks
+    .filter((check): check is DoctorCheck & { status: Exclude<DoctorStatus, 'ok'> } =>
+      check.status !== 'ok',
+    )
+    .map((check) => ({
+      id: check.id,
+      severity: check.status,
+      ...(check.fix === undefined ? {} : { fix: check.fix }),
+    }));
+
+  return {
+    status: aggregateStatus(checks),
+    checks,
+    issues,
+    version: DOCTOR_REPORT_VERSION,
+  };
+}
+
+export function formatDoctorReport(report: DoctorReport): string {
+  if (report.status === 'ok') {
+    return 'Doctor check passed';
   }
-  return 'Doctor check passed';
+  const lines = [`Doctor check ${report.status}`];
+  for (const check of report.checks) {
+    if (check.status === 'ok') continue;
+    lines.push(`  [${check.status.toUpperCase()}] ${check.label}: ${check.message}`);
+    if (check.fix !== undefined) {
+      lines.push(`    fix: ${check.fix}`);
+    }
+  }
+  return lines.join('\n');
 }

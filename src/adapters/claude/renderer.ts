@@ -7,45 +7,63 @@ import {
 export function renderClaudeStartupContext(
   payload: StartupContextPayload,
 ): string {
-  const untrustedLines: string[] = [];
+  const blocks: string[] = [];
 
-  untrustedLines.push(`Project: ${payload.projectSummary}`);
-
+  const projectLines: string[] = [`Project: ${payload.projectSummary}`];
   if (payload.projectRules.length > 0) {
-    untrustedLines.push('Rules:');
+    projectLines.push('Rules:');
     for (const rule of payload.projectRules) {
-      untrustedLines.push(`- ${rule}`);
+      projectLines.push(`- ${rule}`);
     }
   }
-
   if (payload.workstreamSummary) {
-    untrustedLines.push(`Workstream: ${payload.workstreamSummary}`);
+    projectLines.push(`Workstream: ${payload.workstreamSummary}`);
   }
+  blocks.push(
+    wrapUntrusted(projectLines.join('\n'), { source: 'memorize.project' }),
+  );
 
   if (payload.task) {
-    untrustedLines.push(`Task: ${payload.task.title}`);
-    untrustedLines.push(`Goal: ${payload.task.goal}`);
-    untrustedLines.push(`Status: ${payload.task.status}`);
+    const taskLines = [
+      `Task: ${payload.task.title}`,
+      `Goal: ${payload.task.goal}`,
+      `Status: ${payload.task.status}`,
+    ];
+    blocks.push(
+      wrapUntrusted(taskLines.join('\n'), { source: 'memorize.task' }),
+    );
   }
 
   if (payload.latestHandoff) {
     const handoff = payload.latestHandoff;
-    untrustedLines.push(`Latest handoff: ${handoff.fromActor} → ${handoff.toActor}`);
+    const handoffLines: string[] = [
+      `Latest handoff: ${handoff.fromActor} → ${handoff.toActor}`,
+    ];
     if (handoff.fromActor === 'user') {
-      untrustedLines.push(
+      handoffLines.push(
         '(user-authored intent — verify code/test state independently before trusting claims)',
       );
     }
-    untrustedLines.push(`Handoff summary: ${handoff.summary}`);
-    untrustedLines.push(`Next action: ${handoff.nextAction}`);
+    handoffLines.push(
+      `Handoff summary: ${handoff.summary}`,
+      `Next action: ${handoff.nextAction}`,
+    );
     if (handoff.remainingItems.length > 0) {
-      untrustedLines.push(`Remaining: ${handoff.remainingItems.join('; ')}`);
+      handoffLines.push(`Remaining: ${handoff.remainingItems.join('; ')}`);
     }
+    blocks.push(
+      wrapUntrusted(handoffLines.join('\n'), {
+        source: 'memorize.handoff',
+        actor: handoff.fromActor,
+      }),
+    );
   }
 
-  const body = wrapUntrusted(untrustedLines.join('\n'), {
-    source: 'memorize.startup',
-  });
-
-  return ['# Memorize context', '', UNTRUSTED_PREAMBLE, '', body].join('\n');
+  return [
+    '# Memorize context',
+    '',
+    UNTRUSTED_PREAMBLE,
+    '',
+    blocks.join('\n\n'),
+  ].join('\n');
 }

@@ -7,31 +7,37 @@ import {
 export function renderCodexStartupContext(
   payload: StartupContextPayload,
 ): string {
-  const untrustedSections: string[] = [];
+  const blocks: string[] = [];
 
-  untrustedSections.push(`## Project summary\n${payload.projectSummary}`);
-
+  const projectSections: string[] = [
+    `## Project summary\n${payload.projectSummary}`,
+  ];
   if (payload.projectRules.length > 0) {
-    untrustedSections.push(
+    projectSections.push(
       `## Project rules\n${payload.projectRules
         .map((rule) => `- ${rule}`)
         .join('\n')}`,
     );
   }
-
   if (payload.workstreamSummary) {
-    untrustedSections.push(`## Workstream summary\n${payload.workstreamSummary}`);
+    projectSections.push(
+      `## Workstream summary\n${payload.workstreamSummary}`,
+    );
   }
+  blocks.push(
+    wrapUntrusted(projectSections.join('\n\n'), {
+      source: 'memorize.project',
+    }),
+  );
 
   if (payload.task) {
-    untrustedSections.push(
-      `## Current task\n- Title: ${payload.task.title}\n- Goal: ${payload.task.goal}\n- Status: ${payload.task.status}`,
-    );
+    const taskBody = `## Current task\n- Title: ${payload.task.title}\n- Goal: ${payload.task.goal}\n- Status: ${payload.task.status}`;
+    blocks.push(wrapUntrusted(taskBody, { source: 'memorize.task' }));
   }
 
   if (payload.latestHandoff) {
     const handoff = payload.latestHandoff;
-    const handoffLines = [
+    const handoffLines: string[] = [
       '## Latest handoff',
       `- From: ${handoff.fromActor} → ${handoff.toActor}`,
     ];
@@ -53,18 +59,19 @@ export function renderCodexStartupContext(
     if (handoff.warnings.length > 0) {
       handoffLines.push(`- Warnings: ${handoff.warnings.join('; ')}`);
     }
-    untrustedSections.push(handoffLines.join('\n'));
+    blocks.push(
+      wrapUntrusted(handoffLines.join('\n'), {
+        source: 'memorize.handoff',
+        actor: handoff.fromActor,
+      }),
+    );
   }
-
-  const body = wrapUntrusted(untrustedSections.join('\n\n'), {
-    source: 'memorize.startup',
-  });
 
   return [
     '# Memorize startup context',
     '',
     UNTRUSTED_PREAMBLE,
     '',
-    body,
+    blocks.join('\n\n'),
   ].join('\n');
 }
