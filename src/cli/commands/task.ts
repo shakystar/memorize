@@ -2,7 +2,7 @@ import type { Task } from '../../domain/entities.js';
 import { loadStartContext } from '../../services/context-service.js';
 import {
   getBoundProjectId,
-  readProject,
+  resolveActiveTaskId,
 } from '../../services/project-service.js';
 import { getCurrentSessionId } from '../../services/session-service.js';
 import {
@@ -16,15 +16,6 @@ import { HANDOFF_INTENT_NOTICE } from '../../workflows/macros/handoff-task.js';
 import type { CliContext } from '../context.js';
 import { parseFlags } from '../parse-flags.js';
 import { renderScaffoldUsage } from '../usage.js';
-
-async function resolveTaskId(
-  projectId: string,
-  explicit: string | undefined,
-): Promise<string | undefined> {
-  if (explicit) return explicit;
-  const project = await readProject(projectId);
-  return project?.activeTaskIds[0];
-}
 
 const ALLOWED_STATUSES: Task['status'][] = [
   'todo',
@@ -102,8 +93,7 @@ export async function runTaskCommand(
       single: ['summary', 'session', 'task'],
       multi: ['task-update', 'project-update', 'deferred', 'discard'],
     });
-    const taskId = flags.single.task ?? flags.positional[0];
-    const resolvedTaskId = await resolveTaskId(projectId, taskId);
+    const resolvedTaskId = await resolveActiveTaskId(projectId, flags.single.task);
     const summary = flags.single.summary;
     if (!summary)
       throw new Error('--summary is required for task checkpoint.');
@@ -136,11 +126,10 @@ export async function runTaskCommand(
       single: ['summary', 'next', 'from', 'to', 'task', 'confidence'],
       multi: ['done', 'remaining', 'warning', 'question'],
     });
-    const taskId = flags.single.task ?? flags.positional[0];
-    const resolvedTaskId = await resolveTaskId(projectId, taskId);
+    const resolvedTaskId = await resolveActiveTaskId(projectId, flags.single.task);
     if (!resolvedTaskId) {
       throw new Error(
-        'Handoff requires a taskId (pass as positional, --task, or ensure an active task exists).',
+        'Handoff requires a taskId (pass --task or ensure an active task exists).',
       );
     }
     const summary = flags.single.summary;
