@@ -69,15 +69,15 @@ event log  ─►  projection  ─►  startup payload  ─►  agent session
 memorize project init              # bind current dir to a new project
 memorize project show              # print the bound project summary (JSON)
 memorize task create "<title>"     # add a task to the project
-memorize task list                 # list tasks (use --status open|done|all)
-memorize task start                # start the next task
+memorize task list                 # list tasks (use --status todo|in_progress|blocked|done)
+memorize task resume               # load startup context for the current task
 memorize task handoff              # record a handoff intent to another agent
 memorize do "<sentence>"           # natural-language intent routing
 memorize doctor                    # human-readable health check
 memorize doctor --json             # structured health report for automation
 memorize launch claude             # start Claude with bootstrap injection
 memorize launch codex              # start Codex with bootstrap injection
-memorize project sync --push       # push events to a remote transport
+memorize project sync --push --remote-path <path>  # push events to a remote
 ```
 
 Run `memorize` with no arguments for the full command index.

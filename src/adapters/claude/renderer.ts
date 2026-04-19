@@ -48,8 +48,14 @@ export function renderClaudeStartupContext(
       `Handoff summary: ${handoff.summary}`,
       `Next action: ${handoff.nextAction}`,
     );
+    if (handoff.doneItems.length > 0) {
+      handoffLines.push(`Done: ${handoff.doneItems.join('; ')}`);
+    }
     if (handoff.remainingItems.length > 0) {
       handoffLines.push(`Remaining: ${handoff.remainingItems.join('; ')}`);
+    }
+    if (handoff.warnings.length > 0) {
+      handoffLines.push(`Warnings: ${handoff.warnings.join('; ')}`);
     }
     blocks.push(
       wrapUntrusted(handoffLines.join('\n'), {
