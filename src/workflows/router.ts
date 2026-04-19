@@ -21,6 +21,8 @@ export function parseIntent(input: string): ResolvedIntent {
   if (normalized.includes('resume')) {
     return { intent: 'task.resume', raw: input };
   }
+  // Checkpoint before handoff: "checkpoint and hand off" should checkpoint, not handoff.
+  // Compound intent is not supported; the first matching intent wins.
   if (normalized.includes('checkpoint')) {
     return { intent: 'task.checkpoint', raw: input };
   }
