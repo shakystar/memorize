@@ -76,36 +76,42 @@ export async function readEventsWithIntegrity(
 ): Promise<EventIntegrity> {
   const eventsDir = path.join(getProjectRoot(projectId), 'events');
   const result: EventIntegrity = { events: [], corruptLines: [] };
+
+  let files: string[];
   try {
-    const files = (await fs.readdir(eventsDir))
+    files = (await fs.readdir(eventsDir))
       .filter((file) => file.endsWith('.ndjson'))
       .sort();
-
-    for (const file of files) {
-      const raw = await fs.readFile(path.join(eventsDir, file), 'utf8');
-      const lines = raw.split('\n');
-      for (let i = 0; i < lines.length; i++) {
-        const trimmed = lines[i]!.trim();
-        if (!trimmed) continue;
-        try {
-          result.events.push(JSON.parse(trimmed) as DomainEvent);
-        } catch {
-          result.corruptLines.push({
-            file,
-            lineNumber: i + 1,
-            raw: trimmed.slice(0, 200),
-          });
-        }
-      }
-    }
-
-    return result;
   } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
-      return result;
-    }
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return result;
     throw error;
   }
+
+  for (const file of files) {
+    let raw: string;
+    try {
+      raw = await fs.readFile(path.join(eventsDir, file), 'utf8');
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') continue;
+      throw error;
+    }
+    const lines = raw.split('\n');
+    for (let i = 0; i < lines.length; i++) {
+      const trimmed = lines[i]!.trim();
+      if (!trimmed) continue;
+      try {
+        result.events.push(JSON.parse(trimmed) as DomainEvent);
+      } catch {
+        result.corruptLines.push({
+          file,
+          lineNumber: i + 1,
+          raw: trimmed.slice(0, 200),
+        });
+      }
+    }
+  }
+
+  return result;
 }
 
 export async function readEvents(projectId: string): Promise<DomainEvent[]> {

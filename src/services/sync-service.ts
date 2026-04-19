@@ -11,7 +11,7 @@ import type {
 } from '../domain/sync-protocol.js';
 import type { SyncTransport } from './sync-transport.js';
 import { appendEvent, readEvents } from '../storage/event-store.js';
-import { appendLine, readJson, writeJson } from '../storage/fs-utils.js';
+import { appendLine, readJson, withFileLock, writeJson } from '../storage/fs-utils.js';
 import {
   getSyncFile,
   getSyncInboundFile,
@@ -98,9 +98,11 @@ export async function enqueueInbound(
   events: DomainEvent[],
 ): Promise<void> {
   const filePath = getSyncInboundFile(projectId);
-  for (const event of events) {
-    await appendLine(filePath, JSON.stringify(event));
-  }
+  await withFileLock(filePath, async () => {
+    for (const event of events) {
+      await appendLine(filePath, JSON.stringify(event));
+    }
+  });
 }
 
 export async function drainInbound(
@@ -109,11 +111,17 @@ export async function drainInbound(
   const filePath = getSyncInboundFile(projectId);
   try {
     const raw = await fs.readFile(filePath, 'utf8');
-    return raw
-      .split('\n')
-      .map((line) => line.trim())
-      .filter((line) => line.length > 0)
-      .map((line) => JSON.parse(line) as DomainEvent);
+    const events: DomainEvent[] = [];
+    for (const line of raw.split('\n')) {
+      const trimmed = line.trim();
+      if (!trimmed) continue;
+      try {
+        events.push(JSON.parse(trimmed) as DomainEvent);
+      } catch {
+        // Skip corrupt lines — may result from interrupted writes
+      }
+    }
+    return events;
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
       return [];

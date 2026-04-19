@@ -109,7 +109,7 @@ describe('withFileLock', () => {
     // Create a stale lock (mtime will be current, so we set it to the past)
     await mkdir(lockDir);
     const { utimes } = await import('node:fs/promises');
-    const past = new Date(Date.now() - 20_000);
+    const past = new Date(Date.now() - 60_000);
     await utimes(lockDir, past, past);
 
     let executed = false;
