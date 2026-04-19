@@ -1,6 +1,6 @@
 import {
   getBoundProjectId,
-  readProject,
+  resolveActiveTaskId,
 } from '../../services/project-service.js';
 import { getCurrentSessionId } from '../../services/session-service.js';
 import { createCheckpoint } from '../../services/task-service.js';
@@ -24,8 +24,7 @@ export async function checkpointTaskWorkflow(
     throw new Error('No project bound to current directory.');
   }
 
-  const project = await readProject(projectId);
-  const activeTaskId = project?.activeTaskIds[0];
+  const activeTaskId = await resolveActiveTaskId(projectId);
 
   const sessionId = options.sessionId ?? (await getCurrentSessionId(cwd));
   const checkpoint = await createCheckpoint({

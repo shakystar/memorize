@@ -73,6 +73,15 @@ export async function readDefaultWorkstream(
   return readJson<Workstream>(getWorkstreamFile(projectId, workstreamId));
 }
 
+export async function resolveActiveTaskId(
+  projectId: string,
+  explicit?: string,
+): Promise<string | undefined> {
+  if (explicit) return explicit;
+  const project = await readProject(projectId);
+  return project?.activeTaskIds[0];
+}
+
 export async function readSyncState(
   projectId: string,
 ): Promise<ProjectSyncState | undefined> {

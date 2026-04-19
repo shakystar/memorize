@@ -1,6 +1,6 @@
 import {
   getBoundProjectId,
-  readProject,
+  resolveActiveTaskId,
 } from '../../services/project-service.js';
 import { createHandoff } from '../../services/task-service.js';
 
@@ -43,8 +43,7 @@ export async function handoffTaskWorkflow(
     throw new Error('No project bound to current directory.');
   }
 
-  const project = await readProject(projectId);
-  const activeTaskId = project?.activeTaskIds[0];
+  const activeTaskId = await resolveActiveTaskId(projectId);
   if (!activeTaskId) {
     throw new Error('No active task to hand off. Create a task first.');
   }
