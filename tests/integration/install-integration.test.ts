@@ -150,6 +150,45 @@ describe('install integration', () => {
     ).toBe(1);
   });
 
+  it('supports installing Claude and Codex side-by-side without interference', async () => {
+    await writeFile(
+      join(sandbox, 'AGENTS.override.md'),
+      '# Existing override\n\nKeep this note.\n',
+      'utf8',
+    );
+    await mkdir(join(sandbox, '.claude'), { recursive: true });
+    await writeFile(
+      join(sandbox, '.claude', 'settings.local.json'),
+      JSON.stringify({ hooks: { Other: [{ command: 'keep-me' }] } }, null, 2),
+      'utf8',
+    );
+
+    expect(runCli(['install', 'claude']).status).toBe(0);
+    expect(runCli(['install', 'codex']).status).toBe(0);
+    expect(runCli(['install', 'claude']).status).toBe(0);
+    expect(runCli(['install', 'codex']).status).toBe(0);
+
+    const settings = JSON.parse(
+      await readFile(join(sandbox, '.claude', 'settings.local.json'), 'utf8'),
+    ) as { hooks: Record<string, Array<{ command: string }>> };
+    expect(settings.hooks.Other?.[0]?.command).toBe('keep-me');
+    expect(
+      settings.hooks.SessionStart?.filter(
+        (entry) => entry.command === 'memorize hook claude SessionStart',
+      ).length,
+    ).toBe(1);
+
+    const override = await readFile(
+      join(sandbox, 'AGENTS.override.md'),
+      'utf8',
+    );
+    expect(override).toContain('# Existing override');
+    expect(override).toContain('Keep this note.');
+    expect(
+      override.match(/Memorize-managed bootstrap guidance/g)?.length ?? 0,
+    ).toBe(1);
+  });
+
   it('migrates legacy Memorize markers to the versioned format', async () => {
     await writeFile(
       join(sandbox, 'AGENTS.override.md'),

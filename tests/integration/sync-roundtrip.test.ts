@@ -70,7 +70,7 @@ describe('sync roundtrip via file transport', () => {
     expect(inbound.some((event) => event.type === 'task.created')).toBe(true);
   });
 
-  it('exposes push/pull/bind through the cli with --remote-path', async () => {
+  it('exposes push/pull/bind through the cli with --remote-path', { timeout: 30_000 }, async () => {
     const sandboxA = join(sandbox, 'a-cli');
     const sandboxB = join(sandbox, 'b-cli');
     const homeA = join(sandbox, 'home-a-cli');

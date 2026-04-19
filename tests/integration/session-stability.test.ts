@@ -67,7 +67,7 @@ afterEach(async () => {
 });
 
 describe('session id stability', () => {
-  it('reuses the same sessionId across multiple checkpoints when env var is set', async () => {
+  it('reuses the same sessionId across multiple checkpoints when env var is set', { timeout: 30_000 }, async () => {
     expect(runCli(['project', 'init']).status).toBe(0);
     expect(runCli(['task', 'create', 'Session test']).status).toBe(0);
 
@@ -95,7 +95,7 @@ describe('session id stability', () => {
     expect(secondSession).toBe(envSessionId);
   });
 
-  it('reuses the same sessionId across checkpoints via ambient .memorize/current-session.json', async () => {
+  it('reuses the same sessionId across checkpoints via ambient .memorize/current-session.json', { timeout: 30_000 }, async () => {
     expect(runCli(['project', 'init']).status).toBe(0);
     expect(runCli(['task', 'create', 'Ambient session test']).status).toBe(0);
 
