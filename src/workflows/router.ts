@@ -21,8 +21,9 @@ export function parseIntent(input: string): ResolvedIntent {
   if (normalized.includes('resume')) {
     return { intent: 'task.resume', raw: input };
   }
-  // Checkpoint before handoff: "checkpoint and hand off" should checkpoint, not handoff.
-  // Compound intent is not supported; the first matching intent wins.
+  // Intent precedence: the first matching keyword wins. Compound sentences
+  // (e.g. "checkpoint and hand off") are not supported — the earlier check
+  // takes priority. Current order: resume > checkpoint > handoff > task/create.
   if (normalized.includes('checkpoint')) {
     return { intent: 'task.checkpoint', raw: input };
   }

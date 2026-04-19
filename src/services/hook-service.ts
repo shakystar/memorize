@@ -7,7 +7,7 @@ import {
   warnInjectionMarkers,
 } from '../shared/content-safety.js';
 import { prepareLaunch } from './launch-service.js';
-import { getBoundProjectId, readProject } from './project-service.js';
+import { getBoundProjectId, resolveActiveTaskId } from './project-service.js';
 import {
   SESSION_ENV_VAR,
   endSession,
@@ -25,11 +25,6 @@ async function ensureProjectId(cwd: string): Promise<string> {
 
   const setup = await setupProject(cwd);
   return setup.project.id;
-}
-
-async function resolveActiveTaskId(projectId: string): Promise<string | undefined> {
-  const project = await readProject(projectId);
-  return project?.activeTaskIds[0];
 }
 
 async function persistEnvFile(

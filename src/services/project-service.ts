@@ -1,8 +1,7 @@
 import { appendEvent, ensureProjectDirectories } from '../storage/event-store.js';
 import { bindProject, resolveProjectIdForPath } from '../storage/bindings-store.js';
 import { getProjectFile, getWorkstreamFile } from '../storage/path-resolver.js';
-import { readJson } from '../storage/fs-utils.js';
-import { writeJson } from '../storage/fs-utils.js';
+import { readJson, writeJson } from '../storage/fs-utils.js';
 import { rebuildProjectProjection } from './projection-store.js';
 import type { CreateProjectInput } from '../domain/commands.js';
 import { createProject as createProjectEntity, createWorkstream } from '../domain/entities.js';
@@ -77,7 +76,7 @@ export async function resolveActiveTaskId(
   projectId: string,
   explicit?: string,
 ): Promise<string | undefined> {
-  if (explicit) return explicit;
+  if (explicit?.trim()) return explicit.trim();
   const project = await readProject(projectId);
   return project?.activeTaskIds[0];
 }
