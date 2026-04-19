@@ -89,7 +89,7 @@ describe('do command', () => {
     ]);
     expect(handoffResult.status).toBe(0);
     expect(handoffResult.stdout).toContain('Created handoff');
-    expect(handoffResult.stdout).toContain('codex');
+    expect(handoffResult.stdout).toContain('→ codex');
     expect(handoffResult.stdout).toContain(
       'Handoff records intent, context, and decisions only',
     );
