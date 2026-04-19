@@ -1,7 +1,7 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 
-import { readEvents } from '../storage/event-store.js';
+import { readEventsWithIntegrity } from '../storage/event-store.js';
 import { readJson } from '../storage/fs-utils.js';
 import {
   getMemoryIndexFile,
@@ -43,9 +43,12 @@ export async function validateEvents(cwd: string): Promise<string> {
   if (!projectId) {
     throw new Error('No project bound to current directory.');
   }
-  const events = await readEvents(projectId);
-  if (events.length === 0) {
+  const { events, corruptLines } = await readEventsWithIntegrity(projectId);
+  if (events.length === 0 && corruptLines.length === 0) {
     throw new Error('No events found for project.');
+  }
+  if (corruptLines.length > 0) {
+    return `Event validation found ${corruptLines.length} corrupt line(s)`;
   }
   return 'Event validation passed';
 }
@@ -179,6 +182,26 @@ export async function doctor(cwd: string): Promise<DoctorReport> {
           fix: 'memorize project init',
         });
       }
+    }
+  }
+
+  if (projectId) {
+    const { corruptLines } = await readEventsWithIntegrity(projectId);
+    if (corruptLines.length === 0) {
+      checks.push({
+        id: 'events.integrity',
+        label: 'Event log integrity',
+        status: 'ok',
+        message: 'All event lines parse successfully',
+      });
+    } else {
+      checks.push({
+        id: 'events.integrity',
+        label: 'Event log integrity',
+        status: 'warn',
+        message: `${corruptLines.length} corrupt line(s) found: ${corruptLines.map((c) => `${c.file}:${c.lineNumber}`).join(', ')}`,
+        fix: 'memorize events validate',
+      });
     }
   }
 

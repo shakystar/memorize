@@ -7,7 +7,7 @@ import type {
   DomainEventPayload,
   DomainEventType,
 } from '../domain/events.js';
-import { appendLine, ensureDir } from './fs-utils.js';
+import { appendLine, ensureDir, withFileLock } from './fs-utils.js';
 import { getEventsFile, getProjectRoot } from './path-resolver.js';
 
 export interface AppendEventInput<TPayload extends DomainEventPayload> {
@@ -59,35 +59,56 @@ export async function appendEvent<TPayload extends DomainEventPayload>(
   };
 
   await ensureProjectDirectories(input.projectId);
-  await appendLine(
-    getEventsFile(input.projectId, dateKey()),
-    JSON.stringify(event),
+  const eventsFile = getEventsFile(input.projectId, dateKey());
+  await withFileLock(eventsFile, () =>
+    appendLine(eventsFile, JSON.stringify(event)),
   );
   return event;
 }
 
-export async function readEvents(projectId: string): Promise<DomainEvent[]> {
+export interface EventIntegrity {
+  events: DomainEvent[];
+  corruptLines: { file: string; lineNumber: number; raw: string }[];
+}
+
+export async function readEventsWithIntegrity(
+  projectId: string,
+): Promise<EventIntegrity> {
   const eventsDir = path.join(getProjectRoot(projectId), 'events');
+  const result: EventIntegrity = { events: [], corruptLines: [] };
   try {
     const files = (await fs.readdir(eventsDir))
       .filter((file) => file.endsWith('.ndjson'))
       .sort();
-    const events: DomainEvent[] = [];
 
     for (const file of files) {
       const raw = await fs.readFile(path.join(eventsDir, file), 'utf8');
-      for (const line of raw.split('\n')) {
-        const trimmed = line.trim();
+      const lines = raw.split('\n');
+      for (let i = 0; i < lines.length; i++) {
+        const trimmed = lines[i]!.trim();
         if (!trimmed) continue;
-        events.push(JSON.parse(trimmed) as DomainEvent);
+        try {
+          result.events.push(JSON.parse(trimmed) as DomainEvent);
+        } catch {
+          result.corruptLines.push({
+            file,
+            lineNumber: i + 1,
+            raw: trimmed.slice(0, 200),
+          });
+        }
       }
     }
 
-    return events;
+    return result;
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
-      return [];
+      return result;
     }
     throw error;
   }
+}
+
+export async function readEvents(projectId: string): Promise<DomainEvent[]> {
+  const { events } = await readEventsWithIntegrity(projectId);
+  return events;
 }
