@@ -204,4 +204,64 @@ describe('phase 2 services and cli', () => {
     expect(invalid.status).not.toBe(0);
     expect(invalid.stderr).toContain('--status must be one of');
   });
+
+  it('rejects checkpoint when --summary is missing', () => {
+    runCli(['project', 'init']);
+    runCli(['task', 'create', 'Summary test']);
+
+    const result = runCli(['task', 'checkpoint']);
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain('--summary is required');
+  });
+
+  it('rejects handoff with invalid --confidence value', () => {
+    runCli(['project', 'init']);
+    runCli(['task', 'create', 'Confidence test']);
+
+    const result = runCli([
+      'task',
+      'handoff',
+      '--summary',
+      'test',
+      '--next',
+      'verify',
+      '--confidence',
+      'medium-high',
+    ]);
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain('--confidence must be one of');
+  });
+
+  it('rejects sentence handoff when no active task exists', { timeout: 30_000 }, () => {
+    runCli(['project', 'init']);
+
+    const result = runCli([
+      'do',
+      'Hand off the work to Codex',
+      '--summary',
+      'test',
+      '--next',
+      'verify',
+    ]);
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain('No active task');
+  });
+
+  it('rejects sentence handoff with invalid --confidence via do', { timeout: 30_000 }, () => {
+    runCli(['project', 'init']);
+    runCli(['task', 'create', 'Confidence do test']);
+
+    const result = runCli([
+      'do',
+      'Hand off the work to Codex',
+      '--summary',
+      'test',
+      '--next',
+      'verify',
+      '--confidence',
+      'super-high',
+    ]);
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain('--confidence must be one of');
+  });
 });
