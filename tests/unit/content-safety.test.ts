@@ -1,8 +1,10 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  MAX_ARRAY_ITEMS,
   MAX_FIELD_LENGTH,
   UNTRUSTED_PREAMBLE,
+  assertArrayLength,
   assertContentLength,
   detectInjectionMarkers,
   escapeSentinels,
@@ -66,6 +68,24 @@ describe('content-safety', () => {
       expect(() => assertContentLength(long, 'task.description')).toThrow(
         /MAX_FIELD_LENGTH/,
       );
+    });
+  });
+
+  describe('assertArrayLength', () => {
+    it('accepts arrays within the limit', () => {
+      const items = new Array(MAX_ARRAY_ITEMS).fill('x');
+      expect(() => assertArrayLength(items, 'field')).not.toThrow();
+    });
+
+    it('rejects arrays over MAX_ARRAY_ITEMS', () => {
+      const items = new Array(MAX_ARRAY_ITEMS + 1).fill('x');
+      expect(() =>
+        assertArrayLength(items, 'handoff.doneItems'),
+      ).toThrow(/MAX_ARRAY_ITEMS/);
+    });
+
+    it('tolerates undefined input', () => {
+      expect(() => assertArrayLength(undefined, 'field')).not.toThrow();
     });
   });
 

@@ -1,5 +1,19 @@
 export const MAX_FIELD_LENGTH = 8192;
 export const MAX_HOOK_CONTENT_LENGTH = MAX_FIELD_LENGTH;
+export const MAX_ARRAY_ITEMS = 100;
+
+export function assertArrayLength<T>(
+  values: readonly T[] | undefined,
+  field: string,
+  max: number = MAX_ARRAY_ITEMS,
+): void {
+  if (!values) return;
+  if (values.length > max) {
+    throw new Error(
+      `${field} exceeds MAX_ARRAY_ITEMS (${values.length} > ${max}). Split the list or drop low-value items before saving.`,
+    );
+  }
+}
 
 export const UNTRUSTED_PREAMBLE = [
   '## System Instructions (TRUSTED)',

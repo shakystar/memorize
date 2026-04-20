@@ -23,6 +23,7 @@ import {
 import type { Checkpoint, Handoff, Task } from '../domain/entities.js';
 import { assertTaskStatusTransition } from '../domain/state-machines.js';
 import {
+  assertArrayLength,
   assertContentLength,
   detectInjectionMarkers,
   warnInjectionMarkers,
@@ -46,6 +47,7 @@ function guardStringList(
   collected: InjectionMarker[],
 ): void {
   if (!values) return;
+  assertArrayLength(values, field);
   values.forEach((value, index) =>
     guardField(value, `${field}[${index}]`, collected),
   );
