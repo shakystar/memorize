@@ -14,7 +14,10 @@ import {
   getRuleFile,
   getWorkstreamFile,
 } from '../storage/path-resolver.js';
-import { readDefaultWorkstream, readProject } from './project-service.js';
+import {
+  readDefaultWorkstreamForProject,
+  readProject,
+} from './project-service.js';
 import { readHandoff, readTask } from './task-service.js';
 
 async function readOpenConflicts(projectId: string): Promise<Conflict[]> {
@@ -67,23 +70,18 @@ export async function loadStartContext(params: {
     ? await readJson<Workstream>(
         getWorkstreamFile(params.projectId, params.workstreamId),
       )
-    : await readDefaultWorkstream(params.projectId);
+    : await readDefaultWorkstreamForProject(project);
 
   let task = params.taskId
     ? await readTask(params.projectId, params.taskId)
     : undefined;
 
   if (!task) {
-    const candidateTaskIds = [
-      ...project.activeTaskIds.filter((taskId) => {
-        const taskPath = path.join(getProjectRoot(params.projectId), 'tasks', `${taskId}.json`);
-        return taskPath.length > 0;
-      }),
-    ];
-
     const candidateTasks = (
       await Promise.all(
-        candidateTaskIds.map((taskId) => readTask(params.projectId, taskId)),
+        project.activeTaskIds.map((taskId) =>
+          readTask(params.projectId, taskId),
+        ),
       )
     ).filter((candidate): candidate is NonNullable<typeof candidate> => Boolean(candidate));
 

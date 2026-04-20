@@ -66,6 +66,9 @@ describe('claude hook integration', () => {
 
     const persistedEnv = await readFile(envFile, 'utf8');
     expect(persistedEnv).toContain('MEMORIZE_PROJECT_ID=');
-    expect(persistedEnv).toContain('MEMORIZE_BOOTSTRAP_FILE=');
+    // MEMORIZE_BOOTSTRAP_FILE is intentionally NOT set on the hook path:
+    // startup context is returned inline via additionalContext, so no
+    // bootstrap file is written during SessionStart.
+    expect(persistedEnv).not.toContain('MEMORIZE_BOOTSTRAP_FILE=');
   });
 });

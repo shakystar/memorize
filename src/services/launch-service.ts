@@ -26,6 +26,11 @@ export interface PreparedLaunch {
   bootstrapFilePath: string;
 }
 
+export interface ComposedStartupContext {
+  projectId: string;
+  startupContext: string;
+}
+
 export interface LaunchResult extends PreparedLaunch {
   exitCode: number;
 }
@@ -80,19 +85,32 @@ async function captureCodexLastMessage(params: {
   }
 }
 
-export async function prepareLaunch(params: {
+export async function composeStartupContext(params: {
   agent: 'claude' | 'codex';
   cwd: string;
-  passthroughArgs?: string[];
-}): Promise<PreparedLaunch> {
+}): Promise<ComposedStartupContext> {
   const projectId = await ensureProjectReady(params.cwd);
   const payload = await loadStartContext({ projectId });
   const adapter = adapterRegistry[params.agent];
   if (!adapter) {
     throw new Error(`Adapter ${params.agent} is not registered.`);
   }
+  return {
+    projectId,
+    startupContext: adapter.renderStartupContext(payload),
+  };
+}
 
-  const startupContext = adapter.renderStartupContext(payload);
+export async function prepareLaunch(params: {
+  agent: 'claude' | 'codex';
+  cwd: string;
+  passthroughArgs?: string[];
+}): Promise<PreparedLaunch> {
+  const { projectId, startupContext } = await composeStartupContext({
+    agent: params.agent,
+    cwd: params.cwd,
+  });
+
   const bootstrapFilePath = await writeBootstrapFile({
     cwd: params.cwd,
     agent: params.agent,

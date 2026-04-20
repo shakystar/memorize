@@ -6,7 +6,7 @@ import {
   truncateContent,
   warnInjectionMarkers,
 } from '../shared/content-safety.js';
-import { prepareLaunch } from './launch-service.js';
+import { composeStartupContext } from './launch-service.js';
 import { getBoundProjectId, resolveActiveTaskId } from './project-service.js';
 import {
   SESSION_ENV_VAR,
@@ -117,19 +117,16 @@ export async function runClaudeHook(params: {
   const projectId = await ensureProjectId(params.cwd);
 
   if (params.eventName === 'SessionStart') {
-    const bootstrap = await prepareLaunch({
+    const { startupContext: additionalContext } = await composeStartupContext({
       agent: 'claude',
       cwd: params.cwd,
-      passthroughArgs: [],
     });
-    const additionalContext = bootstrap.startupContext;
     const sessionId = await startSession(params.cwd, 'claude');
 
     const envFile = process.env.CLAUDE_ENV_FILE;
     if (envFile) {
       await persistEnvFile(envFile, {
         MEMORIZE_PROJECT_ID: projectId,
-        MEMORIZE_BOOTSTRAP_FILE: bootstrap.bootstrapFilePath,
         [SESSION_ENV_VAR]: sessionId,
       });
     }

@@ -61,15 +61,22 @@ export async function readProject(projectId: string): Promise<Project | undefine
   return readJson<Project>(getProjectFile(projectId));
 }
 
+export async function readDefaultWorkstreamForProject(
+  project: Project,
+): Promise<Workstream | undefined> {
+  const workstreamId = project.activeWorkstreamIds[0];
+  if (!workstreamId) {
+    return undefined;
+  }
+  return readJson<Workstream>(getWorkstreamFile(project.id, workstreamId));
+}
+
 export async function readDefaultWorkstream(
   projectId: string,
 ): Promise<Workstream | undefined> {
   const project = await readProject(projectId);
-  const workstreamId = project?.activeWorkstreamIds[0];
-  if (!workstreamId) {
-    return undefined;
-  }
-  return readJson<Workstream>(getWorkstreamFile(projectId, workstreamId));
+  if (!project) return undefined;
+  return readDefaultWorkstreamForProject(project);
 }
 
 export async function resolveActiveTaskId(
