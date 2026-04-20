@@ -109,6 +109,70 @@ function prepareHookText(
   return truncated;
 }
 
+async function handleSessionStart(params: {
+  projectId: string;
+  agent: 'claude' | 'codex';
+  cwd: string;
+  envFile?: string;
+}): Promise<string> {
+  const { startupContext: additionalContext } = await composeStartupContext({
+    agent: params.agent,
+    cwd: params.cwd,
+  });
+  const sessionId = await startSession(params.cwd, params.agent);
+
+  if (params.envFile) {
+    await persistEnvFile(params.envFile, {
+      MEMORIZE_PROJECT_ID: params.projectId,
+      [SESSION_ENV_VAR]: sessionId,
+    });
+  }
+
+  return JSON.stringify({
+    hookSpecificOutput: {
+      hookEventName: 'SessionStart',
+      additionalContext,
+    },
+  });
+}
+
+async function handleStop(params: {
+  projectId: string;
+  agent: 'claude' | 'codex';
+  cwd: string;
+  rawPayload: string | undefined;
+}): Promise<string> {
+  const payload = parseStopPayload(params.rawPayload);
+  const activeTaskId = await resolveActiveTaskId(params.projectId);
+
+  if (!activeTaskId) {
+    await endSession(params.cwd);
+    return JSON.stringify({
+      systemMessage:
+        'memorize: session ended (no active task, skipped auto-handoff)',
+    });
+  }
+
+  const summary =
+    prepareHookText(
+      payload.lastAssistantMessage,
+      `hook.Stop.last_assistant_message`,
+    ) ?? 'No assistant message captured';
+  const handoff = await createHandoff({
+    projectId: params.projectId,
+    taskId: activeTaskId,
+    fromActor: params.agent,
+    toActor: 'next-agent',
+    summary,
+    nextAction: `Continue from the latest ${params.agent} output.`,
+  });
+  await endSession(params.cwd);
+
+  return JSON.stringify({
+    systemMessage: `memorize: handoff ${handoff.id} recorded`,
+  });
+}
+
 export async function runClaudeHook(params: {
   eventName: string;
   cwd: string;
@@ -117,25 +181,13 @@ export async function runClaudeHook(params: {
   const projectId = await ensureProjectId(params.cwd);
 
   if (params.eventName === 'SessionStart') {
-    const { startupContext: additionalContext } = await composeStartupContext({
+    return handleSessionStart({
+      projectId,
       agent: 'claude',
       cwd: params.cwd,
-    });
-    const sessionId = await startSession(params.cwd, 'claude');
-
-    const envFile = process.env.CLAUDE_ENV_FILE;
-    if (envFile) {
-      await persistEnvFile(envFile, {
-        MEMORIZE_PROJECT_ID: projectId,
-        [SESSION_ENV_VAR]: sessionId,
-      });
-    }
-
-    return JSON.stringify({
-      hookSpecificOutput: {
-        hookEventName: 'SessionStart',
-        additionalContext,
-      },
+      ...(process.env.CLAUDE_ENV_FILE
+        ? { envFile: process.env.CLAUDE_ENV_FILE }
+        : {}),
     });
   }
 
@@ -165,41 +217,11 @@ export async function runClaudeHook(params: {
   }
 
   if (params.eventName === 'Stop') {
-    const payload = parseStopPayload(params.stdinPayload);
-    const activeTaskId = await resolveActiveTaskId(projectId);
-
-    // Without an active task, there is nothing meaningful to hand off.
-    // Recording a handoff whose `taskId` is the session id (a UUID
-    // from Claude Code) produces an orphan that cannot be reached via
-    // the task → latestHandoffId projection, so the next startup
-    // payload silently omits it. Prefer explicit user action: if a
-    // handoff is wanted with no active task, the user / agent can
-    // still call `memorize task handoff` directly.
-    if (!activeTaskId) {
-      await endSession(params.cwd);
-      return JSON.stringify({
-        systemMessage:
-          'memorize: session ended (no active task, skipped auto-handoff)',
-      });
-    }
-
-    const summary =
-      prepareHookText(
-        payload.lastAssistantMessage,
-        'hook.Stop.last_assistant_message',
-      ) ?? 'No assistant message captured';
-    const handoff = await createHandoff({
+    return handleStop({
       projectId,
-      taskId: activeTaskId,
-      fromActor: 'claude',
-      toActor: 'next-agent',
-      summary,
-      nextAction: 'Continue from the latest Claude output.',
-    });
-    await endSession(params.cwd);
-
-    return JSON.stringify({
-      systemMessage: `memorize: handoff ${handoff.id} recorded`,
+      agent: 'claude',
+      cwd: params.cwd,
+      rawPayload: params.stdinPayload,
     });
   }
 
