@@ -27,5 +27,12 @@ export async function resolveProjectIdForPath(
   rootPath: string,
 ): Promise<string | undefined> {
   const bindings = await readBindings();
-  return bindings.byPath[normalizeRoot(rootPath)];
+  let current = normalizeRoot(rootPath);
+  while (true) {
+    const projectId = bindings.byPath[current];
+    if (projectId) return projectId;
+    const parent = path.dirname(current);
+    if (parent === current) return undefined;
+    current = parent;
+  }
 }
