@@ -156,15 +156,16 @@ async function handleStop(params: {
   const summary =
     prepareHookText(
       payload.lastAssistantMessage,
-      `hook.Stop.last_assistant_message`,
+      'hook.Stop.last_assistant_message',
     ) ?? 'No assistant message captured';
+  const agentDisplayName = params.agent === 'claude' ? 'Claude' : 'Codex';
   const handoff = await createHandoff({
     projectId: params.projectId,
     taskId: activeTaskId,
     fromActor: params.agent,
     toActor: 'next-agent',
     summary,
-    nextAction: `Continue from the latest ${params.agent} output.`,
+    nextAction: `Continue from the latest ${agentDisplayName} output.`,
   });
   await endSession(params.cwd);
 
