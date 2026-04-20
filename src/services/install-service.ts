@@ -1,4 +1,5 @@
 import fs from 'node:fs/promises';
+import os from 'node:os';
 import path from 'node:path';
 
 import { isEnoent } from '../storage/fs-utils.js';
@@ -155,28 +156,74 @@ const CODEX_END_MARKER = '<!-- memorize:bootstrap v=1 end -->';
 const LEGACY_CODEX_START_MARKER = '<!-- Memorize:START -->';
 const LEGACY_CODEX_END_MARKER = '<!-- Memorize:END -->';
 
-const CODEX_BLOCK_BODY = [
-  '# Memorize-managed bootstrap guidance',
-  '',
-  '- At the start of every session, run `npx @shakystar/memorize task resume` and treat the JSON it prints as the authoritative project context.',
-  '- Before ending a session, run `npx @shakystar/memorize task handoff --summary "..." --next "..."` so the next agent (human or AI) can pick up without re-explaining.',
-  '- Treat Memorize as the source of truth for tasks, decisions, and cross-session memory. Do not invent state; ask Memorize.',
-  '- Do NOT duplicate Memorize state in your own memory system. Project ids, tasks, handoffs, and rules go stale the moment the user re-runs `project setup`. Always query Memorize fresh at session start.',
-] as const;
+const CODEX_HOOK_COMMANDS = {
+  SessionStart: 'npx @shakystar/memorize hook codex SessionStart',
+  Stop: 'npx @shakystar/memorize hook codex Stop',
+} as const;
 
-function assertCodexBodySafe(): void {
-  for (const line of CODEX_BLOCK_BODY) {
-    if (
-      line.includes(CODEX_START_MARKER) ||
-      line.includes(CODEX_END_MARKER) ||
-      line.includes(LEGACY_CODEX_START_MARKER) ||
-      line.includes(LEGACY_CODEX_END_MARKER)
-    ) {
-      throw new Error(
-        'Codex bootstrap body contains a marker sentinel; aborting to protect file integrity.',
-      );
-    }
+function codexHooksPath(): string {
+  return path.join(os.homedir(), '.codex', 'hooks.json');
+}
+
+export async function installCodexHooks(): Promise<string> {
+  const hooksPath = codexHooksPath();
+  await fs.mkdir(path.dirname(hooksPath), { recursive: true });
+
+  let settings: { hooks?: Record<string, unknown> } = {};
+  try {
+    settings = JSON.parse(await fs.readFile(hooksPath, 'utf8')) as {
+      hooks?: Record<string, unknown>;
+    };
+  } catch (error) {
+    if (!isEnoent(error)) throw error;
   }
+
+  const rawHooks = settings.hooks ?? {};
+  const migrated: HooksMap = {};
+  for (const [event, value] of Object.entries(rawHooks)) {
+    const groups = coerceLegacyList(value);
+    if (groups) migrated[event] = groups;
+  }
+
+  // Prepend memorize entries so our context is established before any
+  // other layer (OMX, third-party) runs.
+  const prependMemorize = (
+    list: HookMatcherGroup[] | undefined,
+    command: string,
+    matcher?: string,
+  ): HookMatcherGroup[] => {
+    const current = list ?? [];
+    if (
+      current.some((group) =>
+        group.hooks.some((entry) => entry.command === command),
+      )
+    ) {
+      return current;
+    }
+    return [
+      {
+        ...(matcher !== undefined ? { matcher } : {}),
+        hooks: [{ type: 'command', command }],
+      },
+      ...current,
+    ];
+  };
+
+  const merged = {
+    ...settings,
+    hooks: {
+      ...migrated,
+      SessionStart: prependMemorize(
+        migrated.SessionStart,
+        CODEX_HOOK_COMMANDS.SessionStart,
+        'startup|resume',
+      ),
+      Stop: prependMemorize(migrated.Stop, CODEX_HOOK_COMMANDS.Stop),
+    },
+  };
+
+  await fs.writeFile(hooksPath, `${JSON.stringify(merged, null, 2)}\n`, 'utf8');
+  return hooksPath;
 }
 
 interface BlockBounds {
@@ -214,59 +261,45 @@ function stripLegacyBlock(source: string): string {
   return `${before}\n\n${after}\n`;
 }
 
-function renderWithBlock(
-  base: string,
-  managedBlock: string,
-): string {
-  const trimmed = base.trim();
-  if (trimmed.length === 0) {
-    return `${managedBlock}\n`;
+function stripLegacyMemorizeBlock(source: string): string {
+  let out = source;
+  // Strip v=1 block.
+  const v1 = locateBlock(out, CODEX_START_MARKER, CODEX_END_MARKER);
+  if (v1) {
+    const before = out.slice(0, v1.startIndex).trimEnd();
+    const after = out.slice(v1.afterEndIndex).replace(/^\n+/, '');
+    if (before.length === 0 && after.length === 0) {
+      out = '';
+    } else if (before.length === 0) {
+      out = `${after}\n`;
+    } else if (after.length === 0) {
+      out = `${before}\n`;
+    } else {
+      out = `${before}\n\n${after}\n`;
+    }
   }
-  return `${trimmed}\n\n${managedBlock}\n`;
-}
-
-function upsertCodexBlock(existing: string, managedBlock: string): string {
-  const withoutLegacy = stripLegacyBlock(existing);
-  const bounds = locateBlock(withoutLegacy, CODEX_START_MARKER, CODEX_END_MARKER);
-
-  if (!bounds) {
-    return renderWithBlock(withoutLegacy, managedBlock);
-  }
-
-  const before = withoutLegacy.slice(0, bounds.startIndex).trimEnd();
-  const after = withoutLegacy.slice(bounds.afterEndIndex).replace(/^\n+/, '');
-
-  const parts: string[] = [];
-  if (before.length > 0) {
-    parts.push(before, '');
-  }
-  parts.push(managedBlock);
-  if (after.length > 0) {
-    parts.push('', after.trimEnd());
-  }
-  return `${parts.join('\n')}\n`;
+  // Also strip the pre-v=1 legacy marker via the existing stripLegacyBlock helper.
+  out = stripLegacyBlock(out);
+  return out;
 }
 
 export async function installCodexIntegration(cwd: string): Promise<string> {
-  assertCodexBodySafe();
+  const hooksPath = await installCodexHooks();
 
   const overridePath = path.join(cwd, 'AGENTS.override.md');
-  const managedBlock = [
-    CODEX_START_MARKER,
-    ...CODEX_BLOCK_BODY,
-    CODEX_END_MARKER,
-  ].join('\n');
-
-  let existing = '';
   try {
-    existing = await fs.readFile(overridePath, 'utf8');
-  } catch (error) {
-    if (!isEnoent(error)) {
-      throw error;
+    const existing = await fs.readFile(overridePath, 'utf8');
+    const cleaned = stripLegacyMemorizeBlock(existing);
+    if (cleaned !== existing) {
+      if (cleaned.trim().length === 0) {
+        await fs.unlink(overridePath);
+      } else {
+        await fs.writeFile(overridePath, cleaned, 'utf8');
+      }
     }
+  } catch (error) {
+    if (!isEnoent(error)) throw error;
   }
 
-  const next = upsertCodexBlock(existing, managedBlock);
-  await fs.writeFile(overridePath, next, 'utf8');
-  return overridePath;
+  return hooksPath;
 }
