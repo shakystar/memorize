@@ -29,6 +29,7 @@
   "files": [
     "dist",
     "README.md",
+    "AGENT_GUIDE.md",
     "LICENSE"
   ],
   "bin": {
