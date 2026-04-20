@@ -50,6 +50,28 @@ describe('install integration', () => {
     expect(settings).toContain('npx @shakystar/memorize hook claude SessionStart');
   });
 
+  it('produces the Claude Code-compatible hook schema with matcher + hooks array', async () => {
+    runCli(['install', 'claude']);
+
+    const settings = JSON.parse(
+      await readFile(join(sandbox, '.claude', 'settings.local.json'), 'utf8'),
+    ) as {
+      hooks: Record<
+        string,
+        Array<{ matcher?: string; hooks: Array<{ type: string; command: string }> }>
+      >;
+    };
+
+    const sessionStart = settings.hooks.SessionStart?.[0];
+    expect(sessionStart).toBeDefined();
+    expect(typeof sessionStart?.matcher).toBe('string');
+    expect(Array.isArray(sessionStart?.hooks)).toBe(true);
+    expect(sessionStart?.hooks[0]?.type).toBe('command');
+    expect(sessionStart?.hooks[0]?.command).toBe(
+      'npx @shakystar/memorize hook claude SessionStart',
+    );
+  });
+
   it('merges Claude settings without deleting existing hooks and is idempotent', async () => {
     await mkdir(join(sandbox, '.claude'), { recursive: true });
     await writeFile(
@@ -57,7 +79,12 @@ describe('install integration', () => {
       JSON.stringify(
         {
           hooks: {
-            Other: [{ command: 'keep-me' }],
+            Other: [
+              {
+                matcher: '',
+                hooks: [{ type: 'command', command: 'keep-me' }],
+              },
+            ],
           },
         },
         null,
@@ -75,15 +102,71 @@ describe('install integration', () => {
     const settings = JSON.parse(
       await readFile(join(sandbox, '.claude', 'settings.local.json'), 'utf8'),
     ) as {
-      hooks: Record<string, Array<{ command: string }>>;
+      hooks: Record<
+        string,
+        Array<{ matcher?: string; hooks: Array<{ type: string; command: string }> }>
+      >;
     };
 
-    expect(settings.hooks.Other?.[0]?.command).toBe('keep-me');
+    expect(settings.hooks.Other?.[0]?.hooks[0]?.command).toBe('keep-me');
     expect(
-      settings.hooks.SessionStart?.filter(
-        (entry) => entry.command === 'npx @shakystar/memorize hook claude SessionStart',
+      settings.hooks.SessionStart?.filter((group) =>
+        group.hooks.some(
+          (entry) =>
+            entry.command === 'npx @shakystar/memorize hook claude SessionStart',
+        ),
       ).length,
     ).toBe(1);
+  });
+
+  it('migrates legacy {command} entries to the matcher + hooks array shape', async () => {
+    await mkdir(join(sandbox, '.claude'), { recursive: true });
+    await writeFile(
+      join(sandbox, '.claude', 'settings.local.json'),
+      JSON.stringify(
+        {
+          hooks: {
+            SessionStart: [
+              { command: 'memorize hook claude SessionStart' },
+            ],
+          },
+        },
+        null,
+        2,
+      ),
+      'utf8',
+    );
+
+    const result = runCli(['install', 'claude']);
+    expect(result.status).toBe(0);
+
+    const settings = JSON.parse(
+      await readFile(join(sandbox, '.claude', 'settings.local.json'), 'utf8'),
+    ) as {
+      hooks: Record<
+        string,
+        Array<{ matcher?: string; hooks?: Array<{ type: string; command: string }> }>
+      >;
+    };
+
+    // No raw `{command}` survives.
+    const anyLegacy = Object.values(settings.hooks).some((list) =>
+      list.some(
+        (entry) =>
+          !Array.isArray(entry.hooks) && typeof (entry as { command?: string }).command === 'string',
+      ),
+    );
+    expect(anyLegacy).toBe(false);
+
+    // The new scoped command is present.
+    expect(
+      settings.hooks.SessionStart?.some((group) =>
+        group.hooks?.some(
+          (entry) =>
+            entry.command === 'npx @shakystar/memorize hook claude SessionStart',
+        ),
+      ),
+    ).toBe(true);
   });
 
   it('installs Codex integration artifacts into the project', async () => {
@@ -161,7 +244,20 @@ describe('install integration', () => {
     await mkdir(join(sandbox, '.claude'), { recursive: true });
     await writeFile(
       join(sandbox, '.claude', 'settings.local.json'),
-      JSON.stringify({ hooks: { Other: [{ command: 'keep-me' }] } }, null, 2),
+      JSON.stringify(
+        {
+          hooks: {
+            Other: [
+              {
+                matcher: '',
+                hooks: [{ type: 'command', command: 'keep-me' }],
+              },
+            ],
+          },
+        },
+        null,
+        2,
+      ),
       'utf8',
     );
 
@@ -172,11 +268,19 @@ describe('install integration', () => {
 
     const settings = JSON.parse(
       await readFile(join(sandbox, '.claude', 'settings.local.json'), 'utf8'),
-    ) as { hooks: Record<string, Array<{ command: string }>> };
-    expect(settings.hooks.Other?.[0]?.command).toBe('keep-me');
+    ) as {
+      hooks: Record<
+        string,
+        Array<{ matcher?: string; hooks: Array<{ type: string; command: string }> }>
+      >;
+    };
+    expect(settings.hooks.Other?.[0]?.hooks[0]?.command).toBe('keep-me');
     expect(
-      settings.hooks.SessionStart?.filter(
-        (entry) => entry.command === 'npx @shakystar/memorize hook claude SessionStart',
+      settings.hooks.SessionStart?.filter((group) =>
+        group.hooks.some(
+          (entry) =>
+            entry.command === 'npx @shakystar/memorize hook claude SessionStart',
+        ),
       ).length,
     ).toBe(1);
 

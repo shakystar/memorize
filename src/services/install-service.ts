@@ -18,14 +18,89 @@ const CLAUDE_HOOK_COMMANDS = {
   Stop: 'npx @shakystar/memorize hook claude Stop',
 } as const;
 
-function ensureHookCommand(
-  list: Array<{ command: string }> | undefined,
+// Claude Code expects each hook event to hold an array of matcher
+// groups, where every group itself carries a `hooks` array of
+// `{ type, command }` entries. Our earlier shape
+// (`{ command }` only, no matcher, no `type`) is silently rejected at
+// launch with "hooks: Expected array, but received undefined".
+// See https://code.claude.com/docs/en/hooks for the schema.
+interface HookEntry {
+  type: 'command';
+  command: string;
+}
+
+interface HookMatcherGroup {
+  matcher?: string;
+  hooks: HookEntry[];
+}
+
+type HooksMap = Record<string, HookMatcherGroup[]>;
+
+function hookGroupHasCommand(group: HookMatcherGroup, command: string): boolean {
+  return (
+    (group.matcher ?? '') === '' &&
+    group.hooks.some((entry) => entry.command === command)
+  );
+}
+
+function ensureMemorizeCommand(
+  list: HookMatcherGroup[] | undefined,
   command: string,
-): Array<{ command: string }> {
+): HookMatcherGroup[] {
   const current = list ?? [];
-  return current.some((entry) => entry.command === command)
-    ? current
-    : [...current, { command }];
+  if (current.some((group) => hookGroupHasCommand(group, command))) {
+    return current;
+  }
+  return [
+    ...current,
+    {
+      matcher: '',
+      hooks: [{ type: 'command', command }],
+    },
+  ];
+}
+
+function coerceLegacyList(
+  raw: unknown,
+): HookMatcherGroup[] | undefined {
+  if (!Array.isArray(raw)) return undefined;
+  return raw
+    .map((entry): HookMatcherGroup | undefined => {
+      if (entry && typeof entry === 'object') {
+        const asGroup = entry as Partial<HookMatcherGroup> & {
+          command?: string;
+        };
+        if (Array.isArray(asGroup.hooks)) {
+          const hooks = asGroup.hooks
+            .filter(
+              (hook): hook is HookEntry =>
+                hook !== null &&
+                typeof hook === 'object' &&
+                typeof (hook as HookEntry).command === 'string',
+            )
+            .map((hook) => ({
+              type: 'command' as const,
+              command: hook.command,
+            }));
+          return {
+            ...(typeof asGroup.matcher === 'string'
+              ? { matcher: asGroup.matcher }
+              : { matcher: '' }),
+            hooks,
+          };
+        }
+        if (typeof asGroup.command === 'string') {
+          // Legacy shape: `{command: "..."}` only. Migrate in place so the
+          // file becomes Claude-Code-valid after re-running install.
+          return {
+            matcher: '',
+            hooks: [{ type: 'command', command: asGroup.command }],
+          };
+        }
+      }
+      return undefined;
+    })
+    .filter((group): group is HookMatcherGroup => group !== undefined);
 }
 
 export async function installClaudeIntegration(cwd: string): Promise<string> {
@@ -33,10 +108,10 @@ export async function installClaudeIntegration(cwd: string): Promise<string> {
   await fs.mkdir(claudeDir, { recursive: true });
 
   const settingsPath = path.join(claudeDir, 'settings.local.json');
-  let settings: { hooks?: Record<string, Array<{ command: string }>> } = {};
+  let settings: { hooks?: Record<string, unknown> } = {};
   try {
     settings = JSON.parse(await fs.readFile(settingsPath, 'utf8')) as {
-      hooks?: Record<string, Array<{ command: string }>>;
+      hooks?: Record<string, unknown>;
     };
   } catch (error) {
     if (!isEnoent(error)) {
@@ -44,24 +119,30 @@ export async function installClaudeIntegration(cwd: string): Promise<string> {
     }
   }
 
-  const hooks = settings.hooks ?? {};
+  const rawHooks = settings.hooks ?? {};
+  const migrated: HooksMap = {};
+  for (const [event, value] of Object.entries(rawHooks)) {
+    const groups = coerceLegacyList(value);
+    if (groups) migrated[event] = groups;
+  }
+
   const merged = {
     ...settings,
     hooks: {
-      ...hooks,
-      SessionStart: ensureHookCommand(
-        hooks.SessionStart,
+      ...migrated,
+      SessionStart: ensureMemorizeCommand(
+        migrated.SessionStart,
         CLAUDE_HOOK_COMMANDS.SessionStart,
       ),
-      PreCompact: ensureHookCommand(
-        hooks.PreCompact,
+      PreCompact: ensureMemorizeCommand(
+        migrated.PreCompact,
         CLAUDE_HOOK_COMMANDS.PreCompact,
       ),
-      PostCompact: ensureHookCommand(
-        hooks.PostCompact,
+      PostCompact: ensureMemorizeCommand(
+        migrated.PostCompact,
         CLAUDE_HOOK_COMMANDS.PostCompact,
       ),
-      Stop: ensureHookCommand(hooks.Stop, CLAUDE_HOOK_COMMANDS.Stop),
+      Stop: ensureMemorizeCommand(migrated.Stop, CLAUDE_HOOK_COMMANDS.Stop),
     },
   };
 

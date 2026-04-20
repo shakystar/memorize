@@ -94,7 +94,15 @@ async function checkClaudeInstall(
     if (isEnoent(error)) return undefined;
     throw error;
   }
-  let settings: { hooks?: Record<string, Array<{ command?: string }>> };
+  let settings: {
+    hooks?: Record<
+      string,
+      Array<{
+        hooks?: Array<{ command?: string }>;
+        command?: string;
+      }>
+    >;
+  };
   try {
     settings = JSON.parse(raw);
   } catch {
@@ -108,10 +116,37 @@ async function checkClaudeInstall(
   }
   const events = ['SessionStart', 'PreCompact', 'PostCompact', 'Stop'];
   const hooks = settings.hooks ?? {};
-  const missing = events.filter((event) => {
+
+  const hasLegacyShape = events.some((event) => {
     const list = hooks[event] ?? [];
-    return !list.some((entry) => /memorize\s+hook\s+claude/.test(entry.command ?? ''));
+    return list.some(
+      (entry) =>
+        entry &&
+        typeof entry.command === 'string' &&
+        !Array.isArray(entry.hooks),
+    );
   });
+  if (hasLegacyShape) {
+    return {
+      id: 'install.claude',
+      label: 'Claude hook integration',
+      status: 'error',
+      message:
+        'Legacy memorize hook shape detected. Claude Code rejects entries without a `matcher` + `hooks` array.',
+      fix: 'memorize install claude',
+    };
+  }
+
+  const commandPresent = (entry: {
+    hooks?: Array<{ command?: string }>;
+  }): boolean =>
+    (entry.hooks ?? []).some((inner) =>
+      /memorize\s+hook\s+claude/.test(inner.command ?? ''),
+    );
+
+  const missing = events.filter(
+    (event) => !(hooks[event] ?? []).some(commandPresent),
+  );
   if (missing.length === events.length) {
     return undefined;
   }
