@@ -2,7 +2,12 @@ import { describe, expect, it } from 'vitest';
 
 import { CURRENT_SCHEMA_VERSION } from '../../src/domain/common.js';
 import type { DomainEvent } from '../../src/domain/events.js';
-import { buildMemoryIndex, reduceProjectState } from '../../src/projections/projector.js';
+import {
+  MAX_RECENT_DECISIONS,
+  MAX_TOP_TASKS,
+  buildMemoryIndex,
+  reduceProjectState,
+} from '../../src/projections/projector.js';
 
 function makeEvent(overrides: Partial<DomainEvent>): DomainEvent {
   return {
@@ -116,4 +121,177 @@ describe('projector', () => {
     expect(index.topTasks).toHaveLength(1);
     expect(index.recentDecisions).toHaveLength(1);
   });
+
+  it('excludes done tasks from activeTaskIds and topTasks', () => {
+    const state = reduceProjectState([
+      projectCreated(),
+      taskEvent('task_open', 'in_progress', '2026-04-15T00:00:00.000Z'),
+      taskEvent('task_done', 'done', '2026-04-16T00:00:00.000Z'),
+    ]);
+
+    expect(state.project?.activeTaskIds).toEqual(['task_open']);
+
+    const index = buildMemoryIndex(state);
+    expect(index.topTasks.map((t) => t.id)).toEqual(['task_open']);
+  });
+
+  it('excludes closed workstreams from activeWorkstreamIds and activeWorkstreams', () => {
+    const state = reduceProjectState([
+      projectCreated(),
+      workstreamEvent('ws_open', 'active'),
+      workstreamEvent('ws_closed', 'closed'),
+    ]);
+
+    expect(state.project?.activeWorkstreamIds).toEqual(['ws_open']);
+
+    const index = buildMemoryIndex(state);
+    expect(index.activeWorkstreams.map((w) => w.id)).toEqual(['ws_open']);
+  });
+
+  it('includes only accepted decisions in recentDecisions, sorted by recency', () => {
+    const state = reduceProjectState([
+      projectCreated(),
+      decisionEvent('dec_proposed', 'proposed', '2026-04-10T00:00:00.000Z'),
+      decisionEvent('dec_rejected', 'rejected', '2026-04-11T00:00:00.000Z'),
+      decisionEvent('dec_old', 'accepted', '2026-04-12T00:00:00.000Z'),
+      decisionEvent('dec_new', 'accepted', '2026-04-15T00:00:00.000Z'),
+    ]);
+
+    const index = buildMemoryIndex(state);
+    expect(index.recentDecisions.map((d) => d.id)).toEqual([
+      'dec_new',
+      'dec_old',
+    ]);
+  });
+
+  it('caps topTasks and recentDecisions at their configured maximums', () => {
+    const taskEvents = Array.from({ length: MAX_TOP_TASKS + 5 }, (_, i) =>
+      taskEvent(
+        `task_${i}`,
+        'in_progress',
+        `2026-04-${String(10 + (i % 20)).padStart(2, '0')}T00:00:00.000Z`,
+      ),
+    );
+    const decisionEvents = Array.from(
+      { length: MAX_RECENT_DECISIONS + 5 },
+      (_, i) =>
+        decisionEvent(
+          `dec_${i}`,
+          'accepted',
+          `2026-04-${String(10 + (i % 20)).padStart(2, '0')}T00:00:00.000Z`,
+        ),
+    );
+    const state = reduceProjectState([
+      projectCreated(),
+      ...taskEvents,
+      ...decisionEvents,
+    ]);
+
+    const index = buildMemoryIndex(state);
+    expect(index.topTasks).toHaveLength(MAX_TOP_TASKS);
+    expect(index.recentDecisions).toHaveLength(MAX_RECENT_DECISIONS);
+  });
 });
+
+function projectCreated(): DomainEvent {
+  return makeEvent({
+    type: 'project.created',
+    payload: {
+      id: 'proj_1',
+      schemaVersion: CURRENT_SCHEMA_VERSION,
+      createdAt: '2026-04-11T00:00:00.000Z',
+      updatedAt: '2026-04-11T00:00:00.000Z',
+      title: 'Memorize',
+      summary: 'Shared context system',
+      goals: [],
+      status: 'active',
+      rootPath: '/tmp/memorize',
+      activeWorkstreamIds: [],
+      activeTaskIds: [],
+      acceptedDecisionIds: [],
+      ruleIds: [],
+    },
+  });
+}
+
+function taskEvent(
+  id: string,
+  status: 'todo' | 'in_progress' | 'blocked' | 'handoff_ready' | 'done',
+  updatedAt: string,
+): DomainEvent {
+  return makeEvent({
+    id: `evt_${id}`,
+    type: 'task.created',
+    scopeType: 'task',
+    scopeId: id,
+    payload: {
+      id,
+      schemaVersion: CURRENT_SCHEMA_VERSION,
+      createdAt: '2026-04-11T00:00:00.000Z',
+      updatedAt,
+      projectId: 'proj_1',
+      title: id,
+      description: id,
+      status,
+      priority: 'medium',
+      ownerType: 'unassigned',
+      goal: id,
+      acceptanceCriteria: [],
+      dependsOn: [],
+      contextRefIds: [],
+      decisionRefIds: [],
+      ruleRefIds: [],
+      openQuestions: [],
+      riskNotes: [],
+    },
+  });
+}
+
+function workstreamEvent(
+  id: string,
+  status: 'active' | 'paused' | 'closed',
+): DomainEvent {
+  return makeEvent({
+    id: `evt_${id}`,
+    type: 'workstream.created',
+    scopeType: 'workstream',
+    scopeId: id,
+    payload: {
+      id,
+      schemaVersion: CURRENT_SCHEMA_VERSION,
+      createdAt: '2026-04-11T00:00:00.000Z',
+      updatedAt: '2026-04-11T00:00:00.000Z',
+      projectId: 'proj_1',
+      title: id,
+      summary: id,
+      status,
+    },
+  });
+}
+
+function decisionEvent(
+  id: string,
+  status: 'proposed' | 'accepted' | 'superseded' | 'rejected',
+  updatedAt: string,
+): DomainEvent {
+  return makeEvent({
+    id: `evt_${id}`,
+    type: status === 'accepted' ? 'decision.accepted' : 'decision.proposed',
+    scopeType: 'project',
+    scopeId: id,
+    payload: {
+      id,
+      schemaVersion: CURRENT_SCHEMA_VERSION,
+      createdAt: '2026-04-11T00:00:00.000Z',
+      updatedAt,
+      scopeType: 'project',
+      scopeId: 'proj_1',
+      title: id,
+      decision: id,
+      rationale: id,
+      status,
+      relatedRuleIds: [],
+      createdBy: 'user',
+    },
+  });
+}

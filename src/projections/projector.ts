@@ -95,8 +95,12 @@ export function reduceProjectState(events: DomainEvent[]): ProjectState {
   if (state.project) {
     state.project = {
       ...state.project,
-      activeWorkstreamIds: Object.keys(state.workstreams),
-      activeTaskIds: Object.keys(state.tasks),
+      activeWorkstreamIds: Object.values(state.workstreams)
+        .filter((workstream) => workstream.status !== 'closed')
+        .map((workstream) => workstream.id),
+      activeTaskIds: Object.values(state.tasks)
+        .filter((task) => task.status !== 'done')
+        .map((task) => task.id),
       acceptedDecisionIds: Object.values(state.decisions)
         .filter((decision) => decision.status === 'accepted')
         .map((decision) => decision.id),
@@ -115,6 +119,13 @@ function applyTaskUpdate(task: Task, patch: Partial<Task>): Task {
   };
 }
 
+export const MAX_TOP_TASKS = 20;
+export const MAX_RECENT_DECISIONS = 20;
+
+function byUpdatedAtDesc<T extends { updatedAt: string }>(a: T, b: T): number {
+  return a.updatedAt < b.updatedAt ? 1 : a.updatedAt > b.updatedAt ? -1 : 0;
+}
+
 export function buildMemoryIndex(state: ProjectState): MemoryIndex {
   if (!state.project) {
     throw new Error('Cannot build memory index without a project');
@@ -124,26 +135,36 @@ export function buildMemoryIndex(state: ProjectState): MemoryIndex {
     schemaVersion: CURRENT_SCHEMA_VERSION,
     projectId: state.project.id,
     shortSummary: state.project.summary,
-    activeWorkstreams: Object.values(state.workstreams).map((workstream) => ({
-      id: workstream.id,
-      title: workstream.title,
-      summary: workstream.summary,
-      status: workstream.status,
-    })),
-    topTasks: Object.values(state.tasks).map((task) => ({
-      id: task.id,
-      title: task.title,
-      status: task.status,
-      priority: task.priority,
-      ...(task.latestHandoffId
-        ? { latestHandoffId: task.latestHandoffId }
-        : {}),
-    })),
-    recentDecisions: Object.values(state.decisions).map((decision) => ({
-      id: decision.id,
-      title: decision.title,
-      status: decision.status,
-    })),
+    activeWorkstreams: Object.values(state.workstreams)
+      .filter((workstream) => workstream.status !== 'closed')
+      .map((workstream) => ({
+        id: workstream.id,
+        title: workstream.title,
+        summary: workstream.summary,
+        status: workstream.status,
+      })),
+    topTasks: Object.values(state.tasks)
+      .filter((task) => task.status !== 'done')
+      .sort(byUpdatedAtDesc)
+      .slice(0, MAX_TOP_TASKS)
+      .map((task) => ({
+        id: task.id,
+        title: task.title,
+        status: task.status,
+        priority: task.priority,
+        ...(task.latestHandoffId
+          ? { latestHandoffId: task.latestHandoffId }
+          : {}),
+      })),
+    recentDecisions: Object.values(state.decisions)
+      .filter((decision) => decision.status === 'accepted')
+      .sort(byUpdatedAtDesc)
+      .slice(0, MAX_RECENT_DECISIONS)
+      .map((decision) => ({
+        id: decision.id,
+        title: decision.title,
+        status: decision.status,
+      })),
     openConflicts: Object.values(state.conflicts).map((conflict) => ({
       id: conflict.id,
       scopeType: conflict.scopeType,
