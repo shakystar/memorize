@@ -33,6 +33,43 @@ function runHook(
   );
 }
 
+function runCli(args: string[]): ReturnType<typeof spawnSync> {
+  return spawnSync('node', [tsxCliPath, cliEntryPath, ...args], {
+    cwd: sandbox,
+    encoding: 'utf8',
+    env: {
+      ...process.env,
+      MEMORIZE_ROOT: memorizeRoot,
+    },
+  });
+}
+
+// Stop hook's content guardrails (truncation, injection warnings) now
+// only fire on the path that actually persists a handoff — which
+// requires an active task. Bootstrap a task for tests that need to
+// exercise that path.
+function bootstrapProjectWithTask(): void {
+  const sessionStart = runHook(
+    'SessionStart',
+    JSON.stringify({
+      cwd: sandbox,
+      hook_event_name: 'SessionStart',
+      session_id: 'trust_session',
+    }),
+  );
+  if (sessionStart.status !== 0) {
+    throw new Error(
+      `SessionStart bootstrap failed: ${String(sessionStart.stderr)}`,
+    );
+  }
+  const taskCreate = runCli(['task', 'create', 'Trust boundary test task']);
+  if (taskCreate.status !== 0) {
+    throw new Error(
+      `task create bootstrap failed: ${String(taskCreate.stderr)}`,
+    );
+  }
+}
+
 beforeEach(async () => {
   sandbox = await mkdtemp(join(tmpdir(), 'memorize-hook-trust-'));
   memorizeRoot = join(sandbox, '.memorize-home');
@@ -50,6 +87,7 @@ afterEach(async () => {
 
 describe('hook stdin trust boundary', () => {
   it('handles invalid JSON without crashing', () => {
+    bootstrapProjectWithTask();
     const result = runHook('Stop', 'this is not valid json {{{');
     expect(result.status).toBe(0);
     expect(String(result.stderr)).toContain('not valid JSON');
@@ -65,6 +103,7 @@ describe('hook stdin trust boundary', () => {
   });
 
   it('ignores wrong-typed fields without throwing', () => {
+    bootstrapProjectWithTask();
     const result = runHook(
       'Stop',
       JSON.stringify({ last_assistant_message: 42, session_id: true }),
@@ -74,6 +113,7 @@ describe('hook stdin trust boundary', () => {
   });
 
   it('truncates oversized hook content and emits a warning', () => {
+    bootstrapProjectWithTask();
     const oversized = 'x'.repeat(MAX_HOOK_CONTENT_LENGTH + 10);
     const result = runHook(
       'Stop',

@@ -24,6 +24,17 @@ function runHook(eventName: string, stdinPayload: object) {
   });
 }
 
+function runCli(args: string[]) {
+  return spawnSync('node', [tsxCliPath, cliEntryPath, ...args], {
+    cwd: sandbox,
+    encoding: 'utf8',
+    env: {
+      ...process.env,
+      MEMORIZE_ROOT: memorizeRoot,
+    },
+  });
+}
+
 beforeEach(async () => {
   sandbox = await mkdtemp(join(tmpdir(), 'memorize-hook-lifecycle-'));
   memorizeRoot = join(sandbox, '.memorize-home');
@@ -74,13 +85,17 @@ describe('claude hook lifecycle', () => {
     expect(checkpointFiles.length).toBeGreaterThan(0);
   });
 
-  it('creates a handoff-ready artifact on Stop', async () => {
+  it('creates a handoff-ready artifact on Stop when an active task exists', async () => {
     const sessionStart = runHook('SessionStart', {
       cwd: sandbox,
       hook_event_name: 'SessionStart',
       session_id: 'session_2',
     });
     expect(sessionStart.status).toBe(0);
+
+    // Stop needs an active task to produce a meaningful handoff.
+    const taskCreate = runCli(['task', 'create', 'Test task']);
+    expect(taskCreate.status).toBe(0);
 
     const result = runHook('Stop', {
       cwd: sandbox,
@@ -104,5 +119,41 @@ describe('claude hook lifecycle', () => {
 
     const handoffContent = await readFile(join(handoffsDir, handoffFiles[0]!), 'utf8');
     expect(handoffContent).toContain('Finished the current pass');
+
+    // Regression guard: the handoff's taskId must match a memorize task
+    // id (task_*), not a Claude Code session UUID. A UUID-shaped taskId
+    // would orphan the handoff from the projection and hide it from
+    // `task resume`.
+    const parsed = JSON.parse(handoffContent) as { taskId: string };
+    expect(parsed.taskId).toMatch(/^task_[a-z0-9]+_[a-z0-9]+$/);
+  });
+
+  it('skips auto-handoff on Stop when no active task exists', async () => {
+    const sessionStart = runHook('SessionStart', {
+      cwd: sandbox,
+      hook_event_name: 'SessionStart',
+      session_id: 'session_3',
+    });
+    expect(sessionStart.status).toBe(0);
+
+    // No task created — Stop must bail out cleanly rather than forge a
+    // handoff whose taskId is a session UUID.
+    const result = runHook('Stop', {
+      cwd: sandbox,
+      hook_event_name: 'Stop',
+      session_id: 'session_3',
+      last_assistant_message: 'nothing to hand off',
+    });
+
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain('"systemMessage"');
+    expect(result.stdout).toContain('no active task');
+    expect(result.stdout).not.toContain('memorize: handoff');
+
+    const projectsRoot = join(memorizeRoot, 'projects');
+    const projectDirs = await readdir(projectsRoot);
+    const handoffsDir = join(projectsRoot, projectDirs[0]!, 'handoffs');
+    const handoffFiles = await readdir(handoffsDir).catch(() => []);
+    expect(handoffFiles.length).toBe(0);
   });
 });

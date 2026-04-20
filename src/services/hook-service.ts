@@ -167,8 +167,22 @@ export async function runClaudeHook(params: {
   if (params.eventName === 'Stop') {
     const payload = parseStopPayload(params.stdinPayload);
     const activeTaskId = await resolveActiveTaskId(projectId);
-    const sessionId =
-      payload.sessionId ?? (await getCurrentSessionId(params.cwd));
+
+    // Without an active task, there is nothing meaningful to hand off.
+    // Recording a handoff whose `taskId` is the session id (a UUID
+    // from Claude Code) produces an orphan that cannot be reached via
+    // the task → latestHandoffId projection, so the next startup
+    // payload silently omits it. Prefer explicit user action: if a
+    // handoff is wanted with no active task, the user / agent can
+    // still call `memorize task handoff` directly.
+    if (!activeTaskId) {
+      await endSession(params.cwd);
+      return JSON.stringify({
+        systemMessage:
+          'memorize: session ended (no active task, skipped auto-handoff)',
+      });
+    }
+
     const summary =
       prepareHookText(
         payload.lastAssistantMessage,
@@ -176,7 +190,7 @@ export async function runClaudeHook(params: {
       ) ?? 'No assistant message captured';
     const handoff = await createHandoff({
       projectId,
-      taskId: activeTaskId ?? sessionId,
+      taskId: activeTaskId,
       fromActor: 'claude',
       toActor: 'next-agent',
       summary,
