@@ -88,8 +88,8 @@ needs detail.
 - Completely remove memorize from a project:
   - delete `.memorize/` in your project
   - delete the memorize hooks from `.claude/settings.local.json`
-  - delete the `<!-- memorize:bootstrap v=1 start --> ... end -->` block
-    from `AGENTS.override.md`
+  - delete the memorize hook entries from `~/.codex/hooks.json`
+    (if you ran `install codex`)
   - optionally `rm -rf ~/.memorize` to clear durable state across
     all projects
 
@@ -171,6 +171,16 @@ no task lists, no summaries.**
    Both commands are safe to re-run and preserve unrelated content in
    the target files.
 
+   - `install claude` writes hook entries to `.claude/settings.local.json`
+     (per-project).
+   - `install codex` writes hook entries to `~/.codex/hooks.json`
+     (global — codex stores hooks per-user, not per-project). Memorize
+     entries are prepended so they run before any other registered
+     hooks; this is how memorize guarantees it is the source of truth
+     even when other orchestration layers (OMX, etc.) are installed.
+     The codex hook is a no-op in directories that are not bound to a
+     memorize project.
+
 4. **Verify**:
 
    ```sh
@@ -202,7 +212,7 @@ project setup        bind cwd + import AGENTS/CLAUDE/.cursorrules
 project show         print bound project JSON
 project sync         push/pull events to a remote path
 install claude       wire hooks into .claude/settings.local.json
-install codex        wire bootstrap block into AGENTS.override.md
+install codex        wire hook entries into ~/.codex/hooks.json
 task create          append task.created event
 task list            list tasks with optional --status/--workstream
 task show            print task JSON

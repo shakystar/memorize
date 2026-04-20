@@ -50,8 +50,13 @@ outputs as a cache that must be re-validated — not as authoritative.
    Safe to delete; `memorize projection rebuild` regenerates it.
 3. **Startup payload** is a small bundle built from the projection
    and rendered per-agent (`claude` vs `codex` formats differ).
-4. **Install hooks** wire your agent runtime (Claude Code / Codex) to
-   ask `memorize` for the startup payload whenever a session begins.
+4. **Install hooks** wire your agent runtime:
+   - Claude Code: `.claude/settings.local.json` (per-project).
+   - Codex: `~/.codex/hooks.json` (global per-user; the handler no-ops
+     when cwd is not a memorize-bound project).
+
+   In both cases the hook calls `memorize hook <agent> SessionStart`
+   and the output is injected as `hookSpecificOutput.additionalContext`.
 
 You interact with memorize through the CLI; never hand-edit
 `.memorize/` files.
@@ -261,17 +266,24 @@ appends its own command array entry, it does not overwrite.
 
 ### `memorize install codex`
 
-Idempotent. Writes a versioned managed block to
-`AGENTS.override.md` at the project root, delimited by
+Idempotent. Writes to `~/.codex/hooks.json` only.
 
-```
-<!-- memorize:bootstrap v=1 start -->
-...
-<!-- memorize:bootstrap v=1 end -->
-```
+- Adds memorize's `SessionStart` and `Stop` hook entries.
+- Memorize entries are **prepended** before any existing third-party
+  entries (OMX, etc.) so memorize context is established first.
+- Legacy `{command}`-only entries (if any) are migrated to the
+  current `{matcher, hooks: [{type, command}]}` shape in the same
+  pass.
+- On re-install, any pre-v0.2 `<!-- memorize:bootstrap v=1 ... -->`
+  block in `AGENTS.override.md` is stripped; the file is removed if
+  it becomes empty. Hooks are the authoritative contract now and the
+  in-repo bootstrap block was pure duplication.
 
-Content outside the markers is preserved. Re-running upgrades or
-refreshes the block in place.
+**Note: codex hooks are global.** `~/.codex/hooks.json` lives under
+your home directory, not in the project, so every codex session on
+your machine will invoke the memorize hook. In unrelated directories
+that are not bound to a memorize project, the hook resolves to a
+no-op (`{}`) — memorize is silent there.
 
 ### `memorize hook claude <EventName>`
 
