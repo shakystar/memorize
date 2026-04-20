@@ -68,4 +68,115 @@ describe('install codex hooks', () => {
       ),
     ).toBe(true);
   });
+
+  it('preserves existing third-party hooks and places memorize first', async () => {
+    const { mkdir, writeFile } = await import('node:fs/promises');
+    const hooksPath = join(codexHome, '.codex', 'hooks.json');
+    await mkdir(join(codexHome, '.codex'), { recursive: true });
+    await writeFile(
+      hooksPath,
+      JSON.stringify(
+        {
+          hooks: {
+            SessionStart: [
+              {
+                matcher: 'startup|resume',
+                hooks: [{ type: 'command', command: 'node /path/to/omx.js' }],
+              },
+            ],
+            Stop: [
+              {
+                hooks: [{ type: 'command', command: 'node /path/to/omx.js' }],
+              },
+            ],
+          },
+        },
+        null,
+        2,
+      ),
+      'utf8',
+    );
+
+    const result = runCli(['install', 'codex']);
+    expect(result.status).toBe(0);
+
+    const hooks = JSON.parse(await readFile(hooksPath, 'utf8')) as {
+      hooks: Record<
+        string,
+        Array<{ matcher?: string; hooks: Array<{ type: string; command: string }> }>
+      >;
+    };
+
+    const sessionStart = hooks.hooks.SessionStart!;
+    // Memorize first, OMX second.
+    expect(sessionStart[0]?.hooks[0]?.command).toContain(
+      'memorize hook codex SessionStart',
+    );
+    expect(sessionStart[1]?.hooks[0]?.command).toContain('omx.js');
+
+    const stop = hooks.hooks.Stop!;
+    expect(stop[0]?.hooks[0]?.command).toContain('memorize hook codex Stop');
+    expect(stop[1]?.hooks[0]?.command).toContain('omx.js');
+  });
+
+  it('is idempotent — a second install does not duplicate memorize entries', async () => {
+    const first = runCli(['install', 'codex']);
+    expect(first.status).toBe(0);
+    const second = runCli(['install', 'codex']);
+    expect(second.status).toBe(0);
+
+    const hooks = JSON.parse(
+      await readFile(join(codexHome, '.codex', 'hooks.json'), 'utf8'),
+    ) as {
+      hooks: Record<
+        string,
+        Array<{ hooks: Array<{ command: string }> }>
+      >;
+    };
+
+    const memorizeCount = (hooks.hooks.SessionStart ?? []).filter((group) =>
+      group.hooks.some((h) => h.command.includes('memorize hook codex')),
+    ).length;
+    expect(memorizeCount).toBe(1);
+  });
+
+  it('migrates legacy {command}-only entries to the matcher+hooks shape', async () => {
+    const { mkdir, writeFile } = await import('node:fs/promises');
+    const hooksPath = join(codexHome, '.codex', 'hooks.json');
+    await mkdir(join(codexHome, '.codex'), { recursive: true });
+    await writeFile(
+      hooksPath,
+      JSON.stringify(
+        {
+          hooks: {
+            SessionStart: [{ command: 'node /path/to/legacy.js' }],
+          },
+        },
+        null,
+        2,
+      ),
+      'utf8',
+    );
+
+    runCli(['install', 'codex']);
+
+    const hooks = JSON.parse(await readFile(hooksPath, 'utf8')) as {
+      hooks: Record<
+        string,
+        Array<{
+          matcher?: string;
+          hooks?: Array<{ type: string; command: string }>;
+          command?: string;
+        }>
+      >;
+    };
+
+    const anyLegacy = Object.values(hooks.hooks).some((list) =>
+      list.some(
+        (entry) =>
+          !Array.isArray(entry.hooks) && typeof entry.command === 'string',
+      ),
+    );
+    expect(anyLegacy).toBe(false);
+  });
 });
