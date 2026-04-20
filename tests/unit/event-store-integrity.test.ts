@@ -35,7 +35,7 @@ describe('event store integrity', () => {
       scopeType: 'task',
       scopeId: `task_${label}`,
       actor: 'test',
-      payload: { label },
+      payload: { title: label },
     });
   }
 
