@@ -240,4 +240,47 @@ describe('install integration', () => {
     );
     expect(override).toBe(content);
   });
+
+  it('doctor reports install.codex:ok after a clean install codex', () => {
+    runCli(['install', 'codex']);
+
+    const result = runCli(['doctor', '--json']);
+    const report = JSON.parse(String(result.stdout)) as {
+      checks: Array<{ id: string; status: string }>;
+    };
+    const codexCheck = report.checks.find((c) => c.id === 'install.codex');
+    expect(codexCheck?.status).toBe('ok');
+  });
+
+  it('doctor reports install.codex:warn when hooks.json exists but memorize hooks are missing', async () => {
+    runCli(['install', 'codex']);
+
+    const hooksPath = join(codexHome, '.codex', 'hooks.json');
+    const raw = JSON.parse(await readFile(hooksPath, 'utf8')) as {
+      hooks: Record<string, unknown[]>;
+    };
+    raw.hooks.SessionStart = [];
+    raw.hooks.Stop = [];
+    await writeFile(hooksPath, JSON.stringify(raw, null, 2), 'utf8');
+
+    const result = runCli(['doctor', '--json']);
+    const report = JSON.parse(String(result.stdout)) as {
+      checks: Array<{ id: string; status: string; message: string }>;
+    };
+    const codexCheck = report.checks.find((c) => c.id === 'install.codex');
+    expect(codexCheck?.status).toBe('warn');
+    expect(codexCheck?.message).toMatch(/memorize hooks/);
+  });
+
+  it('doctor omits install.codex when no ~/.codex/hooks.json exists at all', () => {
+    // Fresh project, no install codex run.
+    runCli(['install', 'claude']);  // bind project; doctor needs a bound project to run most checks.
+    // But note: the key fact is no install codex was run. codexHome exists (mkdtemp made it)
+    // but ~/.codex/hooks.json doesn't.
+    const result = runCli(['doctor', '--json']);
+    const report = JSON.parse(String(result.stdout)) as {
+      checks: Array<{ id: string }>;
+    };
+    expect(report.checks.find((c) => c.id === 'install.codex')).toBeUndefined();
+  });
 });

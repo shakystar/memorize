@@ -1,4 +1,5 @@
 import fs from 'node:fs/promises';
+import os from 'node:os';
 import path from 'node:path';
 
 import { readEventsWithIntegrity } from '../storage/event-store.js';
@@ -168,25 +169,72 @@ async function checkClaudeInstall(
 }
 
 async function checkCodexInstall(
-  cwd: string,
+  _cwd: string,
 ): Promise<DoctorCheck | undefined> {
-  const overridePath = path.join(cwd, 'AGENTS.override.md');
-  let content: string;
+  const hooksPath = path.join(os.homedir(), '.codex', 'hooks.json');
+  let raw: string;
   try {
-    content = await fs.readFile(overridePath, 'utf8');
+    raw = await fs.readFile(hooksPath, 'utf8');
   } catch (error) {
     if (isEnoent(error)) return undefined;
     throw error;
   }
-  const hasMarker =
-    content.includes('<!-- memorize:bootstrap v=1 start -->') &&
-    content.includes('<!-- memorize:bootstrap v=1 end -->');
-  if (!hasMarker) return undefined;
+
+  let parsed: {
+    hooks?: Record<
+      string,
+      Array<{ hooks?: Array<{ command?: string }> }>
+    >;
+  };
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return {
+      id: 'install.codex',
+      label: 'Codex integration',
+      status: 'warn',
+      message: '~/.codex/hooks.json is not valid JSON',
+      fix: 'memorize install codex',
+    };
+  }
+
+  const events = ['SessionStart', 'Stop'];
+  const hooks = parsed.hooks ?? {};
+  const missing = events.filter((event) => {
+    const list = hooks[event] ?? [];
+    return !list.some((group) =>
+      (group.hooks ?? []).some((h) =>
+        /memorize\s+hook\s+codex/.test(h.command ?? ''),
+      ),
+    );
+  });
+
+  if (missing.length === events.length) {
+    // hooks.json exists for some other reason (OMX etc.) but memorize
+    // hooks are absent — surface a warn so the user notices.
+    return {
+      id: 'install.codex',
+      label: 'Codex integration',
+      status: 'warn',
+      message:
+        'Missing memorize hooks in ~/.codex/hooks.json (SessionStart, Stop)',
+      fix: 'memorize install codex',
+    };
+  }
+  if (missing.length > 0) {
+    return {
+      id: 'install.codex',
+      label: 'Codex integration',
+      status: 'warn',
+      message: `Missing memorize hooks for ${missing.join(', ')}`,
+      fix: 'memorize install codex',
+    };
+  }
   return {
     id: 'install.codex',
-    label: 'Codex bootstrap block',
+    label: 'Codex integration',
     status: 'ok',
-    message: 'memorize managed block present in AGENTS.override.md',
+    message: 'memorize SessionStart + Stop hooks registered in ~/.codex/hooks.json',
   };
 }
 
