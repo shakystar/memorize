@@ -232,3 +232,41 @@ export async function runClaudeHook(params: {
   // PostToolUse, SessionStart), so do not include it here.
   return JSON.stringify({});
 }
+
+export async function runCodexHook(params: {
+  eventName: string;
+  cwd: string;
+  stdinPayload?: string;
+}): Promise<string> {
+  // Codex hooks are registered globally in ~/.codex/hooks.json, so every
+  // codex session triggers them regardless of project. The handler must
+  // no-op fast when the cwd does not resolve to a memorize-bound project
+  // (via walk-up) so we do not pollute unrelated codex sessions. Note:
+  // unlike runClaudeHook, we use getBoundProjectId — never ensureProjectId
+  // — so memorize never auto-creates state from a codex hook.
+  const projectId = await getBoundProjectId(params.cwd);
+  if (!projectId) {
+    return JSON.stringify({});
+  }
+
+  if (params.eventName === 'SessionStart') {
+    return handleSessionStart({
+      projectId,
+      agent: 'codex',
+      cwd: params.cwd,
+    });
+  }
+
+  if (params.eventName === 'Stop') {
+    return handleStop({
+      projectId,
+      agent: 'codex',
+      cwd: params.cwd,
+      rawPayload: params.stdinPayload,
+    });
+  }
+
+  // PreToolUse / PostToolUse / UserPromptSubmit — not used yet.
+  // Return empty object so codex's hook validator accepts the output.
+  return JSON.stringify({});
+}
