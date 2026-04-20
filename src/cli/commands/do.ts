@@ -1,10 +1,9 @@
+import { isConfidence, type Confidence } from '../../domain/entities.js';
 import { runWorkflow, type WorkflowOptions } from '../../workflows/macros/run.js';
 import { parseIntent } from '../../workflows/router.js';
 import type { CliContext } from '../context.js';
 import { runInteractiveDo } from '../do-interactive.js';
 import { parseFlags } from '../parse-flags.js';
-
-const CONFIDENCE_VALUES = ['low', 'medium', 'high'] as const;
 
 export async function runDoCommand(
   args: string[],
@@ -37,10 +36,7 @@ export async function runDoCommand(
   }
 
   const confidenceRaw = flags.single.confidence;
-  if (
-    confidenceRaw &&
-    !(CONFIDENCE_VALUES as readonly string[]).includes(confidenceRaw)
-  ) {
+  if (confidenceRaw && !isConfidence(confidenceRaw)) {
     throw new Error('--confidence must be one of low|medium|high.');
   }
 
@@ -50,9 +46,7 @@ export async function runDoCommand(
     ...(flags.single.from ? { fromActor: flags.single.from } : {}),
     ...(flags.single.to ? { toActor: flags.single.to } : {}),
     ...(flags.single.session ? { sessionId: flags.single.session } : {}),
-    ...(confidenceRaw
-      ? { confidence: confidenceRaw as 'low' | 'medium' | 'high' }
-      : {}),
+    ...(confidenceRaw ? { confidence: confidenceRaw as Confidence } : {}),
     ...(flags.multi.done ? { doneItems: flags.multi.done } : {}),
     ...(flags.multi.remaining
       ? { remainingItems: flags.multi.remaining }

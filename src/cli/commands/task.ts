@@ -1,4 +1,8 @@
-import type { Task } from '../../domain/entities.js';
+import {
+  isConfidence,
+  type Confidence,
+  type Task,
+} from '../../domain/entities.js';
 import { loadStartContext } from '../../services/context-service.js';
 import {
   requireBoundProjectId,
@@ -136,17 +140,10 @@ export async function runTaskCommand(
     if (!summary) throw new Error('--summary is required for task handoff.');
     if (!nextAction) throw new Error('--next is required for task handoff.');
     const confidenceRaw = flags.single.confidence;
-    if (
-      confidenceRaw &&
-      !['low', 'medium', 'high'].includes(confidenceRaw)
-    ) {
+    if (confidenceRaw && !isConfidence(confidenceRaw)) {
       throw new Error('--confidence must be one of low|medium|high.');
     }
-    const confidence = confidenceRaw as
-      | 'low'
-      | 'medium'
-      | 'high'
-      | undefined;
+    const confidence = confidenceRaw as Confidence | undefined;
     const handoff = await createHandoff({
       projectId,
       taskId: resolvedTaskId,

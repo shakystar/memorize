@@ -19,9 +19,11 @@ export {
   createTask,
 } from './entities/task.js';
 export {
+  CONFIDENCE_VALUES,
   type Confidence,
   type Handoff,
   createHandoff,
+  isConfidence,
 } from './entities/handoff.js';
 export {
   type Checkpoint,

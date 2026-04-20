@@ -1,6 +1,7 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 
+import { createId, nowIso } from '../domain/common.js';
 import { isEnoent, readJson, writeJson } from '../storage/fs-utils.js';
 
 export const SESSION_ENV_VAR = 'MEMORIZE_SESSION_ID';
@@ -15,19 +16,14 @@ function currentSessionFile(cwd: string): string {
   return path.join(cwd, '.memorize', 'current-session.json');
 }
 
-function createSessionId(): string {
-  const random = Math.random().toString(36).slice(2, 10);
-  return `session_${Date.now().toString(36)}_${random}`;
-}
-
 export async function startSession(
   cwd: string,
   startedBy?: string,
 ): Promise<string> {
-  const sessionId = createSessionId();
+  const sessionId = createId('session');
   const payload: CurrentSessionFile = {
     sessionId,
-    startedAt: new Date().toISOString(),
+    startedAt: nowIso(),
     ...(startedBy ? { startedBy } : {}),
   };
   await writeJson(currentSessionFile(cwd), payload);

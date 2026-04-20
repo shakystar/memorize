@@ -1,7 +1,12 @@
 import type { BaseEntity, EntityId } from '../common.js';
 import { baseEntity } from './base.js';
 
-export type Confidence = 'low' | 'medium' | 'high';
+export const CONFIDENCE_VALUES = ['low', 'medium', 'high'] as const;
+export type Confidence = (typeof CONFIDENCE_VALUES)[number];
+
+export function isConfidence(value: string): value is Confidence {
+  return (CONFIDENCE_VALUES as readonly string[]).includes(value);
+}
 
 export interface Handoff extends BaseEntity {
   projectId: EntityId;

@@ -1,18 +1,15 @@
 import readline from 'node:readline/promises';
 import { stdin as input, stdout as output } from 'node:process';
 
+import {
+  type Confidence,
+  isConfidence,
+} from '../domain/entities.js';
 import { HANDOFF_INTENT_NOTICE } from '../workflows/macros/handoff-task.js';
 import type { ResolvedIntent } from '../workflows/intents.js';
 import { runWorkflow, type WorkflowOptions } from '../workflows/macros/run.js';
 
 type Rl = readline.Interface;
-
-const CONFIDENCE_VALUES = ['low', 'medium', 'high'] as const;
-type Confidence = (typeof CONFIDENCE_VALUES)[number];
-
-function isConfidence(value: string): value is Confidence {
-  return (CONFIDENCE_VALUES as readonly string[]).includes(value);
-}
 
 async function collectLines(rl: Rl, label: string): Promise<string[]> {
   output.write(`${label} (one per line, empty line to finish):\n`);
