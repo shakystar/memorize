@@ -3,6 +3,7 @@ import path from 'node:path';
 import { createFileSyncTransport } from '../../adapters/sync-transport-file.js';
 import {
   createProject,
+  getBoundProjectId,
   readProject,
   readSyncState,
   requireBoundProjectId,
@@ -27,6 +28,15 @@ export async function runProjectCommand(
   const { cwd } = ctx;
 
   if (subcommand === 'init') {
+    const flags = parseFlags(args.slice(1), { boolean: ['force'] });
+    const existingProjectId = await getBoundProjectId(cwd);
+    if (existingProjectId && !flags.boolean.force) {
+      throw new Error(
+        `Directory is already bound to project ${existingProjectId}. ` +
+          `Run \`memorize project setup\` to adopt the existing project, ` +
+          `or pass --force to overwrite the binding with a new project.`,
+      );
+    }
     const project = await createProject({
       title: path.basename(cwd),
       rootPath: cwd,
