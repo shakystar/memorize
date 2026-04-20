@@ -61,4 +61,31 @@ describe('codex hook runtime', () => {
       'Small commits only',
     );
   });
+
+  it('returns an empty object when cwd is not a memorize-bound project', () => {
+    // No `project setup` — cwd has no binding.
+    const result = runCli(
+      ['hook', 'codex', 'SessionStart'],
+      JSON.stringify({
+        cwd: sandbox,
+        hook_event_name: 'SessionStart',
+        session_id: 'codex-test-unbound',
+      }),
+    );
+
+    expect(result.status).toBe(0);
+    expect(String(result.stdout).trim()).toBe('{}');
+  });
+
+  it('returns an empty object for unknown hook events', () => {
+    runCli(['project', 'setup']);
+
+    const result = runCli(
+      ['hook', 'codex', 'PreToolUse'],
+      JSON.stringify({ cwd: sandbox, hook_event_name: 'PreToolUse' }),
+    );
+
+    expect(result.status).toBe(0);
+    expect(String(result.stdout).trim()).toBe('{}');
+  });
 });
