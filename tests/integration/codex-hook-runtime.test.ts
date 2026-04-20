@@ -88,4 +88,56 @@ describe('codex hook runtime', () => {
     expect(result.status).toBe(0);
     expect(String(result.stdout).trim()).toBe('{}');
   });
+
+  it('records a handoff on Stop when an active task exists', async () => {
+    runCli(['project', 'setup']);
+    const taskCreate = runCli(['task', 'create', 'Codex stop test']);
+    expect(taskCreate.status).toBe(0);
+
+    const result = runCli(
+      ['hook', 'codex', 'Stop'],
+      JSON.stringify({
+        cwd: sandbox,
+        hook_event_name: 'Stop',
+        session_id: 'codex-test-stop',
+        last_assistant_message: 'Finished drafting the plan.',
+      }),
+    );
+
+    expect(result.status).toBe(0);
+    expect(String(result.stdout)).toContain('"systemMessage"');
+    expect(String(result.stdout)).toContain('memorize: handoff');
+
+    const projectsRoot = join(memorizeRoot, 'projects');
+    const { readdir, readFile } = await import('node:fs/promises');
+    const projectDirs = await readdir(projectsRoot);
+    const handoffsDir = join(projectsRoot, projectDirs[0]!, 'handoffs');
+    const files = await readdir(handoffsDir);
+    expect(files.length).toBe(1);
+
+    const content = await readFile(join(handoffsDir, files[0]!), 'utf8');
+    const parsed = JSON.parse(content) as {
+      fromActor: string;
+      taskId: string;
+    };
+    expect(parsed.fromActor).toBe('codex');
+    expect(parsed.taskId).toMatch(/^task_[a-z0-9]+_[a-z0-9]+$/);
+  });
+
+  it('skips auto-handoff on Stop when no active task exists', async () => {
+    runCli(['project', 'setup']);
+
+    const result = runCli(
+      ['hook', 'codex', 'Stop'],
+      JSON.stringify({
+        cwd: sandbox,
+        hook_event_name: 'Stop',
+        session_id: 'codex-test-no-task',
+      }),
+    );
+
+    expect(result.status).toBe(0);
+    expect(String(result.stdout)).toContain('no active task');
+    expect(String(result.stdout)).not.toContain('memorize: handoff');
+  });
 });
