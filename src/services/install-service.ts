@@ -1,6 +1,8 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 
+import { isEnoent } from '../storage/fs-utils.js';
+
 const CLAUDE_HOOK_COMMANDS = {
   SessionStart: 'memorize hook claude SessionStart',
   PreCompact: 'memorize hook claude PreCompact',
@@ -29,7 +31,7 @@ export async function installClaudeIntegration(cwd: string): Promise<string> {
       hooks?: Record<string, Array<{ command: string }>>;
     };
   } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
+    if (!isEnoent(error)) {
       throw error;
     }
   }
@@ -169,7 +171,7 @@ export async function installCodexIntegration(cwd: string): Promise<string> {
   try {
     existing = await fs.readFile(overridePath, 'utf8');
   } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
+    if (!isEnoent(error)) {
       throw error;
     }
   }

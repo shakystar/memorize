@@ -2,47 +2,35 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 
 import { readEventsWithIntegrity } from '../storage/event-store.js';
-import { readJson } from '../storage/fs-utils.js';
+import { isEnoent, readJson } from '../storage/fs-utils.js';
 import {
   getMemoryIndexFile,
   getProjectRoot,
 } from '../storage/path-resolver.js';
 import { rebuildProjectProjection } from './projection-store.js';
-import { getBoundProjectId, readProject } from './project-service.js';
+import { getBoundProjectId, readProject, requireBoundProjectId } from './project-service.js';
 
 export async function inspectProject(cwd: string): Promise<string> {
-  const projectId = await getBoundProjectId(cwd);
-  if (!projectId) {
-    throw new Error('No project bound to current directory.');
-  }
+  const projectId = await requireBoundProjectId(cwd);
   const project = await readProject(projectId);
   return JSON.stringify(project, null, 2);
 }
 
 export async function rebuildProjection(cwd: string): Promise<string> {
-  const projectId = await getBoundProjectId(cwd);
-  if (!projectId) {
-    throw new Error('No project bound to current directory.');
-  }
+  const projectId = await requireBoundProjectId(cwd);
   await rebuildProjectProjection(projectId);
   return 'Projection rebuild complete';
 }
 
 export async function rebuildMemoryIndex(cwd: string): Promise<string> {
-  const projectId = await getBoundProjectId(cwd);
-  if (!projectId) {
-    throw new Error('No project bound to current directory.');
-  }
+  const projectId = await requireBoundProjectId(cwd);
   await rebuildProjectProjection(projectId);
   const memoryIndex = await readJson(getMemoryIndexFile(projectId));
   return memoryIndex ? 'Memory index rebuild complete' : 'Memory index missing';
 }
 
 export async function validateEvents(cwd: string): Promise<string> {
-  const projectId = await getBoundProjectId(cwd);
-  if (!projectId) {
-    throw new Error('No project bound to current directory.');
-  }
+  const projectId = await requireBoundProjectId(cwd);
   const { events, corruptLines } = await readEventsWithIntegrity(projectId);
   if (events.length === 0 && corruptLines.length === 0) {
     throw new Error('No events found for project.');
@@ -108,7 +96,7 @@ async function checkGitRedactionRisk(
   try {
     gitignore = await fs.readFile(path.join(cwd, '.gitignore'), 'utf8');
   } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+    if (!isEnoent(error)) throw error;
   }
 
   if (gitignoreHasMemorize(gitignore)) {

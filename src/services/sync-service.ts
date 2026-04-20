@@ -11,7 +11,7 @@ import type {
 } from '../domain/sync-protocol.js';
 import type { SyncTransport } from './sync-transport.js';
 import { appendEvent, readEvents } from '../storage/event-store.js';
-import { appendLine, readJson, withFileLock, writeJson } from '../storage/fs-utils.js';
+import { appendLine, isEnoent, readJson, withFileLock, writeJson } from '../storage/fs-utils.js';
 import {
   getSyncFile,
   getSyncInboundFile,
@@ -123,7 +123,7 @@ export async function drainInbound(
     }
     return events;
   } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+    if (isEnoent(error)) {
       return [];
     }
     throw error;
@@ -138,7 +138,7 @@ export async function markPulled(
   try {
     await fs.writeFile(filePath, '', 'utf8');
   } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
+    if (!isEnoent(error)) {
       throw error;
     }
   }

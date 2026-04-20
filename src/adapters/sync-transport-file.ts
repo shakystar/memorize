@@ -8,6 +8,7 @@ import type {
   SyncPushRequest,
   SyncPushResponse,
 } from '../domain/sync-protocol.js';
+import { isEnoent } from '../storage/fs-utils.js';
 import type { SyncTransport } from '../services/sync-transport.js';
 
 function remoteEventsFile(remoteRoot: string, remoteProjectId: string): string {
@@ -25,7 +26,7 @@ async function readAllRemoteEvents(
       .filter((line) => line.length > 0)
       .map((line) => JSON.parse(line) as DomainEvent);
   } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+    if (isEnoent(error)) {
       return [];
     }
     throw error;

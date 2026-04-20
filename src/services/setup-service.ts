@@ -3,6 +3,7 @@ import path from 'node:path';
 
 import type { Project, Rule } from '../domain/entities.js';
 import { createConflict, createRule } from '../domain/entities.js';
+import { isEnoent } from '../storage/fs-utils.js';
 import { appendEvent } from '../storage/event-store.js';
 import { rebuildProjectProjection } from './projection-store.js';
 import {
@@ -21,7 +22,7 @@ async function readIfExists(filePath: string): Promise<string | undefined> {
   try {
     return await fs.readFile(filePath, 'utf8');
   } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+    if (isEnoent(error)) {
       return undefined;
     }
     throw error;
@@ -65,7 +66,7 @@ async function discoverContextFiles(
       });
     }
   } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
+    if (!isEnoent(error)) {
       throw error;
     }
   }

@@ -7,7 +7,7 @@ import type {
   DomainEventPayload,
   DomainEventType,
 } from '../domain/events.js';
-import { appendLine, ensureDir, withFileLock } from './fs-utils.js';
+import { appendLine, ensureDir, isEnoent, withFileLock } from './fs-utils.js';
 import { getEventsFile, getProjectRoot } from './path-resolver.js';
 
 export interface AppendEventInput<TPayload extends DomainEventPayload> {
@@ -83,7 +83,7 @@ export async function readEventsWithIntegrity(
       .filter((file) => file.endsWith('.ndjson'))
       .sort();
   } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return result;
+    if (isEnoent(error)) return result;
     throw error;
   }
 
@@ -92,7 +92,7 @@ export async function readEventsWithIntegrity(
     try {
       raw = await fs.readFile(path.join(eventsDir, file), 'utf8');
     } catch (error) {
-      if ((error as NodeJS.ErrnoException).code === 'ENOENT') continue;
+      if (isEnoent(error)) continue;
       throw error;
     }
     const lines = raw.split('\n');

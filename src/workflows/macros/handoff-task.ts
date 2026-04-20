@@ -1,5 +1,5 @@
 import {
-  getBoundProjectId,
+  requireBoundProjectId,
   resolveActiveTaskId,
 } from '../../services/project-service.js';
 import { createHandoff } from '../../services/task-service.js';
@@ -38,10 +38,7 @@ export async function handoffTaskWorkflow(
   targetActor?: string,
   options: HandoffWorkflowOptions = {},
 ): Promise<string> {
-  const projectId = await getBoundProjectId(cwd);
-  if (!projectId) {
-    throw new Error('No project bound to current directory.');
-  }
+  const projectId = await requireBoundProjectId(cwd);
 
   const activeTaskId = await resolveActiveTaskId(projectId);
   if (!activeTaskId) {

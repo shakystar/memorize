@@ -1,7 +1,7 @@
 import type { Task } from '../../domain/entities.js';
 import { loadStartContext } from '../../services/context-service.js';
 import {
-  getBoundProjectId,
+  requireBoundProjectId,
   resolveActiveTaskId,
 } from '../../services/project-service.js';
 import { getCurrentSessionId } from '../../services/session-service.js';
@@ -29,8 +29,7 @@ export async function runTaskCommand(
   args: string[],
   ctx: CliContext,
 ): Promise<void> {
-  const projectId = await getBoundProjectId(ctx.cwd);
-  if (!projectId) throw new Error('No project bound to current directory.');
+  const projectId = await requireBoundProjectId(ctx.cwd);
   const subcommand = args[0];
 
   if (subcommand === 'create') {

@@ -1,6 +1,10 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 
+export function isEnoent(error: unknown): boolean {
+  return (error as NodeJS.ErrnoException | undefined)?.code === 'ENOENT';
+}
+
 export async function ensureDir(targetPath: string): Promise<void> {
   await fs.mkdir(targetPath, { recursive: true });
 }
@@ -91,7 +95,20 @@ export async function readJson<T>(filePath: string): Promise<T | undefined> {
     const raw = await fs.readFile(filePath, 'utf8');
     return JSON.parse(raw) as T;
   } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+    if (isEnoent(error)) {
+      return undefined;
+    }
+    throw error;
+  }
+}
+
+export async function readText(
+  filePath: string,
+): Promise<string | undefined> {
+  try {
+    return await fs.readFile(filePath, 'utf8');
+  } catch (error) {
+    if (isEnoent(error)) {
       return undefined;
     }
     throw error;

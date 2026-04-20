@@ -7,7 +7,7 @@ import type {
   StartupContextPayload,
   Workstream,
 } from '../domain/entities.js';
-import { readJson } from '../storage/fs-utils.js';
+import { isEnoent, readJson } from '../storage/fs-utils.js';
 import {
   getMemoryIndexFile,
   getProjectRoot,
@@ -34,7 +34,7 @@ async function readOpenConflicts(projectId: string): Promise<Conflict[]> {
         Boolean(conflict && conflict.status !== 'resolved'),
     );
   } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+    if (isEnoent(error)) {
       return [];
     }
     throw error;

@@ -3,9 +3,9 @@ import path from 'node:path';
 import { createFileSyncTransport } from '../../adapters/sync-transport-file.js';
 import {
   createProject,
-  getBoundProjectId,
   readProject,
   readSyncState,
+  requireBoundProjectId,
 } from '../../services/project-service.js';
 import { inspectProject } from '../../services/repair-service.js';
 import { setupProject } from '../../services/setup-service.js';
@@ -44,8 +44,7 @@ export async function runProjectCommand(
   }
 
   if (subcommand === 'show') {
-    const projectId = await getBoundProjectId(cwd);
-    if (!projectId) throw new Error('No project bound to current directory.');
+    const projectId = await requireBoundProjectId(cwd);
     const project = await readProject(projectId);
     console.log(JSON.stringify(project, null, 2));
     return;
@@ -57,8 +56,7 @@ export async function runProjectCommand(
   }
 
   if (subcommand === 'sync') {
-    const projectId = await getBoundProjectId(cwd);
-    if (!projectId) throw new Error('No project bound to current directory.');
+    const projectId = await requireBoundProjectId(cwd);
     const flags = parseFlags(args.slice(1), {
       single: ['remote-path', 'bind'],
       boolean: ['push', 'pull'],

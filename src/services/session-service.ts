@@ -1,7 +1,7 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 
-import { readJson, writeJson } from '../storage/fs-utils.js';
+import { isEnoent, readJson, writeJson } from '../storage/fs-utils.js';
 
 export const SESSION_ENV_VAR = 'MEMORIZE_SESSION_ID';
 
@@ -39,7 +39,7 @@ export async function endSession(cwd: string): Promise<void> {
   try {
     await fs.unlink(currentSessionFile(cwd));
   } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
+    if (!isEnoent(error)) {
       throw error;
     }
   }

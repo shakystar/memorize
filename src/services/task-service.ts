@@ -2,7 +2,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 
 import { appendEvent } from '../storage/event-store.js';
-import { readJson } from '../storage/fs-utils.js';
+import { isEnoent, readJson } from '../storage/fs-utils.js';
 import {
   getCheckpointFile,
   getHandoffFile,
@@ -201,7 +201,7 @@ export async function listTasks(
       entry.endsWith('.json'),
     );
   } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+    if (isEnoent(error)) {
       return [];
     }
     throw error;

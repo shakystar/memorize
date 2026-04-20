@@ -57,6 +57,14 @@ export async function getBoundProjectId(
   return resolveProjectIdForPath(rootPath);
 }
 
+export async function requireBoundProjectId(rootPath: string): Promise<string> {
+  const projectId = await getBoundProjectId(rootPath);
+  if (!projectId) {
+    throw new Error('No project bound to current directory.');
+  }
+  return projectId;
+}
+
 export async function readProject(projectId: string): Promise<Project | undefined> {
   return readJson<Project>(getProjectFile(projectId));
 }
