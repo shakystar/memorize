@@ -36,11 +36,11 @@ You interact with memorize through the CLI; never hand-edit
 
 ```
 <MEMORIZE_ROOT>/
-├── bindings.json                    # path → projectId (walk-up resolved)
+├── profile/
+│   └── bindings.json                # path → projectId (walk-up resolved)
 └── projects/
     └── <projectId>/
         ├── project.json             # projection (rebuilt from events)
-        ├── sync.json                # sync state
         ├── memory-index.json        # derived summary index
         ├── events/
         │   └── YYYY-MM-DD.ndjson    # append-only, integrity-checked
@@ -50,11 +50,15 @@ You interact with memorize through the CLI; never hand-edit
         ├── checkpoints/<id>.json
         ├── decisions/<id>.json
         ├── rules/<id>.json
-        └── conflicts/<id>.json
+        ├── conflicts/<id>.json
+        ├── topics/<topicId>.md
+        └── sync/
+            ├── remote.json          # sync state
+            └── inbound.ndjson       # pending remote events
 ```
 
 Defaults: `MEMORIZE_ROOT` env overrides the location; if unset,
-memorize uses `<os.homedir()>/.memorize-home`. Set `MEMORIZE_ROOT`
+memorize uses `<os.homedir()>/.memorize`. Set `MEMORIZE_ROOT`
 when running tests or in CI to isolate state.
 
 In the user's project directory, a small `.memorize/` may also appear
@@ -291,7 +295,7 @@ hooks). `install` is the supported path.
 
 | Symptom | Likely cause | Fix |
 |---|---|---|
-| `No project bound to current directory.` | `project setup` never ran, or `~/.memorize-home/bindings.json` was deleted | From the project root, run `memorize project setup` |
+| `No project bound to current directory.` | `project setup` never ran, or `~/.memorize/profile/bindings.json` was deleted | From the project root, run `memorize project setup` |
 | `Directory is already bound to project proj_...` | `project init` re-run on a bound dir | Use `memorize project setup` (idempotent) or `--force` |
 | Claude session shows no context | Install incomplete or `.claude/settings.local.json` edited | `memorize doctor` → check `hook.*` rows → re-run `memorize install claude` |
 | `task list` empty but you created tasks elsewhere | Different cwd resolves to a different project | Run `memorize project show` to confirm the project id and cd to the right root |

@@ -51,7 +51,7 @@ npx memorize doctor
 - `.memorize/` under your project holds per-project runtime state
   (current session, bootstrap files). **Add `.memorize/` to your
   `.gitignore`**; `doctor` warns if it is not.
-- The durable event log lives under `~/.memorize-home/` by default.
+- The durable event log lives under `~/.memorize/` by default.
   Override with the `MEMORIZE_ROOT` environment variable if you want a
   different location.
 
@@ -90,7 +90,7 @@ needs detail.
   - delete the memorize hooks from `.claude/settings.local.json`
   - delete the `<!-- memorize:bootstrap v=1 start --> ... end -->` block
     from `AGENTS.override.md`
-  - optionally `rm -rf ~/.memorize-home` to clear durable state across
+  - optionally `rm -rf ~/.memorize` to clear durable state across
     all projects
 
 ## For AI assistants
@@ -100,18 +100,36 @@ asked you to set up memorize in this project. Follow these steps
 exactly. Every command is idempotent — if a step fails partway, re-run
 it; do not hand-edit `.memorize/` or the generated config files.
 
-1. **Add the package** as a dev dependency:
+1. **Make `memorize` available on PATH.** Pick the path that matches the
+   project:
 
-   ```sh
-   pnpm add -D @shakystar/memorize
-   # or: npm install -D @shakystar/memorize
-   # or: yarn add -D @shakystar/memorize
-   ```
+   - **Node project (has `package.json`)** — install as a dev dependency
+     so the bin lands in `node_modules/.bin`:
+
+     ```sh
+     pnpm add -D @shakystar/memorize
+     # or: npm install -D @shakystar/memorize
+     # or: yarn add -D @shakystar/memorize
+     ```
+
+   - **Non-Node project (no `package.json` or you do not want to add
+     one)** — install globally so the hooks installed in step 3 can
+     invoke `memorize` directly:
+
+     ```sh
+     npm install -g @shakystar/memorize
+     ```
+
+   Do **not** skip this step and rely on bare `npx memorize` — the
+   hook commands installed in step 3 are invoked by Claude Code / Codex
+   from their own process, and will fail if `memorize` is not resolvable
+   via `npx @shakystar/memorize` (which works after either install
+   mode).
 
 2. **Adopt the project**:
 
    ```sh
-   npx memorize project setup
+   npx @shakystar/memorize project setup
    ```
 
    This binds the current directory to a memorize project (creating one
@@ -126,8 +144,8 @@ it; do not hand-edit `.memorize/` or the generated config files.
 3. **Install your agent integration**. Pick the one that matches you:
 
    ```sh
-   npx memorize install claude    # if you are Claude Code
-   npx memorize install codex     # if you are Codex
+   npx @shakystar/memorize install claude    # if you are Claude Code
+   npx @shakystar/memorize install codex     # if you are Codex
    ```
 
    Both commands are safe to re-run and preserve unrelated content in
@@ -136,7 +154,7 @@ it; do not hand-edit `.memorize/` or the generated config files.
 4. **Verify**:
 
    ```sh
-   npx memorize doctor --json
+   npx @shakystar/memorize doctor --json
    ```
 
    Expected: exit code `0` and `"status": "ok"`. If `status` is `warn`
