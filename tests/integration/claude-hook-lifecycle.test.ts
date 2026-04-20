@@ -61,8 +61,11 @@ describe('claude hook lifecycle', () => {
     });
 
     expect(result.status).toBe(0);
-    expect(result.stdout).toContain('"hookEventName":"PostCompact"');
-    expect(result.stdout).toContain('Checkpoint recorded');
+    // PostCompact output must be a plain top-level `systemMessage` —
+    // Claude Code rejects a `hookSpecificOutput` block on this event.
+    expect(result.stdout).not.toContain('"hookSpecificOutput"');
+    expect(result.stdout).toContain('"systemMessage"');
+    expect(result.stdout).toContain('memorize: checkpoint');
 
     const projectsRoot = join(memorizeRoot, 'projects');
     const projectDirs = await readdir(projectsRoot);
@@ -87,8 +90,11 @@ describe('claude hook lifecycle', () => {
     });
 
     expect(result.status).toBe(0);
-    expect(result.stdout).toContain('"hookEventName":"Stop"');
-    expect(result.stdout).toContain('Handoff recorded');
+    // Stop output must be a plain top-level `systemMessage` — Claude
+    // Code rejects a `hookSpecificOutput` block on this event.
+    expect(result.stdout).not.toContain('"hookSpecificOutput"');
+    expect(result.stdout).toContain('"systemMessage"');
+    expect(result.stdout).toContain('memorize: handoff');
 
     const projectsRoot = join(memorizeRoot, 'projects');
     const projectDirs = await readdir(projectsRoot);

@@ -53,7 +53,9 @@ describe('hook stdin trust boundary', () => {
     const result = runHook('Stop', 'this is not valid json {{{');
     expect(result.status).toBe(0);
     expect(String(result.stderr)).toContain('not valid JSON');
-    expect(String(result.stdout)).toContain('"hookEventName":"Stop"');
+    // Stop hooks emit a plain `systemMessage`, not hookSpecificOutput.
+    expect(String(result.stdout)).toContain('"systemMessage"');
+    expect(String(result.stdout)).toContain('memorize: handoff');
   });
 
   it('rejects non-object JSON payloads gracefully', () => {
@@ -68,7 +70,7 @@ describe('hook stdin trust boundary', () => {
       JSON.stringify({ last_assistant_message: 42, session_id: true }),
     );
     expect(result.status).toBe(0);
-    expect(String(result.stdout)).toContain('Handoff recorded');
+    expect(String(result.stdout)).toContain('memorize: handoff');
   });
 
   it('truncates oversized hook content and emits a warning', () => {
@@ -81,7 +83,7 @@ describe('hook stdin trust boundary', () => {
     expect(String(result.stderr)).toContain(
       `hook.Stop.last_assistant_message truncated from ${MAX_HOOK_CONTENT_LENGTH + 10}`,
     );
-    expect(String(result.stdout)).toContain('Handoff recorded');
+    expect(String(result.stdout)).toContain('memorize: handoff');
   });
 
   it('warns on injection markers in hook payloads but still records', () => {
@@ -97,6 +99,6 @@ describe('hook stdin trust boundary', () => {
     expect(String(result.stderr)).toContain(
       'hook.PostCompact.compact_summary',
     );
-    expect(String(result.stdout)).toContain('Checkpoint recorded');
+    expect(String(result.stdout)).toContain('memorize: checkpoint');
   });
 });

@@ -154,11 +154,13 @@ export async function runClaudeHook(params: {
       summary,
     });
 
+    // PostCompact / PreCompact / Stop do not accept a `hookSpecificOutput`
+    // block in their return payload — Claude Code's schema validator
+    // rejects any hook that emits one for these events. The valid shape
+    // is only the top-level fields (continue, systemMessage, etc.). Use
+    // `systemMessage` to surface the operation result to the user.
     return JSON.stringify({
-      hookSpecificOutput: {
-        hookEventName: 'PostCompact',
-        message: `Checkpoint recorded: ${checkpoint.id}`,
-      },
+      systemMessage: `memorize: checkpoint ${checkpoint.id} recorded`,
     });
   }
 
@@ -183,16 +185,13 @@ export async function runClaudeHook(params: {
     await endSession(params.cwd);
 
     return JSON.stringify({
-      hookSpecificOutput: {
-        hookEventName: 'Stop',
-        message: `Handoff recorded: ${handoff.id}`,
-      },
+      systemMessage: `memorize: handoff ${handoff.id} recorded`,
     });
   }
 
-  return JSON.stringify({
-    hookSpecificOutput: {
-      hookEventName: params.eventName,
-    },
-  });
+  // Default (including PreCompact): emit an empty object so Claude
+  // Code's schema validator accepts it. `hookSpecificOutput` is only
+  // defined for a small set of events (PreToolUse, UserPromptSubmit,
+  // PostToolUse, SessionStart), so do not include it here.
+  return JSON.stringify({});
 }
