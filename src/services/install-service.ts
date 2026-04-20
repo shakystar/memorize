@@ -3,11 +3,19 @@ import path from 'node:path';
 
 import { isEnoent } from '../storage/fs-utils.js';
 
+// Using `npx @shakystar/memorize ...` (scoped, fully qualified) rather
+// than bare `memorize ...` so hooks work regardless of install mode:
+// - local dev dep: npx resolves node_modules/.bin without a fetch
+// - global install: npx finds the global bin
+// - no install yet / non-Node project: npx fetches from the registry
+//   on first call and caches, subsequent runs are fast.
+// A bare `memorize` in the hook command would break in any environment
+// where memorize is not already on PATH (including most non-Node repos).
 const CLAUDE_HOOK_COMMANDS = {
-  SessionStart: 'memorize hook claude SessionStart',
-  PreCompact: 'memorize hook claude PreCompact',
-  PostCompact: 'memorize hook claude PostCompact',
-  Stop: 'memorize hook claude Stop',
+  SessionStart: 'npx @shakystar/memorize hook claude SessionStart',
+  PreCompact: 'npx @shakystar/memorize hook claude PreCompact',
+  PostCompact: 'npx @shakystar/memorize hook claude PostCompact',
+  Stop: 'npx @shakystar/memorize hook claude Stop',
 } as const;
 
 function ensureHookCommand(
@@ -69,9 +77,9 @@ const LEGACY_CODEX_END_MARKER = '<!-- Memorize:END -->';
 const CODEX_BLOCK_BODY = [
   '# Memorize-managed bootstrap guidance',
   '',
-  '- Prefer launching Codex via `memorize launch codex` for shared context bootstrap.',
-  '- Memorize will generate and refresh bootstrap context under `.memorize/bootstrap/`.',
-  '- Keep AGENTS override short; treat Memorize as the source for launch-time context injection.',
+  '- At the start of every session, run `npx @shakystar/memorize task resume` and treat the JSON it prints as the authoritative project context.',
+  '- Before ending a session, run `npx @shakystar/memorize task handoff --summary "..." --next "..."` so the next agent (human or AI) can pick up without re-explaining.',
+  '- Treat Memorize as the source of truth for tasks, decisions, and cross-session memory. Do not invent state; ask Memorize.',
 ] as const;
 
 function assertCodexBodySafe(): void {

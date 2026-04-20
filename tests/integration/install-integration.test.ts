@@ -47,7 +47,7 @@ describe('install integration', () => {
     expect(settings).toContain('SessionStart');
     expect(settings).toContain('PreCompact');
     expect(settings).toContain('PostCompact');
-    expect(settings).toContain('memorize hook claude SessionStart');
+    expect(settings).toContain('npx @shakystar/memorize hook claude SessionStart');
   });
 
   it('merges Claude settings without deleting existing hooks and is idempotent', async () => {
@@ -81,7 +81,7 @@ describe('install integration', () => {
     expect(settings.hooks.Other?.[0]?.command).toBe('keep-me');
     expect(
       settings.hooks.SessionStart?.filter(
-        (entry) => entry.command === 'memorize hook claude SessionStart',
+        (entry) => entry.command === 'npx @shakystar/memorize hook claude SessionStart',
       ).length,
     ).toBe(1);
   });
@@ -92,8 +92,10 @@ describe('install integration', () => {
     expect(result.stdout).toContain('Installed Codex integration');
 
     const override = await readFile(join(sandbox, 'AGENTS.override.md'), 'utf8');
-    expect(override).toContain('memorize launch codex');
+    expect(override).toContain('npx @shakystar/memorize task resume');
+    expect(override).toContain('npx @shakystar/memorize task handoff');
     expect(override).toContain('Memorize-managed bootstrap guidance');
+    expect(override).not.toContain('memorize launch codex');
   });
 
   it('merges Codex override content without destroying unrelated content and is idempotent', async () => {
@@ -174,7 +176,7 @@ describe('install integration', () => {
     expect(settings.hooks.Other?.[0]?.command).toBe('keep-me');
     expect(
       settings.hooks.SessionStart?.filter(
-        (entry) => entry.command === 'memorize hook claude SessionStart',
+        (entry) => entry.command === 'npx @shakystar/memorize hook claude SessionStart',
       ).length,
     ).toBe(1);
 
