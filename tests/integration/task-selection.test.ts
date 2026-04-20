@@ -45,4 +45,32 @@ describe('task selection', () => {
     expect(startup.task?.id).toBe(activeTask.id);
     expect(startup.task?.id).not.toBe(todoTask.id);
   });
+
+  it('rejects illegal task status transitions', async () => {
+    const project = await createProject({
+      title: 'Transitions project',
+      rootPath: sandbox,
+    });
+    const task = await createTask({
+      projectId: project.id,
+      title: 'Transitions task',
+      actor: 'user',
+    });
+
+    // todo → done is not in the allowed transition table.
+    await expect(
+      updateTask(project.id, task.id, { status: 'done' }, 'user'),
+    ).rejects.toThrow(/Invalid task status transition: todo -> done/);
+  });
+
+  it('rejects updates to unknown tasks when a status change is requested', async () => {
+    const project = await createProject({
+      title: 'Unknown task project',
+      rootPath: sandbox,
+    });
+
+    await expect(
+      updateTask(project.id, 'task_missing_xx', { status: 'in_progress' }, 'user'),
+    ).rejects.toThrow(/Task task_missing_xx not found/);
+  });
 });

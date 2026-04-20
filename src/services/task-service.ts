@@ -21,12 +21,14 @@ import {
   createTask as createTaskEntity,
 } from '../domain/entities.js';
 import type { Checkpoint, Handoff, Task } from '../domain/entities.js';
+import { assertTaskStatusTransition } from '../domain/state-machines.js';
 import {
   assertContentLength,
   detectInjectionMarkers,
   warnInjectionMarkers,
   type InjectionMarker,
 } from '../shared/content-safety.js';
+import { MemorizeError } from '../shared/errors.js';
 
 function guardField(
   value: string | undefined,
@@ -76,6 +78,15 @@ export async function updateTask(
   patch: Partial<Task>,
   actor = 'system',
 ): Promise<void> {
+  if (patch.status !== undefined) {
+    const existing = await readTask(projectId, taskId);
+    if (!existing) {
+      throw new MemorizeError(`Task ${taskId} not found in project ${projectId}`);
+    }
+    if (existing.status !== patch.status) {
+      assertTaskStatusTransition(existing.status, patch.status);
+    }
+  }
   await appendEvent({
     type: 'task.updated',
     projectId,
