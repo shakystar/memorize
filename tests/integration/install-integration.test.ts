@@ -7,6 +7,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 let sandbox: string;
 let memorizeRoot: string;
+let codexHome: string;
 
 const repoRoot = process.cwd();
 const tsxCliPath = join(repoRoot, 'node_modules', 'tsx', 'dist', 'cli.mjs');
@@ -19,6 +20,7 @@ function runCli(args: string[]) {
     env: {
       ...process.env,
       MEMORIZE_ROOT: memorizeRoot,
+      HOME: codexHome,
     },
   });
 }
@@ -26,6 +28,7 @@ function runCli(args: string[]) {
 beforeEach(async () => {
   sandbox = await mkdtemp(join(tmpdir(), 'memorize-install-'));
   memorizeRoot = join(sandbox, '.memorize-home');
+  codexHome = join(sandbox, 'fake-home');
   await mkdir(join(sandbox, '.cursor', 'rules'), { recursive: true });
   await writeFile(join(sandbox, 'AGENTS.md'), '# Guidance\nUse small commits.\n', 'utf8');
 });
@@ -169,164 +172,72 @@ describe('install integration', () => {
     ).toBe(true);
   });
 
-  it('installs Codex integration artifacts into the project', async () => {
+  it('install codex does not create AGENTS.override.md on a clean project', async () => {
     const result = runCli(['install', 'codex']);
     expect(result.status).toBe(0);
-    expect(result.stdout).toContain('Installed Codex integration');
-
-    const override = await readFile(join(sandbox, 'AGENTS.override.md'), 'utf8');
-    expect(override).toContain('npx @shakystar/memorize task resume');
-    expect(override).toContain('npx @shakystar/memorize task handoff');
-    expect(override).toContain('Memorize-managed bootstrap guidance');
-    expect(override).not.toContain('memorize launch codex');
+    await expect(
+      readFile(join(sandbox, 'AGENTS.override.md'), 'utf8'),
+    ).rejects.toMatchObject({ code: 'ENOENT' });
   });
 
-  it('merges Codex override content without destroying unrelated content and is idempotent', async () => {
-    await writeFile(
-      join(sandbox, 'AGENTS.override.md'),
-      '# Existing override\n\nKeep this custom note.\n',
-      'utf8',
-    );
-
-    const first = runCli(['install', 'codex']);
-    const second = runCli(['install', 'codex']);
-
-    expect(first.status).toBe(0);
-    expect(second.status).toBe(0);
-
-    const override = await readFile(join(sandbox, 'AGENTS.override.md'), 'utf8');
-    expect(override).toContain('# Existing override');
-    expect(override).toContain('Keep this custom note.');
-    expect(override).toContain('Memorize-managed bootstrap guidance');
-    expect(
-      override.match(/Memorize-managed bootstrap guidance/g)?.length ?? 0,
-    ).toBe(1);
-  });
-
-  it('preserves content placed after the managed block on re-install', async () => {
-    // First install starts from empty file.
-    runCli(['install', 'codex']);
-
-    // User edits the file to append content AFTER the managed block.
-    const afterFirst = await readFile(
-      join(sandbox, 'AGENTS.override.md'),
-      'utf8',
-    );
-    await writeFile(
-      join(sandbox, 'AGENTS.override.md'),
-      `${afterFirst.trimEnd()}\n\n# Local overrides\n\n- custom rule\n`,
-      'utf8',
-    );
-
-    // Second install must preserve the "Local overrides" content that sits
-    // after the managed block.
-    const second = runCli(['install', 'codex']);
-    expect(second.status).toBe(0);
-
-    const override = await readFile(
-      join(sandbox, 'AGENTS.override.md'),
-      'utf8',
-    );
-    expect(override).toContain('# Local overrides');
-    expect(override).toContain('- custom rule');
-    expect(override).toContain('Memorize-managed bootstrap guidance');
-    expect(
-      override.match(/Memorize-managed bootstrap guidance/g)?.length ?? 0,
-    ).toBe(1);
-  });
-
-  it('supports installing Claude and Codex side-by-side without interference', async () => {
-    await writeFile(
-      join(sandbox, 'AGENTS.override.md'),
-      '# Existing override\n\nKeep this note.\n',
-      'utf8',
-    );
-    await mkdir(join(sandbox, '.claude'), { recursive: true });
-    await writeFile(
-      join(sandbox, '.claude', 'settings.local.json'),
-      JSON.stringify(
-        {
-          hooks: {
-            Other: [
-              {
-                matcher: '',
-                hooks: [{ type: 'command', command: 'keep-me' }],
-              },
-            ],
-          },
-        },
-        null,
-        2,
-      ),
-      'utf8',
-    );
-
-    expect(runCli(['install', 'claude']).status).toBe(0);
-    expect(runCli(['install', 'codex']).status).toBe(0);
-    expect(runCli(['install', 'claude']).status).toBe(0);
-    expect(runCli(['install', 'codex']).status).toBe(0);
-
-    const settings = JSON.parse(
-      await readFile(join(sandbox, '.claude', 'settings.local.json'), 'utf8'),
-    ) as {
-      hooks: Record<
-        string,
-        Array<{ matcher?: string; hooks: Array<{ type: string; command: string }> }>
-      >;
-    };
-    expect(settings.hooks.Other?.[0]?.hooks[0]?.command).toBe('keep-me');
-    expect(
-      settings.hooks.SessionStart?.filter((group) =>
-        group.hooks.some(
-          (entry) =>
-            entry.command === 'npx @shakystar/memorize hook claude SessionStart',
-        ),
-      ).length,
-    ).toBe(1);
-
-    const override = await readFile(
-      join(sandbox, 'AGENTS.override.md'),
-      'utf8',
-    );
-    expect(override).toContain('# Existing override');
-    expect(override).toContain('Keep this note.');
-    expect(
-      override.match(/Memorize-managed bootstrap guidance/g)?.length ?? 0,
-    ).toBe(1);
-  });
-
-  it('migrates legacy Memorize markers to the versioned format', async () => {
+  it('install codex strips a pre-existing memorize v=1 block from AGENTS.override.md', async () => {
     await writeFile(
       join(sandbox, 'AGENTS.override.md'),
       [
-        '# Header',
+        '# Team notes',
         '',
-        '<!-- Memorize:START -->',
-        '# old managed block',
-        '- ancient guidance',
-        '<!-- Memorize:END -->',
+        'Keep this.',
         '',
-        '# Footer section',
-        'keep me too',
+        '<!-- memorize:bootstrap v=1 start -->',
+        '- Old body',
+        '<!-- memorize:bootstrap v=1 end -->',
         '',
+        '# More team notes',
       ].join('\n'),
       'utf8',
     );
 
-    const result = runCli(['install', 'codex']);
-    expect(result.status).toBe(0);
+    runCli(['install', 'codex']);
 
     const override = await readFile(
       join(sandbox, 'AGENTS.override.md'),
       'utf8',
     );
-    expect(override).toContain('# Header');
-    expect(override).toContain('# Footer section');
-    expect(override).toContain('keep me too');
-    expect(override).toContain('<!-- memorize:bootstrap v=1 start -->');
-    expect(override).toContain('<!-- memorize:bootstrap v=1 end -->');
-    expect(override).not.toContain('<!-- Memorize:START -->');
-    expect(override).not.toContain('<!-- Memorize:END -->');
-    expect(override).not.toContain('ancient guidance');
+    expect(override).toContain('Keep this.');
+    expect(override).toContain('# More team notes');
+    expect(override).not.toContain('memorize:bootstrap');
+    expect(override).not.toContain('Old body');
+  });
+
+  it('install codex strips the pre-v=1 legacy memorize block as well', async () => {
+    await writeFile(
+      join(sandbox, 'AGENTS.override.md'),
+      [
+        '<!-- Memorize:START -->',
+        '- Ancient body',
+        '<!-- Memorize:END -->',
+      ].join('\n'),
+      'utf8',
+    );
+
+    runCli(['install', 'codex']);
+
+    // After stripping everything, the file should be gone.
+    await expect(
+      readFile(join(sandbox, 'AGENTS.override.md'), 'utf8'),
+    ).rejects.toMatchObject({ code: 'ENOENT' });
+  });
+
+  it('install codex keeps unrelated AGENTS.override.md content untouched when no memorize block exists', async () => {
+    const content = '# Team overrides\n\n- rule 1\n- rule 2\n';
+    await writeFile(join(sandbox, 'AGENTS.override.md'), content, 'utf8');
+
+    runCli(['install', 'codex']);
+
+    const override = await readFile(
+      join(sandbox, 'AGENTS.override.md'),
+      'utf8',
+    );
+    expect(override).toBe(content);
   });
 });
