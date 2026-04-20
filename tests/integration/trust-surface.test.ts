@@ -91,7 +91,7 @@ describe('trust and repair surface', () => {
     expect(report.status).toBe('error');
     const bound = report.issues.find((issue) => issue.id === 'project.bound');
     expect(bound?.severity).toBe('error');
-    expect(bound?.fix).toBe('memorize project init');
+    expect(bound?.fix).toBe('memorize project setup');
   });
 
   it('warns when .memorize/ is not listed in .gitignore for a git repo', { timeout: 30_000 }, () => {

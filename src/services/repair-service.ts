@@ -83,6 +83,78 @@ function gitignoreHasMemorize(gitignore: string): boolean {
   });
 }
 
+async function checkClaudeInstall(
+  cwd: string,
+): Promise<DoctorCheck | undefined> {
+  const settingsPath = path.join(cwd, '.claude', 'settings.local.json');
+  let raw: string;
+  try {
+    raw = await fs.readFile(settingsPath, 'utf8');
+  } catch (error) {
+    if (isEnoent(error)) return undefined;
+    throw error;
+  }
+  let settings: { hooks?: Record<string, Array<{ command?: string }>> };
+  try {
+    settings = JSON.parse(raw);
+  } catch {
+    return {
+      id: 'install.claude',
+      label: 'Claude hook integration',
+      status: 'warn',
+      message: `.claude/settings.local.json is not valid JSON`,
+      fix: 'memorize install claude',
+    };
+  }
+  const events = ['SessionStart', 'PreCompact', 'PostCompact', 'Stop'];
+  const hooks = settings.hooks ?? {};
+  const missing = events.filter((event) => {
+    const list = hooks[event] ?? [];
+    return !list.some((entry) => /memorize\s+hook\s+claude/.test(entry.command ?? ''));
+  });
+  if (missing.length === events.length) {
+    return undefined;
+  }
+  if (missing.length > 0) {
+    return {
+      id: 'install.claude',
+      label: 'Claude hook integration',
+      status: 'warn',
+      message: `Missing memorize hooks for ${missing.join(', ')}`,
+      fix: 'memorize install claude',
+    };
+  }
+  return {
+    id: 'install.claude',
+    label: 'Claude hook integration',
+    status: 'ok',
+    message: `All 4 memorize hooks present in .claude/settings.local.json`,
+  };
+}
+
+async function checkCodexInstall(
+  cwd: string,
+): Promise<DoctorCheck | undefined> {
+  const overridePath = path.join(cwd, 'AGENTS.override.md');
+  let content: string;
+  try {
+    content = await fs.readFile(overridePath, 'utf8');
+  } catch (error) {
+    if (isEnoent(error)) return undefined;
+    throw error;
+  }
+  const hasMarker =
+    content.includes('<!-- memorize:bootstrap v=1 start -->') &&
+    content.includes('<!-- memorize:bootstrap v=1 end -->');
+  if (!hasMarker) return undefined;
+  return {
+    id: 'install.codex',
+    label: 'Codex bootstrap block',
+    status: 'ok',
+    message: 'memorize managed block present in AGENTS.override.md',
+  };
+}
+
 async function checkGitRedactionRisk(
   cwd: string,
 ): Promise<DoctorCheck | undefined> {
@@ -129,7 +201,7 @@ export async function doctor(cwd: string): Promise<DoctorReport> {
       status: 'error',
       message:
         error instanceof Error ? error.message : 'Failed to read project binding.',
-      fix: 'memorize project init',
+      fix: 'memorize project setup',
     });
   }
 
@@ -140,7 +212,7 @@ export async function doctor(cwd: string): Promise<DoctorReport> {
         label: 'Project bound to current directory',
         status: 'error',
         message: 'No project bound to current directory.',
-        fix: 'memorize project init',
+        fix: 'memorize project setup',
       });
     }
   } else {
@@ -167,7 +239,7 @@ export async function doctor(cwd: string): Promise<DoctorReport> {
           label: `Storage directory: ${dirName}`,
           status: 'error',
           message: `Missing .memorize/${projectId}/${dirName}`,
-          fix: 'memorize project init',
+          fix: 'memorize projection rebuild',
         });
       }
     }
@@ -192,6 +264,12 @@ export async function doctor(cwd: string): Promise<DoctorReport> {
       });
     }
   }
+
+  const claudeCheck = await checkClaudeInstall(cwd);
+  if (claudeCheck) checks.push(claudeCheck);
+
+  const codexCheck = await checkCodexInstall(cwd);
+  if (codexCheck) checks.push(codexCheck);
 
   const gitCheck = await checkGitRedactionRisk(cwd);
   if (gitCheck) checks.push(gitCheck);
