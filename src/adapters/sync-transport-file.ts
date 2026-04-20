@@ -8,8 +8,8 @@ import type {
   SyncPushRequest,
   SyncPushResponse,
 } from '../domain/sync-protocol.js';
+import type { SyncTransport } from '../domain/sync-transport.js';
 import { isEnoent } from '../storage/fs-utils.js';
-import type { SyncTransport } from '../services/sync-transport.js';
 
 function remoteEventsFile(remoteRoot: string, remoteProjectId: string): string {
   return path.join(remoteRoot, remoteProjectId, 'events.ndjson');

@@ -3,7 +3,7 @@ import type {
   SyncPullResponse,
   SyncPushRequest,
   SyncPushResponse,
-} from '../domain/sync-protocol.js';
+} from './sync-protocol.js';
 
 export interface SyncTransport {
   push(request: SyncPushRequest): Promise<SyncPushResponse>;

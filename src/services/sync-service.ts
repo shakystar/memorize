@@ -9,7 +9,7 @@ import type {
   SyncPushResponse,
   SyncQueueSnapshot,
 } from '../domain/sync-protocol.js';
-import type { SyncTransport } from './sync-transport.js';
+import type { SyncTransport } from '../domain/sync-transport.js';
 import { appendEvent, readEvents } from '../storage/event-store.js';
 import { appendLine, isEnoent, readJson, withFileLock, writeJson } from '../storage/fs-utils.js';
 import {
