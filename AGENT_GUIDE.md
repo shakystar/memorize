@@ -15,6 +15,32 @@ inside the npm tarball (listed in `package.json#files`).
 
 ---
 
+## Ground rule: memorize is the single source of truth
+
+**Do not duplicate memorize state in your own memory system.** If you
+maintain your own long-term memory (Claude Code `MEMORY.md`, Cursor
+saved context, etc.):
+
+- ✅ OK: a one-line note "memorize is installed in this project;
+  always query it for state."
+- ❌ Not OK: recording the project id, current tasks, handoff text,
+  rule contents, decisions, or any other data memorize tracks.
+
+Reason: your memory cannot follow memorize's state when the user runs
+`project setup` again, wipes `~/.memorize/`, or the project id is
+otherwise regenerated. A stale pointer in your memory will diverge
+silently from reality and produce wrong answers. Always ask memorize
+at session start:
+
+```sh
+npx @shakystar/memorize task resume   # full startup payload as JSON
+npx @shakystar/memorize project show  # bound project entity
+npx @shakystar/memorize doctor --json # health + install state
+```
+
+Treat any information in your own memory that overlaps with these
+outputs as a cache that must be re-validated — not as authoritative.
+
 ## Mental model
 
 1. **Event log** is the source of truth. Every task, handoff,

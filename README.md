@@ -100,6 +100,26 @@ asked you to set up memorize in this project. Follow these steps
 exactly. Every command is idempotent — if a step fails partway, re-run
 it; do not hand-edit `.memorize/` or the generated config files.
 
+### Ground rule: memorize is the single source of truth
+
+**Do NOT record memorize state in your own memory system.** Memorize
+is the authoritative store for project id, tasks, handoffs, rules,
+and conflicts. If you maintain your own long-term memory (Claude Code
+`MEMORY.md`, Cursor saved context, etc.), **do not duplicate
+memorize-tracked data there**. Query memorize at session start
+instead:
+
+```sh
+npx @shakystar/memorize task resume
+```
+
+Storing a project id in your own memory goes stale the moment the
+user re-runs `project setup` or wipes `~/.memorize/`, and silently
+breaks cross-session consistency. This has bitten real users.
+The only thing worth recording in your own memory is "memorize is
+installed in this project; always query it for state" — **no ids,
+no task lists, no summaries.**
+
 1. **Make `memorize` available on PATH.** Pick the path that matches the
    project:
 

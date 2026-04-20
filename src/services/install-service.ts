@@ -161,6 +161,7 @@ const CODEX_BLOCK_BODY = [
   '- At the start of every session, run `npx @shakystar/memorize task resume` and treat the JSON it prints as the authoritative project context.',
   '- Before ending a session, run `npx @shakystar/memorize task handoff --summary "..." --next "..."` so the next agent (human or AI) can pick up without re-explaining.',
   '- Treat Memorize as the source of truth for tasks, decisions, and cross-session memory. Do not invent state; ask Memorize.',
+  '- Do NOT duplicate Memorize state in your own memory system. Project ids, tasks, handoffs, and rules go stale the moment the user re-runs `project setup`. Always query Memorize fresh at session start.',
 ] as const;
 
 function assertCodexBodySafe(): void {
