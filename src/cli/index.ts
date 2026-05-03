@@ -1,5 +1,6 @@
 import process from 'node:process';
 
+import { bumpHeartbeat } from '../services/session-service.js';
 import { runConflictCommand } from './commands/conflict.js';
 import { runDoctorCommand } from './commands/doctor.js';
 import { runEventsCommand } from './commands/events.js';
@@ -26,6 +27,10 @@ const handlers: Record<string, CommandHandler> = {
   conflict: runConflictCommand,
 };
 
+// Commands that manage session lifecycle themselves — skip post-command
+// heartbeat for these so we never double-fire the event.
+const SESSION_MANAGING_COMMANDS = new Set(['hook', 'install']);
+
 async function main(): Promise<void> {
   const [, , command, ...args] = process.argv;
   const ctx: CliContext = { cwd: process.cwd() };
@@ -37,6 +42,10 @@ async function main(): Promise<void> {
   }
 
   await handler(args, ctx);
+
+  if (command && !SESSION_MANAGING_COMMANDS.has(command)) {
+    await bumpHeartbeat(ctx.cwd);
+  }
 }
 
 main().catch((error: unknown) => {

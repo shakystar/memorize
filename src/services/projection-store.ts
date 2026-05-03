@@ -8,6 +8,7 @@ import {
   getMemoryIndexFile,
   getProjectFile,
   getRuleFile,
+  getSessionFile,
   getTaskFile,
   getTopicFile,
   getWorkstreamFile,
@@ -72,6 +73,11 @@ export async function rebuildProjectProjection(projectId: string): Promise<void>
   await Promise.all(
     Object.values(state.conflicts).map((conflict) =>
       writeJson(getConflictFile(projectId, conflict.id), conflict),
+    ),
+  );
+  await Promise.all(
+    Object.values(state.sessions).map((session) =>
+      writeJson(getSessionFile(projectId, session.id), session),
     ),
   );
 }

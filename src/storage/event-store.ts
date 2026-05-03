@@ -37,6 +37,7 @@ export async function ensureProjectDirectories(projectId: string): Promise<void>
       path.join(projectRoot, 'rules'),
       path.join(projectRoot, 'topics'),
       path.join(projectRoot, 'sync'),
+      path.join(projectRoot, 'sessions'),
     ].map((dirPath) => ensureDir(dirPath)),
   );
 }

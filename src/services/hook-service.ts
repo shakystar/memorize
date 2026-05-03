@@ -114,11 +114,16 @@ function prepareHookText(
 }
 
 const handleSessionStart: HookHandler = async (ctx) => {
-  const { startupContext: additionalContext } = await composeStartupContext({
+  const composed = await composeStartupContext({
     agent: ctx.agent,
     cwd: ctx.cwd,
   });
-  const sessionId = await startSession(ctx.cwd, ctx.agent);
+  const sessionId = await startSession(ctx.cwd, {
+    actor: ctx.agent,
+    projectId: ctx.projectId,
+    ...(composed.taskId ? { taskId: composed.taskId } : {}),
+  });
+  const additionalContext = composed.startupContext;
 
   // Claude Code passes a writable env-file path so memorize can hand
   // back the new session id. Codex has no equivalent — only Claude

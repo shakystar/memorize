@@ -8,6 +8,7 @@ import type {
   ProjectSyncState,
   Rule,
   Session,
+  SessionHeartbeatPayload,
   Task,
   Workstream,
 } from './entities.js';
@@ -27,6 +28,7 @@ export type DomainEventType =
   | 'conflict.resolved'
   | 'session.started'
   | 'session.completed'
+  | 'session.heartbeat'
   | 'sync.state.updated';
 
 export interface DomainEvent<TPayload = unknown> extends BaseEntity {
@@ -51,4 +53,5 @@ export type DomainEventPayload =
   | Rule
   | Conflict
   | Session
+  | SessionHeartbeatPayload
   | ProjectSyncState;

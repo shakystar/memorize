@@ -158,4 +158,51 @@ describe('adapter renderers', () => {
     expect(codex).not.toContain('- Description:');
   });
 
+  it('renders other active tasks for both adapters when present', () => {
+    const payload: StartupContextPayload = {
+      ...samplePayload,
+      otherActiveTasks: [
+        {
+          id: 'task_xyz_2',
+          title: 'Polish renderer budget',
+          status: 'in_progress',
+          assignment: {
+            sessionId: 'sess_abc_9',
+            actor: 'codex',
+            lastSeenAt: ISO,
+            freshness: 'active 5m ago',
+          },
+        },
+      ],
+    };
+    const claude = renderClaudeStartupContext(payload);
+    const codex = renderCodexStartupContext(payload);
+
+    expect(claude).toContain('Other active tasks:');
+    expect(claude).toContain(
+      '- task_xyz_2: "Polish renderer budget" (codex, active 5m ago)',
+    );
+    expect(claude).toContain('source="memorize.other-active-tasks"');
+
+    expect(codex).toContain('## Other active tasks');
+    expect(codex).toContain(
+      '- task_xyz_2: "Polish renderer budget" — codex, active 5m ago',
+    );
+    expect(codex).toContain('source="memorize.other-active-tasks"');
+  });
+
+  it('omits other active tasks section when list is empty or undefined', () => {
+    const empty: StartupContextPayload = {
+      ...samplePayload,
+      otherActiveTasks: [],
+    };
+    expect(renderClaudeStartupContext(empty)).not.toContain('Other active tasks');
+    expect(renderCodexStartupContext(empty)).not.toContain('Other active tasks');
+    expect(renderClaudeStartupContext(samplePayload)).not.toContain(
+      'Other active tasks',
+    );
+    expect(renderCodexStartupContext(samplePayload)).not.toContain(
+      'Other active tasks',
+    );
+  });
 });

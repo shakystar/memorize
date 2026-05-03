@@ -2,6 +2,7 @@ import path from 'node:path';
 
 import type {
   Conflict,
+  OtherActiveTask,
   Rule,
   StartupContextPayload,
   Workstream,
@@ -13,10 +14,12 @@ import {
   getRuleFile,
   getWorkstreamFile,
 } from '../storage/path-resolver.js';
+import { freshnessLabel } from './freshness.js';
 import {
   readDefaultWorkstreamForProject,
   readProject,
 } from './project-service.js';
+import { readActiveSessions } from './session-service.js';
 import { readHandoff, readTask } from './task-service.js';
 
 async function readOpenConflicts(projectId: string): Promise<Conflict[]> {
@@ -35,10 +38,45 @@ async function readProjectRules(
   return rules.filter((rule): rule is Rule => Boolean(rule));
 }
 
+async function buildOtherActiveTasks(params: {
+  projectId: string;
+  selfTaskId?: string;
+  selfSessionId?: string;
+}): Promise<OtherActiveTask[]> {
+  const sessions = await readActiveSessions(params.projectId);
+  const otherSessions = sessions.filter((session) => {
+    if (params.selfSessionId && session.id === params.selfSessionId) return false;
+    if (!session.taskId) return false;
+    if (params.selfTaskId && session.taskId === params.selfTaskId) return false;
+    return true;
+  });
+  if (otherSessions.length === 0) return [];
+
+  const tasks = await Promise.all(
+    otherSessions.map(async (session) => {
+      const task = await readTask(params.projectId, session.taskId!);
+      if (!task) return undefined;
+      return {
+        id: task.id,
+        title: task.title,
+        status: task.status,
+        assignment: {
+          sessionId: session.id,
+          actor: session.actor,
+          lastSeenAt: session.lastSeenAt,
+          freshness: freshnessLabel(session.lastSeenAt),
+        },
+      } satisfies OtherActiveTask;
+    }),
+  );
+  return tasks.filter((entry): entry is OtherActiveTask => Boolean(entry));
+}
+
 export async function loadStartContext(params: {
   projectId: string;
   workstreamId?: string;
   taskId?: string;
+  selfSessionId?: string;
 }): Promise<StartupContextPayload> {
   const project = await readProject(params.projectId);
   if (!project) {
@@ -80,6 +118,12 @@ export async function loadStartContext(params: {
       : undefined;
   const rules = await readProjectRules(params.projectId, project.ruleIds);
 
+  const otherActiveTasks = await buildOtherActiveTasks({
+    projectId: params.projectId,
+    ...(task?.id ? { selfTaskId: task.id } : {}),
+    ...(params.selfSessionId ? { selfSessionId: params.selfSessionId } : {}),
+  });
+
   return {
     projectSummary: memoryIndex?.shortSummary ?? project.summary,
     projectRules: rules.map((rule) => `${rule.title}: ${rule.body}`),
@@ -90,5 +134,6 @@ export async function loadStartContext(params: {
     ...(latestHandoff ? { latestHandoff } : {}),
     openConflicts: await readOpenConflicts(params.projectId),
     mustReadTopics: memoryIndex?.mustReadTopics ?? [],
+    ...(otherActiveTasks.length > 0 ? { otherActiveTasks } : {}),
   };
 }

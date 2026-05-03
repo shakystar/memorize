@@ -143,6 +143,20 @@ export function getSyncInboundFile(projectId: string): string {
   );
 }
 
+export function getSessionsDir(projectId: string): string {
+  const projectRoot = getProjectRoot(projectId);
+  return ensureWithinRoot(path.join(projectRoot, 'sessions'), projectRoot);
+}
+
+export function getSessionFile(projectId: string, sessionId: string): string {
+  assertValidId(sessionId, 'sessionId');
+  const sessionsDir = getSessionsDir(projectId);
+  return ensureWithinRoot(
+    path.join(sessionsDir, `${sessionId}.json`),
+    sessionsDir,
+  );
+}
+
 export function getConflictFile(projectId: string, conflictId: string): string {
   assertValidId(conflictId, 'conflictId');
   const projectRoot = getProjectRoot(projectId);

@@ -39,8 +39,16 @@ export {
   type ConflictType,
   createConflict,
 } from './entities/conflict.js';
-export { type Session, createSession } from './entities/session.js';
-export { type StartupContextPayload } from './entities/startup-context.js';
+export {
+  type Session,
+  type SessionHeartbeatPayload,
+  createSession,
+} from './entities/session.js';
+export {
+  type OtherActiveTask,
+  type OtherActiveTaskAssignment,
+  type StartupContextPayload,
+} from './entities/startup-context.js';
 export { type MemoryIndex } from './entities/memory-index.js';
 export {
   type ProjectSyncState,

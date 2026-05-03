@@ -8,7 +8,14 @@ export interface Session extends BaseEntity {
   actor: string;
   startedAt: ISODateString;
   endedAt?: ISODateString;
+  /** Most recent activity attributed to this session — bumped on heartbeat events. */
+  lastSeenAt: ISODateString;
   status: 'active' | 'completed';
+}
+
+export interface SessionHeartbeatPayload {
+  sessionId: EntityId;
+  at: ISODateString;
 }
 
 export function createSession(input: {
@@ -23,6 +30,7 @@ export function createSession(input: {
     ...(input.taskId ? { taskId: input.taskId } : {}),
     actor: input.actor,
     startedAt: timestamp,
+    lastSeenAt: timestamp,
     status: 'active',
   };
 }

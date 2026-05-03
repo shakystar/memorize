@@ -106,6 +106,20 @@ export function renderCodexStartupContext(
     );
   }
 
+  if (payload.otherActiveTasks && payload.otherActiveTasks.length > 0) {
+    const otherLines: string[] = ['## Other active tasks'];
+    for (const entry of payload.otherActiveTasks) {
+      otherLines.push(
+        `- ${entry.id}: "${entry.title}" — ${entry.assignment.actor}, ${entry.assignment.freshness}`,
+      );
+    }
+    blocks.push(
+      wrapUntrusted(otherLines.join('\n'), {
+        source: 'memorize.other-active-tasks',
+      }),
+    );
+  }
+
   return [
     '# Memorize startup context',
     '',

@@ -8,6 +8,8 @@ import type {
   MemoryIndex,
   Project,
   Rule,
+  Session,
+  SessionHeartbeatPayload,
   Task,
   Workstream,
 } from '../domain/entities.js';
@@ -21,6 +23,7 @@ export interface ProjectState {
   decisions: Record<string, Decision>;
   rules: Record<string, Rule>;
   conflicts: Record<string, Conflict>;
+  sessions: Record<string, Session>;
 }
 
 export function reduceProjectState(events: DomainEvent[]): ProjectState {
@@ -33,6 +36,7 @@ export function reduceProjectState(events: DomainEvent[]): ProjectState {
     decisions: {},
     rules: {},
     conflicts: {},
+    sessions: {},
   };
 
   for (const event of events) {
@@ -86,6 +90,37 @@ export function reduceProjectState(events: DomainEvent[]): ProjectState {
       case 'conflict.detected':
       case 'conflict.resolved':
         state.conflicts[event.scopeId] = event.payload as Conflict;
+        break;
+      case 'session.started':
+        {
+          const session = event.payload as Session;
+          state.sessions[session.id] = session;
+        }
+        break;
+      case 'session.completed':
+        {
+          const existing = state.sessions[event.scopeId];
+          if (!existing) break;
+          state.sessions[event.scopeId] = {
+            ...existing,
+            status: 'completed',
+            endedAt: event.createdAt,
+            lastSeenAt: event.createdAt,
+            updatedAt: event.createdAt,
+          };
+        }
+        break;
+      case 'session.heartbeat':
+        {
+          const payload = event.payload as SessionHeartbeatPayload;
+          const existing = state.sessions[payload.sessionId];
+          if (!existing) break;
+          state.sessions[payload.sessionId] = {
+            ...existing,
+            lastSeenAt: payload.at,
+            updatedAt: payload.at,
+          };
+        }
         break;
       default:
         break;
