@@ -1,0 +1,82 @@
+# Changelog
+
+All notable changes to `@shakystar/memorize` are recorded here.
+
+This file follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
+loosely. The project adheres to [Semantic Versioning](https://semver.org/);
+major-version bumps are reserved for breaking changes to the on-disk event
+log layout or the public CLI surface.
+
+## [1.0.0-rc.0] — 2026-05-03
+
+First release candidate. The 1.0 promise: the on-disk layout described in
+the "Storage" section of the inventory and the CLI command surface listed
+under `## Day-to-day commands` in the README will not break compatibility
+within the 1.x line.
+
+### Added
+
+- **Lock-free informational assignment model.** `Session` entity is now
+  fully wired: `session.started` / `session.heartbeat` / `session.completed`
+  events are emitted, projector reduces them into a sessions map, and a
+  CLI middleware pumps a heartbeat after every non-session-managing command.
+- **Other active tasks in the startup payload.** `task resume` (and the
+  hook-rendered SessionStart context) now lists tasks held by other live
+  sessions with a freshness label (`active 5m ago`, `stale ~2h ago`,
+  `stale (likely abandoned)`) so a parallel agent can pick a different
+  task and avoid duplicate work.
+- **PostCompact summary surfacing.** When a Claude session is resumed
+  after a context compact, the latest `Checkpoint.summary` for the
+  picked-up task is rendered into the new session's startup payload so
+  continuity is preserved.
+- **Renderer character budget.** Startup payloads have a soft cap
+  (default 8000 chars, ~2000 tokens) with strict-priority block ordering
+  (project > task > handoff > checkpoint > conflicts > other-tasks >
+  topics). Overflow drops the lowest-priority blocks and emits a budget
+  notice listing what was omitted.
+- **Sync golden test.** `tests/golden/sync-roundtrip-golden.test.ts`
+  pins which event types cross the wire (session events DO, sync state
+  does NOT) — any future filter change is a breaking change and must
+  bump major.
+- **Quickstart demo.** `examples/quickstart.sh` is a self-contained
+  30-second sequence (project setup → task create → task resume →
+  checkpoint) intended for asciinema/GIF recording. An integration test
+  locks the script's milestones so the public asset cannot rot silently.
+
+### Changed
+
+- `MEMORY.md`-style task assignment is no longer enforced — the design is
+  intentionally informational. Memorize records who is on what; agents
+  decide whether to defer.
+- Renderer blocks are now built with explicit priorities and an optional
+  `{ budget }` argument so tests can drive drop scenarios without padding
+  payloads to many kilobytes.
+
+### Removed
+
+- `do "<sentence>"` experimental NL intent router. Agents call task /
+  handoff commands directly; the indirection was not earning its keep.
+- `launch claude|codex` legacy wrapper. `install <agent>` is the standard
+  entry point now.
+- `workstream.updated`, `checklist.item.upserted` events and the
+  `ChecklistItem` entity (declared but never reduced).
+
+### Experimental (NOT covered by the 1.0 compatibility promise)
+
+- `memorize project sync [--push|--pull|--bind|--remote-path]`. The file
+  transport is functional and roundtrip-tested but real cross-machine
+  dogfooding is post-1.0. Treat its CLI flags and on-disk wire format
+  as subject to breaking change in a 1.x minor release.
+- `sync.state.updated` event type (local bookkeeping; intentionally
+  filtered from sync push payloads).
+
+## [0.2.0-alpha.0] — 2026-04-21
+
+Last alpha cut before the 1.0 stabilization sprints.
+
+- Codex hook integration (`install codex` writes to global
+  `~/.codex/hooks.json`; `doctor` verifies install).
+- Doctor `fix` text for missing `project setup` corrected.
+- Codex install now strips legacy blocks instead of writing new ones,
+  preserves hook order (memorize first), and is idempotent.
+- Codex hooks are now the documented integration contract.

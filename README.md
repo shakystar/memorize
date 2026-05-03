@@ -244,10 +244,26 @@ project init         low-level "create fresh project" (rarely needed)
 
 ## Status
 
-Memorize is in a `0.x` alpha. Expect API iteration until `1.0.0`. The
-event log schema is versioned and projections are regenerable, so
-upgrades should not require manual data migration within a major
-version.
+Memorize is at `1.0.0-rc.0` — first release candidate. The 1.0
+compatibility promise covers:
+
+- The on-disk event log layout (`<MEMORIZE_ROOT>/projects/<pid>/...`)
+  and the per-project `.memorize/` directory shape.
+- The day-to-day CLI surface listed above.
+- The hook contracts written by `install claude` and `install codex`.
+
+Within the 1.x line we will not break those. The event log is versioned
+and projections are regenerable, so upgrades within a major version do
+not require manual data migration.
+
+**Experimental** (subject to change in a 1.x minor release):
+
+- `memorize project sync [--push|--pull|--bind|--remote-path]`. The file
+  transport works and is roundtrip-tested, but real cross-machine
+  dogfooding is post-1.0. Use it for local experimentation; do not
+  depend on the wire format yet.
+
+See [CHANGELOG.md](./CHANGELOG.md) for what landed in this RC.
 
 ## Contributing
 
