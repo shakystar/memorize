@@ -164,6 +164,53 @@ describe('projector', () => {
     ]);
   });
 
+  it('reduces session.started events into the sessions map', () => {
+    const state = reduceProjectState([
+      projectCreated(),
+      sessionStartedEvent('sess_1', 'claude', 'task_1', '2026-04-20T00:00:00.000Z'),
+    ]);
+    expect(state.sessions['sess_1']).toMatchObject({
+      id: 'sess_1',
+      actor: 'claude',
+      taskId: 'task_1',
+      status: 'active',
+      lastSeenAt: '2026-04-20T00:00:00.000Z',
+    });
+  });
+
+  it('marks sessions completed and bumps lastSeenAt on session.completed', () => {
+    const state = reduceProjectState([
+      projectCreated(),
+      sessionStartedEvent('sess_1', 'codex', undefined, '2026-04-20T00:00:00.000Z'),
+      sessionCompletedEvent('sess_1', '2026-04-20T01:00:00.000Z'),
+    ]);
+    expect(state.sessions['sess_1']?.status).toBe('completed');
+    expect(state.sessions['sess_1']?.endedAt).toBe('2026-04-20T01:00:00.000Z');
+    expect(state.sessions['sess_1']?.lastSeenAt).toBe('2026-04-20T01:00:00.000Z');
+  });
+
+  it('bumps lastSeenAt on session.heartbeat without changing status', () => {
+    const state = reduceProjectState([
+      projectCreated(),
+      sessionStartedEvent('sess_1', 'claude', undefined, '2026-04-20T00:00:00.000Z'),
+      sessionHeartbeatEvent('sess_1', '2026-04-20T00:05:00.000Z'),
+      sessionHeartbeatEvent('sess_1', '2026-04-20T00:10:00.000Z'),
+    ]);
+    expect(state.sessions['sess_1']?.status).toBe('active');
+    expect(state.sessions['sess_1']?.lastSeenAt).toBe(
+      '2026-04-20T00:10:00.000Z',
+    );
+  });
+
+  it('ignores session.completed and session.heartbeat for unknown sessions', () => {
+    const state = reduceProjectState([
+      projectCreated(),
+      sessionCompletedEvent('sess_missing', '2026-04-20T00:00:00.000Z'),
+      sessionHeartbeatEvent('sess_missing', '2026-04-20T00:01:00.000Z'),
+    ]);
+    expect(state.sessions['sess_missing']).toBeUndefined();
+  });
+
   it('caps topTasks and recentDecisions at their configured maximums', () => {
     const taskEvents = Array.from({ length: MAX_TOP_TASKS + 5 }, (_, i) =>
       taskEvent(
@@ -266,6 +313,57 @@ function workstreamEvent(
       summary: id,
       status,
     },
+  });
+}
+
+function sessionStartedEvent(
+  id: string,
+  actor: string,
+  taskId: string | undefined,
+  startedAt: string,
+): DomainEvent {
+  return makeEvent({
+    id: `evt_${id}_started`,
+    type: 'session.started',
+    scopeType: 'session',
+    scopeId: id,
+    actor,
+    payload: {
+      id,
+      schemaVersion: CURRENT_SCHEMA_VERSION,
+      createdAt: startedAt,
+      updatedAt: startedAt,
+      projectId: 'proj_1',
+      ...(taskId ? { taskId } : {}),
+      actor,
+      startedAt,
+      lastSeenAt: startedAt,
+      status: 'active',
+    },
+  });
+}
+
+function sessionCompletedEvent(id: string, endedAt: string): DomainEvent {
+  return makeEvent({
+    id: `evt_${id}_completed`,
+    type: 'session.completed',
+    scopeType: 'session',
+    scopeId: id,
+    createdAt: endedAt,
+    updatedAt: endedAt,
+    payload: {},
+  });
+}
+
+function sessionHeartbeatEvent(sessionId: string, at: string): DomainEvent {
+  return makeEvent({
+    id: `evt_${sessionId}_heartbeat_${at}`,
+    type: 'session.heartbeat',
+    scopeType: 'session',
+    scopeId: sessionId,
+    createdAt: at,
+    updatedAt: at,
+    payload: { sessionId, at },
   });
 }
 

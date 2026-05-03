@@ -5,6 +5,10 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { createFileSyncTransport } from '../../src/adapters/sync-transport-file.js';
+import {
+  bumpHeartbeat,
+  startSession,
+} from '../../src/services/session-service.js';
 import { setupProject } from '../../src/services/setup-service.js';
 import {
   createCheckpoint,
@@ -100,6 +104,17 @@ describe('sync golden — 1.0 compatibility baseline', () => {
         nextAction: 'Pull on B and verify',
       });
 
+      // session.started + session.heartbeat — assignment-model events
+      // that MUST cross the wire so a remote agent can see who is
+      // actively working on what task. Filtering them would break the
+      // Sprint 2 lock-free assignment design.
+      await startSession(projectDirA, {
+        actor: 'claude',
+        projectId,
+        taskId: task.id,
+      });
+      await bumpHeartbeat(projectDirA);
+
       const pushResponse = await pushProject(projectId, transport);
       expect(pushResponse.accepted.length).toBeGreaterThan(0);
 
@@ -130,6 +145,13 @@ describe('sync golden — 1.0 compatibility baseline', () => {
       // sync.state.updated is intentionally filtered out of push payloads
       // (it is local bookkeeping). The 1.0 promise: it never crosses the wire.
       expect(types).not.toContain('sync.state.updated');
+
+      // Assignment-model events DO cross the wire — remote agents must
+      // see session lifecycle so the lock-free assignment model works
+      // across machines. The 1.0 promise: these are part of the public
+      // sync surface and any future filter would be a breaking change.
+      expect(types).toContain('session.started');
+      expect(types).toContain('session.heartbeat');
 
       // Payload integrity — pick the handoff and verify its content survived.
       const handoffEvent = inbound.find(

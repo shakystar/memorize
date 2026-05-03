@@ -114,6 +114,10 @@ function prepareHookText(
 }
 
 const handleSessionStart: HookHandler = async (ctx) => {
+  // Order matters: composeStartupContext must run BEFORE startSession so
+  // the new session is not yet in the projection when otherActiveTasks is
+  // computed. Reversing this would make every starting session see itself
+  // as a competing other-active-task.
   const composed = await composeStartupContext({
     agent: ctx.agent,
     cwd: ctx.cwd,
