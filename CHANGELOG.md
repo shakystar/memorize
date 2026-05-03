@@ -7,6 +7,39 @@ loosely. The project adheres to [Semantic Versioning](https://semver.org/);
 major-version bumps are reserved for breaking changes to the on-disk event
 log layout or the public CLI surface.
 
+## [1.0.0-rc.4] — 2026-05-03
+
+Three gaps surfaced by the rc.3 dogfood telemetry. Gap B is the most
+load-bearing: without it, Claude tool subprocesses never saw
+`MEMORIZE_SESSION_ID`, so every hook handler that depended on session
+disambiguation silently degraded.
+
+### Fixed
+
+- **Gap B — `CLAUDE_ENV_FILE` propagation.** Claude's
+  `CLAUDE_ENV_FILE` is a shell script Claude `source`s, not a dotenv
+  file. memorize was writing `KEY="value"` lines without `export`, so
+  the assignments stayed shell-local and never reached the `claude`
+  process or its tool subprocesses. Now writes `export KEY="value"`,
+  which is what the file extension (`.sh`) implied all along.
+  Verifiable in any Claude session via `env | grep MEMORIZE`.
+- **Gap A — hook task attribution.** `PostCompact` and `Stop`
+  resolved the active task via `project.activeTaskIds[0]`, which
+  picks an arbitrary other agent's work whenever the calling session
+  did not happen to claim the first task. Hook handlers now read the
+  taskId the calling session itself claimed at `SessionStart` (via
+  the new `getCurrentSessionTaskId`) and only fall back to the
+  project-level guess when the session never claimed anything.
+
+### Documented
+
+- **Gap C — Codex sandbox + memorize home.** Codex's default
+  workspace-write sandbox blocks writes to `~/.memorize/`, so
+  agent-initiated memorize CLI calls inside a sandboxed turn fail
+  with `EACCES`. `AGENT_GUIDE.md` now documents the workaround
+  (allowlist `~/.memorize` or set `MEMORIZE_ROOT` inside the
+  sandbox).
+
 ## [1.0.0-rc.3] — 2026-05-03
 
 Two bugs surfaced by the rc.2 dogfood against the duo-pane test

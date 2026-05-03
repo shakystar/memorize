@@ -283,6 +283,19 @@ export async function getCurrentSessionId(cwd: string): Promise<string> {
   return startSession(cwd, { actor: 'ambient' });
 }
 
+/**
+ * Returns the taskId this session claimed at startSession, if any.
+ * Used by hook handlers to attribute checkpoints / handoffs to the
+ * right task instead of falling back to project.activeTaskIds[0],
+ * which would point at an arbitrary other agent's work.
+ */
+export async function getCurrentSessionTaskId(
+  cwd: string,
+): Promise<string | undefined> {
+  const pointer = await findCwdSession(cwd);
+  return pointer?.taskId;
+}
+
 export async function readActiveSessions(projectId: string): Promise<Session[]> {
   const sessions = await readJsonDir<Session>(getSessionsDir(projectId));
   return sessions.filter((s) => s.status === 'active');

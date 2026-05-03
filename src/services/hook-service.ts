@@ -18,6 +18,7 @@ import {
   SESSION_ENV_VAR,
   endSession,
   getCurrentSessionId,
+  getCurrentSessionTaskId,
   startSession,
 } from './session-service.js';
 import { createCheckpoint, createHandoff } from './task-service.js';
@@ -35,8 +36,13 @@ async function persistEnvFile(
   targetPath: string,
   entries: Record<string, string>,
 ): Promise<void> {
+  // CLAUDE_ENV_FILE points at a `.sh` script that Claude sources — not a
+  // dotenv-style file. Without `export` the assignments stay shell-local
+  // and never reach the spawned `claude` subprocess (or its tool calls).
+  // Discovered during the rc.4 telemetry investigation: hooks were firing
+  // but MEMORIZE_SESSION_ID was missing from every Bash subprocess.
   const lines = Object.entries(entries).map(
-    ([key, value]) => `${key}=${JSON.stringify(value)}`,
+    ([key, value]) => `export ${key}=${JSON.stringify(value)}`,
   );
   await fs.writeFile(targetPath, `${lines.join('\n')}\n`, 'utf8');
 }
@@ -149,7 +155,14 @@ const handleSessionStart: HookHandler = async (ctx) => {
 
 const handlePostCompact: HookHandler = async (ctx) => {
   const payload = parsePostCompactPayload(ctx.rawPayload);
-  const activeTaskId = await resolveActiveTaskId(ctx.projectId);
+  // Prefer the task this session itself claimed at SessionStart over
+  // project.activeTaskIds[0]. The naive fallback was Gap A in the rc.3
+  // dogfood: it attached every checkpoint to whichever task happened to
+  // be first in the project's active list, even if the calling session
+  // was working on something else entirely.
+  const activeTaskId =
+    (await getCurrentSessionTaskId(ctx.cwd)) ??
+    (await resolveActiveTaskId(ctx.projectId));
   const sessionId =
     payload.sessionId ?? (await getCurrentSessionId(ctx.cwd));
   const summary =
@@ -172,7 +185,11 @@ const handlePostCompact: HookHandler = async (ctx) => {
 
 const handleStop: HookHandler = async (ctx) => {
   const payload = parseStopPayload(ctx.rawPayload);
-  const activeTaskId = await resolveActiveTaskId(ctx.projectId);
+  // Same Gap A fix as PostCompact: hand off the task this session
+  // claimed, not "whatever project.activeTaskIds[0] happens to be."
+  const activeTaskId =
+    (await getCurrentSessionTaskId(ctx.cwd)) ??
+    (await resolveActiveTaskId(ctx.projectId));
   // Hook payloads include the agent's own session_id. Pass it through
   // so endSession resolves correctly even when env/tty disambiguation
   // would have failed (the rc.2 dogfood found Claude's Stop killing

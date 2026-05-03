@@ -9,6 +9,7 @@ import {
   bumpHeartbeat,
   endSession,
   getCurrentSessionId,
+  getCurrentSessionTaskId,
   startSession,
 } from '../../src/services/session-service.js';
 
@@ -120,6 +121,33 @@ describe('multi-session per cwd — Sprint 3-5 fix', () => {
 
     const remaining = await readdir(join(sandbox, '.memorize', 'sessions'));
     expect(remaining).toEqual([`${b}.json`]);
+  });
+
+  it('getCurrentSessionTaskId returns the taskId the session claimed at startSession (Gap A)', async () => {
+    // Regression for the rc.3 dogfood Gap A: PostCompact / Stop hooks
+    // were attributing checkpoints to project.activeTaskIds[0] instead
+    // of the task this session itself claimed. The hook handlers now
+    // call getCurrentSessionTaskId first and only fall back to the
+    // project-level guess if the session never claimed anything.
+    // (The real-project event-log path is exercised in the
+    // picker-deconflict integration test; here we only need the
+    // pointer plumbing.)
+    delete process.env[SESSION_ENV_VAR];
+    const sessionId = await startSession(sandbox, {
+      taskId: 'task_claimed_by_self',
+      actor: 'claude',
+    });
+    process.env[SESSION_ENV_VAR] = sessionId;
+
+    expect(await getCurrentSessionTaskId(sandbox)).toBe('task_claimed_by_self');
+  });
+
+  it('getCurrentSessionTaskId returns undefined when the session has no claimed task', async () => {
+    delete process.env[SESSION_ENV_VAR];
+    const sessionId = await startSession(sandbox, { actor: 'claude' });
+    process.env[SESSION_ENV_VAR] = sessionId;
+
+    expect(await getCurrentSessionTaskId(sandbox)).toBeUndefined();
   });
 
   it('migrates a legacy current-session.json into the sessions/ directory and deletes the original', async () => {

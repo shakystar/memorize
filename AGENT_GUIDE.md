@@ -290,6 +290,17 @@ your machine will invoke the memorize hook. In unrelated directories
 that are not bound to a memorize project, the hook resolves to a
 no-op (`{}`) — memorize is silent there.
 
+**Note: codex sandbox + memorize home directory.** memorize stores
+project state under `~/.memorize/` (overridable via `MEMORIZE_ROOT`).
+Codex's default workspace-write sandbox blocks writes outside the
+project root, so memorize CLI invocations from inside a sandboxed
+codex session — including the ones the agent itself runs to record
+handoffs — will fail unless `~/.memorize/` is added to the sandbox's
+writable roots. The `Stop` hook handler still attributes the session
+correctly because it runs outside the sandbox; the failure mode is
+agent-initiated writes during the session (e.g. `memorize handoff
+create` from inside a codex turn).
+
 ### `memorize hook claude <EventName>`
 
 Internal entry point called by the hooks installed via
@@ -328,6 +339,7 @@ handled automatically after writes.
 | Integrity warnings | Corrupt ndjson line (disk full, crash mid-append) | `memorize events validate` then `memorize projection rebuild` |
 | `.memorize/` committed to git | `.gitignore` missing entry | Add `.memorize/` to `.gitignore`; existing commits need manual cleanup |
 | Hook file clobbered | User rewrote `.claude/settings.local.json` manually | Re-run `memorize install claude`; memorize preserves other hook entries |
+| Codex agent sees `EACCES` writing to `~/.memorize/...` | Codex sandbox blocks writes outside project root | Add `~/.memorize` to the codex sandbox writable roots, or set `MEMORIZE_ROOT` to a path inside the sandbox |
 
 ---
 
