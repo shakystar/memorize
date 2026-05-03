@@ -20,7 +20,7 @@ import {
   readProject,
 } from './project-service.js';
 import { readActiveSessions } from './session-service.js';
-import { readHandoff, readTask } from './task-service.js';
+import { readCheckpoint, readHandoff, readTask } from './task-service.js';
 
 async function readOpenConflicts(projectId: string): Promise<Conflict[]> {
   const conflictsDir = path.join(getProjectRoot(projectId), 'conflicts');
@@ -116,6 +116,10 @@ export async function loadStartContext(params: {
     task?.latestHandoffId
       ? await readHandoff(params.projectId, task.latestHandoffId)
       : undefined;
+  const latestCheckpoint =
+    task?.latestCheckpointId
+      ? await readCheckpoint(params.projectId, task.latestCheckpointId)
+      : undefined;
   const rules = await readProjectRules(params.projectId, project.ruleIds);
 
   const otherActiveTasks = await buildOtherActiveTasks({
@@ -132,6 +136,7 @@ export async function loadStartContext(params: {
       : {}),
     ...(task ? { task } : {}),
     ...(latestHandoff ? { latestHandoff } : {}),
+    ...(latestCheckpoint ? { latestCheckpoint } : {}),
     openConflicts: await readOpenConflicts(params.projectId),
     mustReadTopics: memoryIndex?.mustReadTopics ?? [],
     ...(otherActiveTasks.length > 0 ? { otherActiveTasks } : {}),

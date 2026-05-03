@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import type {
+  Checkpoint,
   Conflict,
   Handoff,
   StartupContextPayload,
@@ -189,6 +190,107 @@ describe('adapter renderers', () => {
       '- task_xyz_2: "Polish renderer budget" — codex, active 5m ago',
     );
     expect(codex).toContain('source="memorize.other-active-tasks"');
+  });
+
+  it('renders latest compact summary for both adapters when present', () => {
+    const checkpoint: Checkpoint = {
+      id: 'checkpoint_abc_1',
+      schemaVersion: '0.1.0',
+      createdAt: ISO,
+      updatedAt: ISO,
+      projectId: 'proj_abc_1',
+      taskId: 'task_abc_1',
+      sessionId: 'sess_abc_1',
+      summary: 'Compacted: implemented renderer scaffolding',
+      taskUpdates: [],
+      projectUpdates: [],
+      promotedDecisions: [],
+      deferredItems: ['Wire character budget', 'Add fixture coverage'],
+      discardableItems: [],
+    };
+    const payload: StartupContextPayload = {
+      ...samplePayload,
+      latestCheckpoint: checkpoint,
+    };
+    const claude = renderClaudeStartupContext(payload);
+    const codex = renderCodexStartupContext(payload);
+
+    expect(claude).toContain(
+      'Latest compact summary: Compacted: implemented renderer scaffolding',
+    );
+    expect(claude).toContain('Deferred items:');
+    expect(claude).toContain('- Wire character budget');
+    expect(claude).toContain('source="memorize.checkpoint"');
+
+    expect(codex).toContain('## Latest compact summary');
+    expect(codex).toContain(
+      '- Summary: Compacted: implemented renderer scaffolding',
+    );
+    expect(codex).toContain('  - Wire character budget');
+    expect(codex).toContain('source="memorize.checkpoint"');
+  });
+
+  it('omits compact summary section when no checkpoint present', () => {
+    expect(renderClaudeStartupContext(samplePayload)).not.toContain(
+      'compact summary',
+    );
+    expect(renderCodexStartupContext(samplePayload)).not.toContain(
+      'compact summary',
+    );
+  });
+
+  it('drops low-priority blocks and renders a budget notice when payload exceeds budget', () => {
+    const payload: StartupContextPayload = {
+      ...samplePayload,
+      task: richTask,
+      latestHandoff: richHandoff,
+      mustReadTopics: [
+        { id: 'topic_1', title: 'Topic A', path: '/a' },
+        { id: 'topic_2', title: 'Topic B', path: '/b' },
+      ],
+      otherActiveTasks: [
+        {
+          id: 'task_other_1',
+          title: 'Other work',
+          status: 'in_progress',
+          assignment: {
+            sessionId: 'sess_other',
+            actor: 'codex',
+            lastSeenAt: ISO,
+            freshness: 'active just now',
+          },
+        },
+      ],
+    };
+
+    // Budget tight enough to fit project + task + handoff (~750 chars)
+    // but trip on other-active-tasks (~135 chars), forcing strict-stop
+    // semantics to drop topics as well.
+    const tightBudget = 850;
+    const claude = renderClaudeStartupContext(payload, { budget: tightBudget });
+    const codex = renderCodexStartupContext(payload, { budget: tightBudget });
+
+    expect(claude).toContain('Project: Memorize shared context system');
+    expect(claude).toContain('Task: Wire renderer fields');
+    expect(claude).toContain('Latest handoff:');
+    expect(claude).not.toContain('Must-read topics:');
+    expect(claude).not.toContain('Other active tasks:');
+    expect(claude).toContain('source="memorize.budget-notice"');
+    expect(claude).toContain('Sections dropped to fit budget');
+
+    expect(codex).toContain('## Project summary');
+    expect(codex).toContain('## Current task');
+    expect(codex).toContain('## Latest handoff');
+    expect(codex).not.toContain('## Must-read topics');
+    expect(codex).not.toContain('## Other active tasks');
+    expect(codex).toContain('## Budget notice');
+  });
+
+  it('does not emit a budget notice when payload fits within budget', () => {
+    const claude = renderClaudeStartupContext(richPayload);
+    const codex = renderCodexStartupContext(richPayload);
+    expect(claude).not.toContain('memorize.budget-notice');
+    expect(codex).not.toContain('memorize.budget-notice');
   });
 
   it('omits other active tasks section when list is empty or undefined', () => {
