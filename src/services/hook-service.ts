@@ -1,7 +1,6 @@
 import fs from 'node:fs/promises';
 
 import type { AdapterAgent } from '../adapters/index.js';
-import { ACTOR_NEXT_AGENT } from '../domain/common.js';
 import {
   detectInjectionMarkers,
   MAX_HOOK_CONTENT_LENGTH,
@@ -21,7 +20,7 @@ import {
   getCurrentSessionTaskId,
   startSession,
 } from './session-service.js';
-import { createCheckpoint, createHandoff } from './task-service.js';
+import { createCheckpoint } from './task-service.js';
 
 interface HookContext {
   projectId: string;
@@ -75,26 +74,12 @@ interface PostCompactPayload {
   compactSummary?: string;
 }
 
-interface StopPayload {
-  lastAssistantMessage?: string;
-}
-
 function parsePostCompactPayload(raw: string | undefined): PostCompactPayload {
   const obj = parseJsonObject(raw);
   const result: PostCompactPayload = {};
   const compactSummary = readStringField(obj, 'compact_summary');
   if (compactSummary !== undefined) {
     result.compactSummary = compactSummary;
-  }
-  return result;
-}
-
-function parseStopPayload(raw: string | undefined): StopPayload {
-  const obj = parseJsonObject(raw);
-  const result: StopPayload = {};
-  const lastAssistantMessage = readStringField(obj, 'last_assistant_message');
-  if (lastAssistantMessage !== undefined) {
-    result.lastAssistantMessage = lastAssistantMessage;
   }
   return result;
 }
@@ -176,46 +161,30 @@ const handlePostCompact: HookHandler = async (ctx) => {
   });
 };
 
-const handleStop: HookHandler = async (ctx) => {
-  const payload = parseStopPayload(ctx.rawPayload);
-  // Same Gap A fix as PostCompact: hand off the task this session
-  // claimed, not "whatever project.activeTaskIds[0] happens to be."
-  const activeTaskId =
-    (await getCurrentSessionTaskId(ctx.cwd)) ??
-    (await resolveActiveTaskId(ctx.projectId));
-  // Do NOT forward payload.sessionId: it's the agent's own ID (Claude
-  // UUID etc.), not a memorize session_xxx, so endSession's pointer
-  // lookup would always miss and silently no-op — exactly the rc.4
-  // dogfood Gap D where Stop fired but session.completed was never
-  // written and pointer files leaked. Env/tty disambiguation (now
-  // reliable post Gap-B) is the right path.
+// β redesign: Stop fires per-turn (every assistant response end), NOT
+// per-session. The rc.0..rc.4 design treated it as session-end, which
+// caused per-turn auto-handoffs to accumulate (handoff = an intentional
+// inter-agent baton-pass, not "the AI just spoke once") and per-turn
+// session-completed events to fire (or fail to fire — rc.4 Gap D). The
+// honest model: handoffs are agent-initiated (`memorize handoff
+// create`), session lifecycle is owned by SessionStart + heartbeat +
+// reapStaleSessions + (when available) the agent's SessionEnd hook.
+// Stop now no-ops; we keep the handler so pre-β installs that still
+// register Stop don't fail when the hook fires.
+const handleStop: HookHandler = async () => EMPTY_HOOK_RESULT;
 
-  if (!activeTaskId) {
-    await endSession(ctx.cwd);
-    return JSON.stringify({
-      systemMessage:
-        'memorize: session ended (no active task, skipped auto-handoff)',
-    });
-  }
-
-  const summary =
-    prepareHookText(
-      payload.lastAssistantMessage,
-      'hook.Stop.last_assistant_message',
-    ) ?? 'No assistant message captured';
-  const agentDisplayName = ctx.agent === 'claude' ? 'Claude' : 'Codex';
-  const handoff = await createHandoff({
-    projectId: ctx.projectId,
-    taskId: activeTaskId,
-    fromActor: ctx.agent,
-    toActor: ACTOR_NEXT_AGENT,
-    summary,
-    nextAction: `Continue from the latest ${agentDisplayName} output.`,
-  });
+const handleSessionEnd: HookHandler = async (ctx) => {
+  // Claude Code's SessionEnd fires regardless of how the session
+  // terminated (clean /exit, Ctrl+C, terminal close — see hook docs
+  // `reason` field: clear/resume/logout/prompt_input_exit/other).
+  // Best-effort cleanup: write session.completed and unlink the cwd
+  // pointer for whichever session this hook resolves to via env/tty.
+  // If the resolution misses (e.g. env propagation lost), the session
+  // stays as 'active' until the next reapStaleSessions sweep abandons
+  // it — graceful degradation, not data loss.
   await endSession(ctx.cwd);
-
   return JSON.stringify({
-    systemMessage: `memorize: handoff ${handoff.id} recorded`,
+    systemMessage: 'memorize: session ended',
   });
 };
 
@@ -226,11 +195,16 @@ const EMPTY_HOOK_RESULT = JSON.stringify({});
 const claudeHookHandlers: Record<string, HookHandler> = {
   SessionStart: handleSessionStart,
   PostCompact: handlePostCompact,
+  SessionEnd: handleSessionEnd,
   Stop: handleStop,
 };
 
 const codexHookHandlers: Record<string, HookHandler> = {
   SessionStart: handleSessionStart,
+  // Codex has no SessionEnd hook (verified against
+  // developers.openai.com/codex/hooks 2026-05). Codex sessions get
+  // cleaned up entirely via reapStaleSessions — either on the next
+  // codex SessionStart in the same cwd or via `memorize session reap`.
   Stop: handleStop,
 };
 

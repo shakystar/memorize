@@ -25,6 +25,24 @@ import { rebuildProjectProjection } from './projection-store.js';
 
 export const SESSION_ENV_VAR = 'MEMORIZE_SESSION_ID';
 
+/**
+ * Pointers older than this without a heartbeat bump are treated as
+ * abandoned — no live agent could reasonably go this long without
+ * issuing a memorize CLI call (heartbeat fires from CLI middleware).
+ * Tunable via MEMORIZE_STALE_SESSION_MS env var for tests / unusual
+ * workflows.
+ */
+const DEFAULT_STALE_SESSION_MS = 30 * 60 * 1000;
+function staleThresholdMs(): number {
+  const raw = process.env.MEMORIZE_STALE_SESSION_MS;
+  if (raw === undefined || raw === '') return DEFAULT_STALE_SESSION_MS;
+  const parsed = Number(raw);
+  // Accept 0 (reap immediately) for tests and aggressive cleanup.
+  return Number.isFinite(parsed) && parsed >= 0
+    ? parsed
+    : DEFAULT_STALE_SESSION_MS;
+}
+
 interface CwdSessionPointer {
   sessionId: string;
   startedAt: string;
@@ -133,6 +151,96 @@ async function findCwdSession(
   return all.sort((a, b) => (a.startedAt < b.startedAt ? 1 : -1))[0];
 }
 
+export interface ReapResult {
+  /** Session ids reaped on this call (status was active, now abandoned). */
+  reapedSessionIds: string[];
+}
+
+/**
+ * Sweeps cwd pointers that have gone past the heartbeat staleness
+ * threshold (or all of them if `force` is set). For each stale pointer
+ * with a projectId, emits a `session.abandoned` event and unlinks the
+ * pointer file. Pointers without a projectId (ambient sessions) are
+ * just unlinked.
+ *
+ * Replaces what rc.0..rc.4 mistakenly tried to do via the per-turn
+ * `Stop` hook. The hook-driven path was never able to distinguish
+ * "agent finished a turn" from "session ended" (and Codex has no
+ * session-end hook at all), so lifecycle authority now lives here:
+ * triggered by `startSession` (next-Start-reaps-stale) and by the
+ * `memorize session reap` command.
+ */
+export async function reapStaleSessions(
+  cwd: string,
+  options: { force?: boolean } = {},
+): Promise<ReapResult> {
+  await migrateLegacyPointer(cwd);
+  const pointers = await listCwdPointers(cwd);
+  if (pointers.length === 0) return { reapedSessionIds: [] };
+
+  const now = Date.now();
+  const threshold = staleThresholdMs();
+  const reaped: string[] = [];
+
+  for (const pointer of pointers) {
+    if (!options.force) {
+      const startedAtMs = Date.parse(pointer.startedAt);
+      // Use projection's lastSeenAt when available — it tracks heartbeats
+      // bumped by every memorize CLI call, which is a much fresher signal
+      // than the pointer's startedAt.
+      let lastActivityMs = startedAtMs;
+      if (pointer.projectId) {
+        try {
+          const sessionFromProjection = await readJson<Session>(
+            path.join(getSessionsDir(pointer.projectId), `${pointer.sessionId}.json`),
+          );
+          if (sessionFromProjection?.lastSeenAt) {
+            lastActivityMs = Date.parse(sessionFromProjection.lastSeenAt);
+          }
+        } catch {
+          // Ignore: fall back to pointer.startedAt.
+        }
+      }
+      if (now - lastActivityMs < threshold) continue;
+    }
+
+    if (pointer.projectId) {
+      const endedAt = nowIso();
+      const abandonedPayload: Session = {
+        id: pointer.sessionId,
+        schemaVersion: CURRENT_SCHEMA_VERSION,
+        createdAt: pointer.startedAt,
+        updatedAt: endedAt,
+        projectId: pointer.projectId,
+        ...(pointer.taskId ? { taskId: pointer.taskId } : {}),
+        actor: pointer.startedBy ?? ACTOR_SYSTEM,
+        startedAt: pointer.startedAt,
+        endedAt,
+        lastSeenAt: endedAt,
+        status: 'abandoned',
+      };
+      await appendEvent({
+        type: 'session.abandoned',
+        projectId: pointer.projectId,
+        scopeType: 'session',
+        scopeId: pointer.sessionId,
+        actor: pointer.startedBy ?? ACTOR_SYSTEM,
+        payload: abandonedPayload,
+      });
+      await rebuildProjectProjection(pointer.projectId);
+    }
+
+    try {
+      await fs.unlink(cwdSessionFile(cwd, pointer.sessionId));
+    } catch (error) {
+      if (!isEnoent(error)) throw error;
+    }
+    reaped.push(pointer.sessionId);
+  }
+
+  return { reapedSessionIds: reaped };
+}
+
 export interface StartSessionOptions {
   actor?: string;
   projectId?: string;
@@ -144,6 +252,11 @@ export async function startSession(
   options: StartSessionOptions = {},
 ): Promise<string> {
   await migrateLegacyPointer(cwd);
+  // Sweep prior abandoned pointers in this cwd before minting a new
+  // session. Live concurrent sessions (heartbeating within the
+  // staleness threshold) are spared — only truly stale pointers get
+  // reaped here.
+  await reapStaleSessions(cwd);
 
   const actor = options.actor ?? 'ambient';
   let sessionId: string;

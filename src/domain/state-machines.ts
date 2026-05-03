@@ -22,8 +22,9 @@ const workstreamTransitions: Record<WorkstreamStatus, WorkstreamStatus[]> = {
 };
 
 const sessionTransitions: Record<Session['status'], Session['status'][]> = {
-  active: ['completed'],
+  active: ['completed', 'abandoned'],
   completed: [],
+  abandoned: [],
 };
 
 const conflictTransitions: Record<ConflictStatus, ConflictStatus[]> = {

@@ -10,6 +10,7 @@ import {
   endSession,
   getCurrentSessionId,
   getCurrentSessionTaskId,
+  reapStaleSessions,
   startSession,
 } from '../../src/services/session-service.js';
 
@@ -184,5 +185,53 @@ describe('multi-session per cwd — Sprint 3-5 fix', () => {
       sessionId: 'session_legacy_xx',
       startedBy: 'claude',
     });
+  });
+});
+
+describe('reapStaleSessions — β lifecycle ownership', () => {
+  it('does not reap a freshly started session (within the staleness threshold)', async () => {
+    delete process.env[SESSION_ENV_VAR];
+    const a = await startSession(sandbox);
+    const result = await reapStaleSessions(sandbox);
+    expect(result.reapedSessionIds).toEqual([]);
+    // Pointer still on disk for the live session.
+    const remaining = await readdir(join(sandbox, '.memorize', 'sessions'));
+    expect(remaining).toEqual([`${a}.json`]);
+  });
+
+  it('with force: true reaps every cwd pointer regardless of age', async () => {
+    delete process.env[SESSION_ENV_VAR];
+    const a = await startSession(sandbox);
+    delete process.env[SESSION_ENV_VAR];
+    const b = await startSession(sandbox);
+    const result = await reapStaleSessions(sandbox, { force: true });
+    expect(result.reapedSessionIds.sort()).toEqual([a, b].sort());
+    const remaining = await readdir(join(sandbox, '.memorize', 'sessions')).catch(
+      () => [] as string[],
+    );
+    expect(remaining).toEqual([]);
+  });
+
+  it('startSession sweeps prior pointers in the same cwd via force-aware reap (env override)', async () => {
+    // MEMORIZE_STALE_SESSION_MS=0 means "every existing pointer is
+    // already past the threshold," so the next startSession will reap
+    // them on the way in. This is the production path that prevents
+    // accumulation of dead Codex pointers across runs (Codex has no
+    // session-end hook so reap is the only cleanup mechanism).
+    process.env.MEMORIZE_STALE_SESSION_MS = '0';
+    try {
+      delete process.env[SESSION_ENV_VAR];
+      await startSession(sandbox);
+      delete process.env[SESSION_ENV_VAR];
+      await startSession(sandbox);
+      delete process.env[SESSION_ENV_VAR];
+      const c = await startSession(sandbox);
+      const remaining = await readdir(join(sandbox, '.memorize', 'sessions'));
+      // Only the latest pointer survives — older ones reaped by c's
+      // entry into startSession.
+      expect(remaining).toEqual([`${c}.json`]);
+    } finally {
+      delete process.env.MEMORIZE_STALE_SESSION_MS;
+    }
   });
 });

@@ -51,12 +51,34 @@ outputs as a cache that must be re-validated — not as authoritative.
 3. **Startup payload** is a small bundle built from the projection
    and rendered per-agent (`claude` vs `codex` formats differ).
 4. **Install hooks** wire your agent runtime:
-   - Claude Code: `.claude/settings.local.json` (per-project).
+   - Claude Code: `.claude/settings.local.json` (per-project) — registers
+     `SessionStart`, `PreCompact`, `PostCompact`, `SessionEnd`.
    - Codex: `~/.codex/hooks.json` (global per-user; the handler no-ops
-     when cwd is not a memorize-bound project).
+     when cwd is not a memorize-bound project) — registers `SessionStart`
+     only. Codex has no SessionEnd / Shutdown hook.
 
-   In both cases the hook calls `memorize hook <agent> SessionStart`
-   and the output is injected as `hookSpecificOutput.additionalContext`.
+   In both cases the SessionStart hook calls `memorize hook <agent>
+   SessionStart` and the output is injected as
+   `hookSpecificOutput.additionalContext`.
+
+5. **Session lifecycle** is owned by memorize, not by per-turn hooks.
+   - `SessionStart` mints a new session, claims a task (best-effort),
+     and reaps any prior abandoned pointers in the same cwd.
+   - Heartbeat events fire from every memorize CLI call — they keep
+     the session's `lastSeenAt` fresh.
+   - Claude `SessionEnd` writes `session.completed` and unlinks the
+     cwd pointer when the agent exits cleanly.
+   - For Ctrl+C, crashes, and Codex (which has no end-hook), the next
+     `SessionStart` in the same cwd reaps stale pointers (older than
+     30 min by default; tunable via `MEMORIZE_STALE_SESSION_MS`) and
+     emits `session.abandoned`. Run `memorize session reap` to force a
+     sweep at any time.
+6. **Handoffs are agent-initiated.** The `Stop` hook used to auto-write
+   a handoff at every assistant turn — that conflated "turn end" with
+   "session end." Now agents call `memorize handoff create ...` only
+   when they actually want to hand off control or summarize their work
+   for the next agent. Treat handoffs as intentional artifacts, not
+   automatic ones.
 
 You interact with memorize through the CLI; never hand-edit
 `.memorize/` files.

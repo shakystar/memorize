@@ -44,29 +44,14 @@ function runCli(args: string[]): ReturnType<typeof spawnSync> {
   });
 }
 
-// Stop hook's content guardrails (truncation, injection warnings) now
-// only fire on the path that actually persists a handoff — which
-// requires an active task. Bootstrap a task for tests that need to
-// exercise that path.
-function bootstrapProjectWithTask(): void {
-  const sessionStart = runHook(
-    'SessionStart',
-    JSON.stringify({
-      cwd: sandbox,
-      hook_event_name: 'SessionStart',
-      session_id: 'trust_session',
-    }),
-  );
-  if (sessionStart.status !== 0) {
-    throw new Error(
-      `SessionStart bootstrap failed: ${String(sessionStart.stderr)}`,
-    );
-  }
-  const taskCreate = runCli(['task', 'create', 'Trust boundary test task']);
-  if (taskCreate.status !== 0) {
-    throw new Error(
-      `task create bootstrap failed: ${String(taskCreate.stderr)}`,
-    );
+// β redesign moved Stop to a pure no-op. The remaining hook that
+// reads stdin content and runs it through truncation / injection
+// warnings is PostCompact (`compact_summary`). These tests now drive
+// the trust boundary through that path.
+function bootstrapProject(): void {
+  const setup = runCli(['project', 'setup']);
+  if (setup.status !== 0) {
+    throw new Error(`project setup failed: ${String(setup.stderr)}`);
   }
 }
 
@@ -87,13 +72,12 @@ afterEach(async () => {
 
 describe('hook stdin trust boundary', () => {
   it('handles invalid JSON without crashing', () => {
-    bootstrapProjectWithTask();
-    const result = runHook('Stop', 'this is not valid json {{{');
+    bootstrapProject();
+    const result = runHook('PostCompact', 'this is not valid json {{{');
     expect(result.status).toBe(0);
     expect(String(result.stderr)).toContain('not valid JSON');
-    // Stop hooks emit a plain `systemMessage`, not hookSpecificOutput.
     expect(String(result.stdout)).toContain('"systemMessage"');
-    expect(String(result.stdout)).toContain('memorize: handoff');
+    expect(String(result.stdout)).toContain('memorize: checkpoint');
   });
 
   it('rejects non-object JSON payloads gracefully', () => {
@@ -103,27 +87,27 @@ describe('hook stdin trust boundary', () => {
   });
 
   it('ignores wrong-typed fields without throwing', () => {
-    bootstrapProjectWithTask();
+    bootstrapProject();
     const result = runHook(
-      'Stop',
-      JSON.stringify({ last_assistant_message: 42, session_id: true }),
+      'PostCompact',
+      JSON.stringify({ compact_summary: 42, session_id: true }),
     );
     expect(result.status).toBe(0);
-    expect(String(result.stdout)).toContain('memorize: handoff');
+    expect(String(result.stdout)).toContain('memorize: checkpoint');
   });
 
   it('truncates oversized hook content and emits a warning', () => {
-    bootstrapProjectWithTask();
+    bootstrapProject();
     const oversized = 'x'.repeat(MAX_HOOK_CONTENT_LENGTH + 10);
     const result = runHook(
-      'Stop',
-      JSON.stringify({ last_assistant_message: oversized }),
+      'PostCompact',
+      JSON.stringify({ compact_summary: oversized }),
     );
     expect(result.status).toBe(0);
     expect(String(result.stderr)).toContain(
-      `hook.Stop.last_assistant_message truncated from ${MAX_HOOK_CONTENT_LENGTH + 10}`,
+      `hook.PostCompact.compact_summary truncated from ${MAX_HOOK_CONTENT_LENGTH + 10}`,
     );
-    expect(String(result.stdout)).toContain('memorize: handoff');
+    expect(String(result.stdout)).toContain('memorize: checkpoint');
   });
 
   it('warns on injection markers in hook payloads but still records', () => {

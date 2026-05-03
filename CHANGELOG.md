@@ -7,50 +7,80 @@ loosely. The project adheres to [Semantic Versioning](https://semver.org/);
 major-version bumps are reserved for breaking changes to the on-disk event
 log layout or the public CLI surface.
 
-## [1.0.0-rc.4] — 2026-05-03
+## [1.0.0-rc.5] — 2026-05-03
 
-Four gaps surfaced by the rc.3 dogfood. Gap B is the most load-bearing
-(without it, every Claude tool subprocess saw `MEMORIZE_SESSION_ID` as
-unset, silently degrading every other session-aware code path); Gap D
-was discovered while verifying the Gap B fix.
+Session lifecycle redesign (β track). The rc.0..rc.4 line treated
+Claude's `Stop` hook as session-end; in fact `Stop` fires per assistant
+turn, which produced one bogus auto-handoff per turn and (in rc.3+)
+caused per-turn `session.completed` event attempts. Verified by data:
+the duo-pane dogfood log shows 4 handoffs in 49 seconds across a single
+session. Codex has the same per-turn `Stop` semantics and no
+session-end hook of any kind.
 
-### Fixed
+This release moves session lifecycle off per-turn hooks entirely.
 
-- **Gap B — `CLAUDE_ENV_FILE` propagation.** Claude's
-  `CLAUDE_ENV_FILE` is a shell script Claude `source`s, not a dotenv
-  file. memorize was writing `KEY="value"` lines without `export`, so
-  the assignments stayed shell-local and never reached the `claude`
-  process or its tool subprocesses. Now writes `export KEY="value"`,
-  which is what the file extension (`.sh`) implied all along.
-  Verifiable in any Claude session via `env | grep MEMORIZE`.
-- **Gap A — hook task attribution.** `PostCompact` and `Stop`
-  resolved the active task via `project.activeTaskIds[0]`, which
-  picks an arbitrary other agent's work whenever the calling session
-  did not happen to claim the first task. Hook handlers now read the
-  taskId the calling session itself claimed at `SessionStart` (via
-  the new `getCurrentSessionTaskId`) and only fall back to the
-  project-level guess when the session never claimed anything.
-- **Gap D — Stop hook silently leaking sessions.** The rc.3 fix
-  forwarded the agent's payload `session_id` to `endSession` as if
-  it were a memorize session id. Claude/Codex payloads speak their
-  own ID space (Claude UUIDs etc.), so the pointer lookup always
-  missed and `endSession` returned early — `session.completed` was
-  never written, pointer files leaked, and the projection
-  accumulated dead "active" sessions that blocked the picker.
-  Discovered in production: 13 stale active sessions claiming tasks
-  in the duo-pane dogfood project. Hook handlers now ignore
-  `payload.sessionId` and resolve the calling session via env/tty
-  (now reliable post Gap-B). The `endSession({ sessionId })` API
-  itself is preserved for memorize-aware callers (scripts, tests).
+### Changed (breaking for anyone who depended on per-turn auto-handoffs)
+
+- **`Stop` hook is now a no-op.** Both `memorize hook claude Stop` and
+  `memorize hook codex Stop` return `{}`. They no longer create
+  handoffs and no longer touch the session pointer. Pre-β installs
+  that still register Stop continue to work — the no-op response
+  satisfies the schema. `memorize install claude` and `memorize
+  install codex` strip memorize's Stop registration on re-run while
+  preserving any user-added Stop entries for other tools.
+- **Handoffs are agent-initiated.** Agents must call `memorize
+  handoff create ...` explicitly when they actually want to summarize
+  work and pass control. Auto-creation per turn is gone.
+- **Claude `SessionEnd` hook is registered on install.** It fires on
+  every termination path Claude exposes (clean `/exit`, `Ctrl+C`,
+  terminal close — see `reason` field) and writes a clean
+  `session.completed` plus unlinks the cwd pointer.
+- **Codex lifecycle owned entirely by `reapStaleSessions`.** Codex
+  has no `SessionEnd` / `Shutdown` hook (verified against
+  developers.openai.com/codex/hooks 2026-05). The next codex
+  `SessionStart` in the same cwd reaps prior abandoned pointers; the
+  new `memorize session reap` command lets users force a sweep.
+
+### Added
+
+- **`session.abandoned` event + Session status.** Distinct from
+  `session.completed`: a session that ended without a clean shutdown
+  (Ctrl+C, crash, codex exit, heartbeat timeout). The picker treats
+  abandoned the same as completed (not active) so the underlying
+  task is fair game for the next agent.
+- **`reapStaleSessions(cwd, { force? })`.** Sweeps cwd pointers past
+  the heartbeat staleness threshold (`MEMORIZE_STALE_SESSION_MS`,
+  default 30 min). Triggered automatically by `startSession` and
+  exposed via `memorize session reap`.
+- **`memorize session reap [--force]` CLI command.**
+
+### Fixed (carried from the partial rc.4 work)
+
+- **Gap B — `CLAUDE_ENV_FILE` propagation.** memorize was writing
+  `KEY="value"` lines to a `.sh` script Claude sources; without
+  `export` the assignments stayed shell-local. Now writes
+  `export KEY="value"`. Verifiable via `env | grep MEMORIZE`.
+- **Gap A — checkpoint task attribution.** `PostCompact` resolved
+  the active task via `project.activeTaskIds[0]`, picking an
+  arbitrary other agent's work whenever the calling session was on
+  something else. Now reads the task this session claimed at
+  `SessionStart` (via `getCurrentSessionTaskId`).
 
 ### Documented
 
 - **Gap C — Codex sandbox + memorize home.** Codex's default
-  workspace-write sandbox blocks writes to `~/.memorize/`, so
-  agent-initiated memorize CLI calls inside a sandboxed turn fail
-  with `EACCES`. `AGENT_GUIDE.md` now documents the workaround
-  (allowlist `~/.memorize` or set `MEMORIZE_ROOT` inside the
-  sandbox).
+  workspace-write sandbox blocks writes to `~/.memorize/`. Workaround:
+  allowlist `~/.memorize` or set `MEMORIZE_ROOT` inside the sandbox.
+- **Lifecycle ownership.** `AGENT_GUIDE.md` now documents the new
+  `SessionStart` → heartbeat → `SessionEnd` / reap flow and the
+  agent-initiated handoff contract.
+
+### Skipped
+
+The `1.0.0-rc.4` cut never shipped — it was rolled forward into rc.5
+when the Stop=session-end design flaw was discovered during rc.4
+verification. See `tests/integration/task-aware-hooks.test.ts` and
+`AGENT_GUIDE.md` for the post-β contract.
 
 ## [1.0.0-rc.3] — 2026-05-03
 

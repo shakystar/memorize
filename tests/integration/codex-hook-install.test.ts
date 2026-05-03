@@ -37,7 +37,13 @@ afterEach(async () => {
 });
 
 describe('install codex hooks', () => {
-  it('creates ~/.codex/hooks.json with memorize SessionStart + Stop entries', async () => {
+  it('creates ~/.codex/hooks.json with only the memorize SessionStart entry (β redesign drops Stop)', async () => {
+    // β redesign: codex has no SessionEnd / Shutdown hook (verified
+    // against developers.openai.com/codex/hooks). Stop fires per-turn,
+    // so wiring it caused the same bogus per-turn artifacts as Claude.
+    // Codex lifecycle is owned entirely by reapStaleSessions; the only
+    // hook we register is SessionStart (which itself triggers the reap
+    // sweep on entry).
     const result = runCli(['install', 'codex']);
     expect(result.status).toBe(0);
 
@@ -59,20 +65,25 @@ describe('install codex hooks', () => {
       ),
     ).toBe(true);
 
+    // Memorize must NOT appear under Stop after a clean install. A
+    // pre-β install would have planted us there; install must also
+    // strip it out on re-run.
     const stop = hooks.hooks.Stop ?? [];
     expect(
       stop.some((group) =>
         group.hooks.some((h) =>
-          h.command.includes('@shakystar/memorize hook codex Stop'),
+          h.command.includes('memorize hook codex Stop'),
         ),
       ),
-    ).toBe(true);
+    ).toBe(false);
   });
 
-  it('preserves existing third-party hooks and places memorize first', async () => {
+  it('preserves existing third-party Stop entries while removing legacy memorize Stop', async () => {
     const { mkdir, writeFile } = await import('node:fs/promises');
     const hooksPath = join(codexHome, '.codex', 'hooks.json');
     await mkdir(join(codexHome, '.codex'), { recursive: true });
+    // Simulate a pre-β install: memorize Stop alongside an unrelated
+    // OMX Stop. After install, OMX stays, memorize is gone.
     await writeFile(
       hooksPath,
       JSON.stringify(
@@ -86,7 +97,10 @@ describe('install codex hooks', () => {
             ],
             Stop: [
               {
-                hooks: [{ type: 'command', command: 'node /path/to/omx.js' }],
+                hooks: [
+                  { type: 'command', command: 'npx @shakystar/memorize hook codex Stop' },
+                  { type: 'command', command: 'node /path/to/omx.js' },
+                ],
               },
             ],
           },
@@ -114,9 +128,13 @@ describe('install codex hooks', () => {
     );
     expect(sessionStart[1]?.hooks[0]?.command).toContain('omx.js');
 
-    const stop = hooks.hooks.Stop!;
-    expect(stop[0]?.hooks[0]?.command).toContain('memorize hook codex Stop');
-    expect(stop[1]?.hooks[0]?.command).toContain('omx.js');
+    // Stop entries: memorize stripped, OMX preserved.
+    const stop = hooks.hooks.Stop ?? [];
+    const stopCommands = stop.flatMap((g) => g.hooks.map((h) => h.command));
+    expect(stopCommands.some((cmd) => cmd.includes('memorize hook codex Stop'))).toBe(
+      false,
+    );
+    expect(stopCommands.some((cmd) => cmd.includes('omx.js'))).toBe(true);
   });
 
   it('is idempotent — a second install does not duplicate memorize entries', async () => {

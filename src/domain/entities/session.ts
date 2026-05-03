@@ -10,7 +10,11 @@ export interface Session extends BaseEntity {
   endedAt?: ISODateString;
   /** Most recent activity attributed to this session — bumped on heartbeat events. */
   lastSeenAt: ISODateString;
-  status: 'active' | 'completed';
+  /** `active` while running, `completed` on a clean end (Claude SessionEnd
+   *  hook, explicit CLI), `abandoned` when reaped without a clean end
+   *  (heartbeat timeout, next SessionStart in the same cwd, or explicit
+   *  `memorize session reap`). */
+  status: 'active' | 'completed' | 'abandoned';
 }
 
 export interface SessionHeartbeatPayload {

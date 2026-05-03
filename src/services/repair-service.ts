@@ -115,7 +115,7 @@ async function checkClaudeInstall(
       fix: 'memorize install claude',
     };
   }
-  const events = ['SessionStart', 'PreCompact', 'PostCompact', 'Stop'];
+  const events = ['SessionStart', 'PreCompact', 'PostCompact', 'SessionEnd'];
   const hooks = settings.hooks ?? {};
 
   const hasLegacyShape = events.some((event) => {
@@ -164,7 +164,7 @@ async function checkClaudeInstall(
     id: 'install.claude',
     label: 'Claude hook integration',
     status: 'ok',
-    message: `All 4 memorize hooks present in .claude/settings.local.json`,
+    message: `All ${events.length} memorize hooks present in .claude/settings.local.json`,
   };
 }
 
@@ -198,7 +198,9 @@ async function checkCodexInstall(
     };
   }
 
-  const events = ['SessionStart', 'Stop'];
+  // Codex has no SessionEnd hook (verified May 2026), so SessionStart
+  // is the only memorize entry we expect to see post-β-redesign.
+  const events = ['SessionStart'];
   const hooks = parsed.hooks ?? {};
   const missing = events.filter((event) => {
     const list = hooks[event] ?? [];

@@ -75,40 +75,17 @@ describe('task-aware hook semantics', () => {
     expect(taskContent).toContain('latestCheckpointId');
   });
 
-  it('attaches Stop handoffs to the current active task', async () => {
+  it('SessionEnd hook completes the calling session and unlinks its cwd pointer', async () => {
+    // β redesign: lifecycle moved off the per-turn Stop hook to
+    // Claude's actual SessionEnd hook. Stop is now no-op (handoffs are
+    // agent-initiated). SessionEnd writes session.completed and unlinks
+    // the cwd pointer. The "session_id" the Claude payload carries is
+    // its own UUID (different ID space from memorize's session_xxx),
+    // so the handler resolves the calling session via env-propagated
+    // MEMORIZE_SESSION_ID — exactly the production wire format.
     runCli(['project', 'setup']);
-    runCli(['task', 'create', 'Wire', 'task-aware', 'handoff']);
+    runCli(['task', 'create', 'SessionEnd', 'regression']);
 
-    const result = runHook('Stop', {
-      cwd: sandbox,
-      hook_event_name: 'Stop',
-      session_id: 'session_task_2',
-      last_assistant_message: 'Task-aware stop summary',
-    });
-    expect(result.status).toBe(0);
-
-    const projectDirs = await readdir(join(memorizeRoot, 'projects'));
-    const taskFiles = await readdir(join(memorizeRoot, 'projects', projectDirs[0]!, 'tasks'));
-    const taskContent = await readFile(
-      join(memorizeRoot, 'projects', projectDirs[0]!, 'tasks', taskFiles[0]!),
-      'utf8',
-    );
-
-    expect(taskContent).toContain('latestHandoffId');
-    expect(taskContent).toContain('handoff_ready');
-  });
-
-  it('Stop hook completes the calling session and unlinks its cwd pointer (rc.4 Gap D)', async () => {
-    // Regression for rc.4 Gap D: handleStop used to forward the agent's
-    // payload session_id (Claude UUID) to endSession, which looked up a
-    // pointer that did not exist and silently no-op'd. Result: handoffs
-    // got written but session.completed events never fired and pointer
-    // files leaked, so the projection accumulated dead "active"
-    // sessions that blocked the picker indefinitely.
-    runCli(['project', 'setup']);
-    runCli(['task', 'create', 'Gap', 'D', 'regression']);
-
-    // Pretend a SessionStart fired and stamped a memorize-side pointer.
     const sessionStart = runHook('SessionStart', {
       cwd: sandbox,
       hook_event_name: 'SessionStart',
@@ -120,32 +97,23 @@ describe('task-aware hook semantics', () => {
     expect(sessionsBefore.length).toBe(1);
     const memorizeSessionId = sessionsBefore[0]!.replace(/\.json$/, '');
 
-    // Drive Stop with a payload whose session_id is an agent-shaped
-    // UUID (unrelated to the memorize session id) — exactly the wire
-    // format Claude uses. Production env propagation goes through
-    // CLAUDE_ENV_FILE → source → exported MEMORIZE_SESSION_ID; in this
-    // test we set it directly so the Stop subprocess can resolve the
-    // pointer the way real Claude tool subprocesses do.
-    const stop = runHook(
-      'Stop',
+    const sessionEnd = runHook(
+      'SessionEnd',
       {
         cwd: sandbox,
-        hook_event_name: 'Stop',
+        hook_event_name: 'SessionEnd',
         session_id: 'c0000000-0000-0000-0000-000000000001',
-        last_assistant_message: 'Gap D regression',
+        reason: 'logout',
       },
       { MEMORIZE_SESSION_ID: memorizeSessionId },
     );
-    expect(stop.status).toBe(0);
+    expect(sessionEnd.status).toBe(0);
 
-    // Pointer file for the just-ended session must be gone.
     const sessionsAfter = await readdir(join(sandbox, '.memorize', 'sessions')).catch(
       () => [] as string[],
     );
     expect(sessionsAfter.length).toBe(0);
 
-    // session.completed must appear in the project event log so the
-    // projection no longer counts this session as active.
     const projectDirs = await readdir(join(memorizeRoot, 'projects'));
     const events = await readdir(join(memorizeRoot, 'projects', projectDirs[0]!, 'events'));
     let sawCompleted = false;

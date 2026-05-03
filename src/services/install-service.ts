@@ -16,8 +16,18 @@ const CLAUDE_HOOK_COMMANDS = {
   SessionStart: 'npx @shakystar/memorize hook claude SessionStart',
   PreCompact: 'npx @shakystar/memorize hook claude PreCompact',
   PostCompact: 'npx @shakystar/memorize hook claude PostCompact',
-  Stop: 'npx @shakystar/memorize hook claude Stop',
+  SessionEnd: 'npx @shakystar/memorize hook claude SessionEnd',
 } as const;
+
+// Hook commands previous installs registered for memorize that the
+// current β-track design no longer wants. We strip these from the
+// merged settings so re-running `install claude` migrates an existing
+// project off the per-turn auto-handoff path. Keep the list narrow —
+// only memorize-owned commands; user-added Stop hooks for other tools
+// must be untouched.
+const CLAUDE_LEGACY_MEMORIZE_HOOK_COMMANDS = [
+  'npx @shakystar/memorize hook claude Stop',
+] as const;
 
 // Claude Code expects each hook event to hold an array of matcher
 // groups, where every group itself carries a `hooks` array of
@@ -59,6 +69,26 @@ function ensureMemorizeCommand(
       hooks: [{ type: 'command', command }],
     },
   ];
+}
+
+/**
+ * Strip a memorize-owned hook command from a matcher-group list,
+ * preserving any other entries the user may have added under the same
+ * event. Returns undefined when removing our entry leaves the event
+ * with no groups, so the caller can drop the event key entirely.
+ */
+function stripMemorizeCommand(
+  list: HookMatcherGroup[] | undefined,
+  command: string,
+): HookMatcherGroup[] | undefined {
+  if (!list) return undefined;
+  const cleaned = list
+    .map((group) => ({
+      ...group,
+      hooks: group.hooks.filter((entry) => entry.command !== command),
+    }))
+    .filter((group) => group.hooks.length > 0);
+  return cleaned.length > 0 ? cleaned : undefined;
 }
 
 function coerceLegacyList(
@@ -124,23 +154,41 @@ export async function installClaudeIntegration(cwd: string): Promise<string> {
     if (groups) migrated[event] = groups;
   }
 
+  // Strip legacy memorize-owned hook commands first so the merged
+  // result reflects only the current β contract. Anything user-added
+  // under the same event keys stays put.
+  const purged: HooksMap = { ...migrated };
+  for (const legacyCommand of CLAUDE_LEGACY_MEMORIZE_HOOK_COMMANDS) {
+    for (const event of Object.keys(purged)) {
+      const cleaned = stripMemorizeCommand(purged[event], legacyCommand);
+      if (cleaned) {
+        purged[event] = cleaned;
+      } else {
+        delete purged[event];
+      }
+    }
+  }
+
   const merged = {
     ...settings,
     hooks: {
-      ...migrated,
+      ...purged,
       SessionStart: ensureMemorizeCommand(
-        migrated.SessionStart,
+        purged.SessionStart,
         CLAUDE_HOOK_COMMANDS.SessionStart,
       ),
       PreCompact: ensureMemorizeCommand(
-        migrated.PreCompact,
+        purged.PreCompact,
         CLAUDE_HOOK_COMMANDS.PreCompact,
       ),
       PostCompact: ensureMemorizeCommand(
-        migrated.PostCompact,
+        purged.PostCompact,
         CLAUDE_HOOK_COMMANDS.PostCompact,
       ),
-      Stop: ensureMemorizeCommand(migrated.Stop, CLAUDE_HOOK_COMMANDS.Stop),
+      SessionEnd: ensureMemorizeCommand(
+        purged.SessionEnd,
+        CLAUDE_HOOK_COMMANDS.SessionEnd,
+      ),
     },
   };
 
@@ -155,8 +203,16 @@ const LEGACY_CODEX_END_MARKER = '<!-- Memorize:END -->';
 
 const CODEX_HOOK_COMMANDS = {
   SessionStart: 'npx @shakystar/memorize hook codex SessionStart',
-  Stop: 'npx @shakystar/memorize hook codex Stop',
 } as const;
+
+// Codex has no SessionEnd / Shutdown / Exit hook of any kind (verified
+// against developers.openai.com/codex/hooks 2026-05). Codex Stop fires
+// per-turn just like Claude's, so the rc.X auto-handoff path was wrong
+// here too. Strip the legacy registration on re-install; lifecycle for
+// codex is owned entirely by reapStaleSessions.
+const CODEX_LEGACY_MEMORIZE_HOOK_COMMANDS = [
+  'npx @shakystar/memorize hook codex Stop',
+] as const;
 
 function codexHooksPath(): string {
   return path.join(os.homedir(), '.codex', 'hooks.json');
@@ -179,6 +235,21 @@ export async function installCodexHooks(): Promise<string> {
   for (const [event, value] of Object.entries(rawHooks)) {
     const groups = coerceLegacyList(value);
     if (groups) migrated[event] = groups;
+  }
+
+  // Drop legacy memorize-owned commands the β contract no longer
+  // wants. Same care as Claude install: only memorize-prefixed
+  // entries are removed.
+  const purged: HooksMap = { ...migrated };
+  for (const legacyCommand of CODEX_LEGACY_MEMORIZE_HOOK_COMMANDS) {
+    for (const event of Object.keys(purged)) {
+      const cleaned = stripMemorizeCommand(purged[event], legacyCommand);
+      if (cleaned) {
+        purged[event] = cleaned;
+      } else {
+        delete purged[event];
+      }
+    }
   }
 
   // Prepend memorize entries so our context is established before any
@@ -208,13 +279,12 @@ export async function installCodexHooks(): Promise<string> {
   const merged = {
     ...settings,
     hooks: {
-      ...migrated,
+      ...purged,
       SessionStart: prependMemorize(
-        migrated.SessionStart,
+        purged.SessionStart,
         CODEX_HOOK_COMMANDS.SessionStart,
         'startup|resume',
       ),
-      Stop: prependMemorize(migrated.Stop, CODEX_HOOK_COMMANDS.Stop),
     },
   };
 

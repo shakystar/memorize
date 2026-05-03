@@ -85,7 +85,12 @@ describe('claude hook lifecycle', () => {
     expect(checkpointFiles.length).toBeGreaterThan(0);
   });
 
-  it('creates a handoff-ready artifact on Stop when an active task exists', async () => {
+  it('Stop hook is a no-op (β redesign — handoffs are agent-initiated, not per-turn)', async () => {
+    // rc.0..rc.4 wired Stop to auto-create a handoff every time the
+    // assistant finished a turn. That conflated "turn end" with
+    // "session end" and produced one bogus handoff per turn. β model:
+    // Stop returns `{}`, agents call `memorize handoff create`
+    // explicitly when they actually want to hand off.
     const sessionStart = runHook('SessionStart', {
       cwd: sandbox,
       hook_event_name: 'SessionStart',
@@ -93,67 +98,79 @@ describe('claude hook lifecycle', () => {
     });
     expect(sessionStart.status).toBe(0);
 
-    // Stop needs an active task to produce a meaningful handoff.
-    const taskCreate = runCli(['task', 'create', 'Test task']);
-    expect(taskCreate.status).toBe(0);
+    runCli(['task', 'create', 'Test task']);
 
     const result = runHook('Stop', {
       cwd: sandbox,
       hook_event_name: 'Stop',
       session_id: 'session_2',
-      last_assistant_message: 'Finished the current pass and prepared the next step.',
+      last_assistant_message: 'Finished the current pass.',
     });
 
     expect(result.status).toBe(0);
-    // Stop output must be a plain top-level `systemMessage` — Claude
-    // Code rejects a `hookSpecificOutput` block on this event.
-    expect(result.stdout).not.toContain('"hookSpecificOutput"');
-    expect(result.stdout).toContain('"systemMessage"');
-    expect(result.stdout).toContain('memorize: handoff');
-
-    const projectsRoot = join(memorizeRoot, 'projects');
-    const projectDirs = await readdir(projectsRoot);
-    const handoffsDir = join(projectsRoot, projectDirs[0]!, 'handoffs');
-    const handoffFiles = await readdir(handoffsDir);
-    expect(handoffFiles.length).toBeGreaterThan(0);
-
-    const handoffContent = await readFile(join(handoffsDir, handoffFiles[0]!), 'utf8');
-    expect(handoffContent).toContain('Finished the current pass');
-
-    // Regression guard: the handoff's taskId must match a memorize task
-    // id (task_*), not a Claude Code session UUID. A UUID-shaped taskId
-    // would orphan the handoff from the projection and hide it from
-    // `task resume`.
-    const parsed = JSON.parse(handoffContent) as { taskId: string };
-    expect(parsed.taskId).toMatch(/^task_[a-z0-9]+_[a-z0-9]+$/);
-  });
-
-  it('skips auto-handoff on Stop when no active task exists', async () => {
-    const sessionStart = runHook('SessionStart', {
-      cwd: sandbox,
-      hook_event_name: 'SessionStart',
-      session_id: 'session_3',
-    });
-    expect(sessionStart.status).toBe(0);
-
-    // No task created — Stop must bail out cleanly rather than forge a
-    // handoff whose taskId is a session UUID.
-    const result = runHook('Stop', {
-      cwd: sandbox,
-      hook_event_name: 'Stop',
-      session_id: 'session_3',
-      last_assistant_message: 'nothing to hand off',
-    });
-
-    expect(result.status).toBe(0);
-    expect(result.stdout).toContain('"systemMessage"');
-    expect(result.stdout).toContain('no active task');
-    expect(result.stdout).not.toContain('memorize: handoff');
+    expect(result.stdout.trim()).toBe('{}');
 
     const projectsRoot = join(memorizeRoot, 'projects');
     const projectDirs = await readdir(projectsRoot);
     const handoffsDir = join(projectsRoot, projectDirs[0]!, 'handoffs');
     const handoffFiles = await readdir(handoffsDir).catch(() => []);
     expect(handoffFiles.length).toBe(0);
+  });
+
+  it('SessionEnd hook writes session.completed and unlinks the cwd pointer', async () => {
+    const sessionStart = runHook('SessionStart', {
+      cwd: sandbox,
+      hook_event_name: 'SessionStart',
+      session_id: 'c0000000-0000-0000-0000-000000000099',
+    });
+    expect(sessionStart.status).toBe(0);
+
+    const sessionsBefore = await readdir(join(sandbox, '.memorize', 'sessions'));
+    expect(sessionsBefore.length).toBe(1);
+    const memorizeSessionId = sessionsBefore[0]!.replace(/\.json$/, '');
+
+    // Production env propagation goes through CLAUDE_ENV_FILE → source →
+    // exported MEMORIZE_SESSION_ID; in-test we pass it directly so the
+    // SessionEnd subprocess can resolve the pointer.
+    const sessionEnd = spawnSync(
+      'node',
+      [tsxCliPath, cliEntryPath, 'hook', 'claude', 'SessionEnd'],
+      {
+        cwd: sandbox,
+        input: JSON.stringify({
+          cwd: sandbox,
+          hook_event_name: 'SessionEnd',
+          session_id: 'c0000000-0000-0000-0000-000000000099',
+          reason: 'logout',
+        }),
+        encoding: 'utf8',
+        env: {
+          ...process.env,
+          MEMORIZE_ROOT: memorizeRoot,
+          MEMORIZE_SESSION_ID: memorizeSessionId,
+        },
+      },
+    );
+    expect(sessionEnd.status).toBe(0);
+
+    // Cwd pointer gone.
+    const sessionsAfter = await readdir(join(sandbox, '.memorize', 'sessions')).catch(
+      () => [] as string[],
+    );
+    expect(sessionsAfter.length).toBe(0);
+
+    // session.completed event landed in the project log.
+    const projectsRoot = join(memorizeRoot, 'projects');
+    const projectDirs = await readdir(projectsRoot);
+    const events = await readdir(join(projectsRoot, projectDirs[0]!, 'events'));
+    let sawCompleted = false;
+    for (const ev of events) {
+      const body = await readFile(
+        join(projectsRoot, projectDirs[0]!, 'events', ev),
+        'utf8',
+      );
+      if (body.includes('"session.completed"')) sawCompleted = true;
+    }
+    expect(sawCompleted).toBe(true);
   });
 });

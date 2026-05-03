@@ -98,12 +98,13 @@ export function reduceProjectState(events: DomainEvent[]): ProjectState {
         }
         break;
       case 'session.completed':
+      case 'session.abandoned':
         {
           const existing = state.sessions[event.scopeId];
           if (!existing) break;
           state.sessions[event.scopeId] = {
             ...existing,
-            status: 'completed',
+            status: event.type === 'session.completed' ? 'completed' : 'abandoned',
             endedAt: event.createdAt,
             lastSeenAt: event.createdAt,
             updatedAt: event.createdAt,
