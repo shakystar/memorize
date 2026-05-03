@@ -12,8 +12,6 @@ describe('CLI smoke', () => {
     expect(result.stdout).toContain('memorize doctor');
     expect(result.stdout).toContain('memorize task list');
     expect(result.stdout).toContain('AGENT_GUIDE.md');
-    // `launch` is intentionally NOT advertised in the public usage; the
-    // command still works for fallback use but is no longer surfaced.
     expect(result.stdout).not.toContain('memorize launch');
   });
 });

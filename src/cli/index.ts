@@ -1,12 +1,10 @@
 import process from 'node:process';
 
 import { runConflictCommand } from './commands/conflict.js';
-import { runDoCommand } from './commands/do.js';
 import { runDoctorCommand } from './commands/doctor.js';
 import { runEventsCommand } from './commands/events.js';
 import { runHookCommand } from './commands/hook.js';
 import { runInstallCommand } from './commands/install.js';
-import { runLaunchCommand } from './commands/launch.js';
 import { runMemoryIndexCommand } from './commands/memory-index.js';
 import { runProjectCommand } from './commands/project.js';
 import { runProjectionCommand } from './commands/projection.js';
@@ -24,10 +22,8 @@ const handlers: Record<string, CommandHandler> = {
   doctor: runDoctorCommand,
   install: runInstallCommand,
   hook: runHookCommand,
-  launch: runLaunchCommand,
   task: runTaskCommand,
   conflict: runConflictCommand,
-  do: runDoCommand,
 };
 
 async function main(): Promise<void> {

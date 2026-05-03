@@ -291,15 +291,6 @@ Internal entry point called by the hooks installed via
 `install claude`. Humans and AIs typically do not invoke this
 directly. See `src/services/hook-service.ts` for the stdin contract.
 
-### `memorize do "<sentence>" [flags]`
-
-Experimental natural-language intent router. Parses a sentence into
-an intent (`task.create`, `task.handoff`, `project.summary`, etc.)
-and dispatches the matching macro. Same flags as the underlying
-commands (`--summary`, `--next`, `--confidence`, …). Use this for
-interactive sessions; scripts should prefer explicit `task *`
-commands.
-
 ### `memorize conflict list`
 
 Lists all open conflicts for the bound project as JSON.
@@ -318,14 +309,6 @@ safe to run at any time.
 
 Regenerates `memory-index.json` from the current projection. Usually
 handled automatically after writes.
-
-### `memorize launch claude | codex`
-
-**Rarely used.** Wrapper that loads the startup context, writes a
-bootstrap file, and spawns the agent CLI with env + args populated.
-Intended only for environments where `install` hooks cannot run
-(for example, Claude Code deployments where users have disabled
-hooks). `install` is the supported path.
 
 ---
 

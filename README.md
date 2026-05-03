@@ -220,14 +220,12 @@ task resume          render startup context for current task
 task checkpoint      record mid-session snapshot
 task handoff         record handoff to next agent
 doctor [--json]      diagnose project and integration state
-do "<sentence>"      natural-language intent router (experimental)
 conflict list        list open conflicts as JSON
 events validate      verify event log integrity
 projection rebuild   re-reduce events into projections
 memory-index rebuild regenerate memory index from projection
 hook claude <Event>  internal hook entry (called by Claude Code)
 project init         low-level "create fresh project" (rarely needed)
-launch claude|codex  legacy wrapper (install is the supported path)
 ```
 
 ## Status

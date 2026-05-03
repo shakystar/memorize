@@ -1,3 +1,4 @@
+import { ACTOR_NEXT_AGENT, ACTOR_USER } from '../../domain/common.js';
 import {
   isConfidence,
   type Confidence,
@@ -16,10 +17,15 @@ import {
   listTasks,
   readTask,
 } from '../../services/task-service.js';
-import { HANDOFF_INTENT_NOTICE } from '../../workflows/macros/handoff-task.js';
 import type { CliContext } from '../context.js';
 import { parseFlags } from '../parse-flags.js';
 import { renderScaffoldUsage } from '../usage.js';
+
+const HANDOFF_INTENT_NOTICE = [
+  'Note: Handoff records intent, context, and decisions only —',
+  '      not code state. The next agent verifies tests and git',
+  '      state independently at session start.',
+].join('\n');
 
 const ALLOWED_STATUSES: Task['status'][] = [
   'todo',
@@ -29,141 +35,170 @@ const ALLOWED_STATUSES: Task['status'][] = [
   'done',
 ];
 
+type TaskHandler = (
+  args: string[],
+  ctx: CliContext,
+  projectId: string,
+) => Promise<void>;
+
+async function runCreateTask(
+  args: string[],
+  _ctx: CliContext,
+  projectId: string,
+): Promise<void> {
+  const title = args.join(' ').trim();
+  if (!title) throw new Error('Task title is required.');
+  const task = await createTask({
+    projectId,
+    title,
+    description: title,
+    actor: ACTOR_USER,
+  });
+  console.log(`Created task ${task.id}`);
+}
+
+async function runShowTask(
+  args: string[],
+  _ctx: CliContext,
+  projectId: string,
+): Promise<void> {
+  const taskId = args[0];
+  if (!taskId) throw new Error('Task id is required.');
+  const task = await readTask(projectId, taskId);
+  console.log(JSON.stringify(task, null, 2));
+}
+
+async function runListTasks(
+  args: string[],
+  _ctx: CliContext,
+  projectId: string,
+): Promise<void> {
+  const flags = parseFlags(args, { single: ['status', 'workstream'] });
+  const status = flags.single.status as Task['status'] | undefined;
+  if (status && !ALLOWED_STATUSES.includes(status)) {
+    throw new Error(`--status must be one of ${ALLOWED_STATUSES.join('|')}.`);
+  }
+  const tasks = await listTasks(projectId, {
+    ...(status ? { status } : {}),
+    ...(flags.single.workstream
+      ? { workstreamId: flags.single.workstream }
+      : {}),
+  });
+  if (tasks.length === 0) {
+    console.log('No tasks found.');
+    return;
+  }
+  for (const task of tasks) {
+    console.log(`${task.id}\t${task.status}\t${task.priority}\t${task.title}`);
+  }
+}
+
+async function runResumeTask(
+  _args: string[],
+  _ctx: CliContext,
+  projectId: string,
+): Promise<void> {
+  const payload = await loadStartContext({ projectId });
+  console.log(JSON.stringify(payload, null, 2));
+}
+
+async function runCheckpointTask(
+  args: string[],
+  ctx: CliContext,
+  projectId: string,
+): Promise<void> {
+  const flags = parseFlags(args, {
+    single: ['summary', 'session', 'task'],
+    multi: ['task-update', 'project-update', 'deferred', 'discard'],
+  });
+  const resolvedTaskId = await resolveActiveTaskId(projectId, flags.single.task);
+  const summary = flags.single.summary;
+  if (!summary) throw new Error('--summary is required for task checkpoint.');
+  const sessionId =
+    flags.single.session ?? (await getCurrentSessionId(ctx.cwd));
+  const checkpoint = await createCheckpoint({
+    projectId,
+    sessionId,
+    ...(resolvedTaskId ? { taskId: resolvedTaskId } : {}),
+    summary,
+    ...(flags.multi['task-update']
+      ? { taskUpdates: flags.multi['task-update'] }
+      : {}),
+    ...(flags.multi['project-update']
+      ? { projectUpdates: flags.multi['project-update'] }
+      : {}),
+    ...(flags.multi.deferred ? { deferredItems: flags.multi.deferred } : {}),
+    ...(flags.multi.discard
+      ? { discardableItems: flags.multi.discard }
+      : {}),
+  });
+  console.log(`Created checkpoint ${checkpoint.id}`);
+}
+
+async function runHandoffTask(
+  args: string[],
+  _ctx: CliContext,
+  projectId: string,
+): Promise<void> {
+  const flags = parseFlags(args, {
+    single: ['summary', 'next', 'from', 'to', 'task', 'confidence'],
+    multi: ['done', 'remaining', 'warning', 'question'],
+  });
+  const resolvedTaskId = await resolveActiveTaskId(projectId, flags.single.task);
+  if (!resolvedTaskId) {
+    throw new Error(
+      'Handoff requires a taskId (pass --task or ensure an active task exists).',
+    );
+  }
+  const summary = flags.single.summary;
+  const nextAction = flags.single.next;
+  if (!summary) throw new Error('--summary is required for task handoff.');
+  if (!nextAction) throw new Error('--next is required for task handoff.');
+  const confidenceRaw = flags.single.confidence;
+  if (confidenceRaw && !isConfidence(confidenceRaw)) {
+    throw new Error('--confidence must be one of low|medium|high.');
+  }
+  const confidence = confidenceRaw as Confidence | undefined;
+  const handoff = await createHandoff({
+    projectId,
+    taskId: resolvedTaskId,
+    fromActor: flags.single.from ?? ACTOR_USER,
+    toActor: flags.single.to ?? ACTOR_NEXT_AGENT,
+    summary,
+    nextAction,
+    ...(flags.multi.done ? { doneItems: flags.multi.done } : {}),
+    ...(flags.multi.remaining
+      ? { remainingItems: flags.multi.remaining }
+      : {}),
+    ...(flags.multi.warning ? { warnings: flags.multi.warning } : {}),
+    ...(flags.multi.question
+      ? { unresolvedQuestions: flags.multi.question }
+      : {}),
+    ...(confidence ? { confidence } : {}),
+  });
+  console.log(`Created handoff ${handoff.id}\n\n${HANDOFF_INTENT_NOTICE}`);
+}
+
+const taskHandlers: Record<string, TaskHandler> = {
+  create: runCreateTask,
+  show: runShowTask,
+  list: runListTasks,
+  resume: runResumeTask,
+  start: runResumeTask,
+  checkpoint: runCheckpointTask,
+  handoff: runHandoffTask,
+};
+
 export async function runTaskCommand(
   args: string[],
   ctx: CliContext,
 ): Promise<void> {
   const projectId = await requireBoundProjectId(ctx.cwd);
   const subcommand = args[0];
-
-  if (subcommand === 'create') {
-    const title = args.slice(1).join(' ').trim();
-    if (!title) throw new Error('Task title is required.');
-    const task = await createTask({
-      projectId,
-      title,
-      description: title,
-      actor: 'user',
-    });
-    console.log(`Created task ${task.id}`);
+  const handler = subcommand ? taskHandlers[subcommand] : undefined;
+  if (!handler) {
+    console.log(renderScaffoldUsage());
     return;
   }
-
-  if (subcommand === 'show') {
-    const taskId = args[1];
-    if (!taskId) throw new Error('Task id is required.');
-    const task = await readTask(projectId, taskId);
-    console.log(JSON.stringify(task, null, 2));
-    return;
-  }
-
-  if (subcommand === 'list') {
-    const flags = parseFlags(args.slice(1), {
-      single: ['status', 'workstream'],
-    });
-    const status = flags.single.status as Task['status'] | undefined;
-    if (status && !ALLOWED_STATUSES.includes(status)) {
-      throw new Error(
-        `--status must be one of ${ALLOWED_STATUSES.join('|')}.`,
-      );
-    }
-    const tasks = await listTasks(projectId, {
-      ...(status ? { status } : {}),
-      ...(flags.single.workstream
-        ? { workstreamId: flags.single.workstream }
-        : {}),
-    });
-    if (tasks.length === 0) {
-      console.log('No tasks found.');
-      return;
-    }
-    for (const task of tasks) {
-      console.log(
-        `${task.id}\t${task.status}\t${task.priority}\t${task.title}`,
-      );
-    }
-    return;
-  }
-
-  if (subcommand === 'resume' || subcommand === 'start') {
-    const payload = await loadStartContext({ projectId });
-    console.log(JSON.stringify(payload, null, 2));
-    return;
-  }
-
-  if (subcommand === 'checkpoint') {
-    const flags = parseFlags(args.slice(1), {
-      single: ['summary', 'session', 'task'],
-      multi: ['task-update', 'project-update', 'deferred', 'discard'],
-    });
-    const resolvedTaskId = await resolveActiveTaskId(projectId, flags.single.task);
-    const summary = flags.single.summary;
-    if (!summary)
-      throw new Error('--summary is required for task checkpoint.');
-    const sessionId =
-      flags.single.session ?? (await getCurrentSessionId(ctx.cwd));
-    const checkpoint = await createCheckpoint({
-      projectId,
-      sessionId,
-      ...(resolvedTaskId ? { taskId: resolvedTaskId } : {}),
-      summary,
-      ...(flags.multi['task-update']
-        ? { taskUpdates: flags.multi['task-update'] }
-        : {}),
-      ...(flags.multi['project-update']
-        ? { projectUpdates: flags.multi['project-update'] }
-        : {}),
-      ...(flags.multi.deferred
-        ? { deferredItems: flags.multi.deferred }
-        : {}),
-      ...(flags.multi.discard
-        ? { discardableItems: flags.multi.discard }
-        : {}),
-    });
-    console.log(`Created checkpoint ${checkpoint.id}`);
-    return;
-  }
-
-  if (subcommand === 'handoff') {
-    const flags = parseFlags(args.slice(1), {
-      single: ['summary', 'next', 'from', 'to', 'task', 'confidence'],
-      multi: ['done', 'remaining', 'warning', 'question'],
-    });
-    const resolvedTaskId = await resolveActiveTaskId(projectId, flags.single.task);
-    if (!resolvedTaskId) {
-      throw new Error(
-        'Handoff requires a taskId (pass --task or ensure an active task exists).',
-      );
-    }
-    const summary = flags.single.summary;
-    const nextAction = flags.single.next;
-    if (!summary) throw new Error('--summary is required for task handoff.');
-    if (!nextAction) throw new Error('--next is required for task handoff.');
-    const confidenceRaw = flags.single.confidence;
-    if (confidenceRaw && !isConfidence(confidenceRaw)) {
-      throw new Error('--confidence must be one of low|medium|high.');
-    }
-    const confidence = confidenceRaw as Confidence | undefined;
-    const handoff = await createHandoff({
-      projectId,
-      taskId: resolvedTaskId,
-      fromActor: flags.single.from ?? 'user',
-      toActor: flags.single.to ?? 'next-agent',
-      summary,
-      nextAction,
-      ...(flags.multi.done ? { doneItems: flags.multi.done } : {}),
-      ...(flags.multi.remaining
-        ? { remainingItems: flags.multi.remaining }
-        : {}),
-      ...(flags.multi.warning ? { warnings: flags.multi.warning } : {}),
-      ...(flags.multi.question
-        ? { unresolvedQuestions: flags.multi.question }
-        : {}),
-      ...(confidence ? { confidence } : {}),
-    });
-    console.log(`Created handoff ${handoff.id}\n\n${HANDOFF_INTENT_NOTICE}`);
-    return;
-  }
-
-  console.log(renderScaffoldUsage());
+  await handler(args.slice(1), ctx, projectId);
 }

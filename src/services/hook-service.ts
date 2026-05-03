@@ -1,31 +1,35 @@
 import fs from 'node:fs/promises';
 
+import type { AdapterAgent } from '../adapters/index.js';
+import { ACTOR_NEXT_AGENT } from '../domain/common.js';
 import {
   detectInjectionMarkers,
   MAX_HOOK_CONTENT_LENGTH,
   truncateContent,
   warnInjectionMarkers,
 } from '../shared/content-safety.js';
-import { composeStartupContext } from './launch-service.js';
-import { getBoundProjectId, resolveActiveTaskId } from './project-service.js';
+import { composeStartupContext } from './startup-context-service.js';
+import {
+  ensureBoundProjectId,
+  getBoundProjectId,
+  resolveActiveTaskId,
+} from './project-service.js';
 import {
   SESSION_ENV_VAR,
   endSession,
   getCurrentSessionId,
   startSession,
 } from './session-service.js';
-import { setupProject } from './setup-service.js';
 import { createCheckpoint, createHandoff } from './task-service.js';
 
-async function ensureProjectId(cwd: string): Promise<string> {
-  const existingProjectId = await getBoundProjectId(cwd);
-  if (existingProjectId) {
-    return existingProjectId;
-  }
-
-  const setup = await setupProject(cwd);
-  return setup.project.id;
+interface HookContext {
+  projectId: string;
+  agent: AdapterAgent;
+  cwd: string;
+  rawPayload: string | undefined;
 }
+
+type HookHandler = (ctx: HookContext) => Promise<string>;
 
 async function persistEnvFile(
   targetPath: string,
@@ -109,21 +113,19 @@ function prepareHookText(
   return truncated;
 }
 
-async function handleSessionStart(params: {
-  projectId: string;
-  agent: 'claude' | 'codex';
-  cwd: string;
-  envFile?: string;
-}): Promise<string> {
+const handleSessionStart: HookHandler = async (ctx) => {
   const { startupContext: additionalContext } = await composeStartupContext({
-    agent: params.agent,
-    cwd: params.cwd,
+    agent: ctx.agent,
+    cwd: ctx.cwd,
   });
-  const sessionId = await startSession(params.cwd, params.agent);
+  const sessionId = await startSession(ctx.cwd, ctx.agent);
 
-  if (params.envFile) {
-    await persistEnvFile(params.envFile, {
-      MEMORIZE_PROJECT_ID: params.projectId,
+  // Claude Code passes a writable env-file path so memorize can hand
+  // back the new session id. Codex has no equivalent — only Claude
+  // populates this env var.
+  if (ctx.agent === 'claude' && process.env.CLAUDE_ENV_FILE) {
+    await persistEnvFile(process.env.CLAUDE_ENV_FILE, {
+      MEMORIZE_PROJECT_ID: ctx.projectId,
       [SESSION_ENV_VAR]: sessionId,
     });
   }
@@ -134,19 +136,37 @@ async function handleSessionStart(params: {
       additionalContext,
     },
   });
-}
+};
 
-async function handleStop(params: {
-  projectId: string;
-  agent: 'claude' | 'codex';
-  cwd: string;
-  rawPayload: string | undefined;
-}): Promise<string> {
-  const payload = parseStopPayload(params.rawPayload);
-  const activeTaskId = await resolveActiveTaskId(params.projectId);
+const handlePostCompact: HookHandler = async (ctx) => {
+  const payload = parsePostCompactPayload(ctx.rawPayload);
+  const activeTaskId = await resolveActiveTaskId(ctx.projectId);
+  const sessionId =
+    payload.sessionId ?? (await getCurrentSessionId(ctx.cwd));
+  const summary =
+    prepareHookText(payload.compactSummary, 'hook.PostCompact.compact_summary') ??
+    'Compact summary unavailable';
+  const checkpoint = await createCheckpoint({
+    projectId: ctx.projectId,
+    sessionId,
+    ...(activeTaskId ? { taskId: activeTaskId } : {}),
+    summary,
+  });
+
+  // PostCompact / PreCompact / Stop must NOT include `hookSpecificOutput`
+  // — Claude Code's schema validator rejects it on these events. Top-level
+  // fields like `systemMessage` are the only valid surface here.
+  return JSON.stringify({
+    systemMessage: `memorize: checkpoint ${checkpoint.id} recorded`,
+  });
+};
+
+const handleStop: HookHandler = async (ctx) => {
+  const payload = parseStopPayload(ctx.rawPayload);
+  const activeTaskId = await resolveActiveTaskId(ctx.projectId);
 
   if (!activeTaskId) {
-    await endSession(params.cwd);
+    await endSession(ctx.cwd);
     return JSON.stringify({
       systemMessage:
         'memorize: session ended (no active task, skipped auto-handoff)',
@@ -158,79 +178,51 @@ async function handleStop(params: {
       payload.lastAssistantMessage,
       'hook.Stop.last_assistant_message',
     ) ?? 'No assistant message captured';
-  const agentDisplayName = params.agent === 'claude' ? 'Claude' : 'Codex';
+  const agentDisplayName = ctx.agent === 'claude' ? 'Claude' : 'Codex';
   const handoff = await createHandoff({
-    projectId: params.projectId,
+    projectId: ctx.projectId,
     taskId: activeTaskId,
-    fromActor: params.agent,
-    toActor: 'next-agent',
+    fromActor: ctx.agent,
+    toActor: ACTOR_NEXT_AGENT,
     summary,
     nextAction: `Continue from the latest ${agentDisplayName} output.`,
   });
-  await endSession(params.cwd);
+  await endSession(ctx.cwd);
 
   return JSON.stringify({
     systemMessage: `memorize: handoff ${handoff.id} recorded`,
   });
-}
+};
+
+// Empty `{}` keeps Claude Code / codex schema validators happy when memorize
+// has nothing to contribute (PreCompact, PreToolUse, etc.).
+const EMPTY_HOOK_RESULT = JSON.stringify({});
+
+const claudeHookHandlers: Record<string, HookHandler> = {
+  SessionStart: handleSessionStart,
+  PostCompact: handlePostCompact,
+  Stop: handleStop,
+};
+
+const codexHookHandlers: Record<string, HookHandler> = {
+  SessionStart: handleSessionStart,
+  Stop: handleStop,
+};
 
 export async function runClaudeHook(params: {
   eventName: string;
   cwd: string;
   stdinPayload?: string;
 }): Promise<string> {
-  const projectId = await ensureProjectId(params.cwd);
-
-  if (params.eventName === 'SessionStart') {
-    return handleSessionStart({
-      projectId,
-      agent: 'claude',
-      cwd: params.cwd,
-      ...(process.env.CLAUDE_ENV_FILE
-        ? { envFile: process.env.CLAUDE_ENV_FILE }
-        : {}),
-    });
-  }
-
-  if (params.eventName === 'PostCompact') {
-    const payload = parsePostCompactPayload(params.stdinPayload);
-    const activeTaskId = await resolveActiveTaskId(projectId);
-    const sessionId =
-      payload.sessionId ?? (await getCurrentSessionId(params.cwd));
-    const summary =
-      prepareHookText(payload.compactSummary, 'hook.PostCompact.compact_summary') ??
-      'Compact summary unavailable';
-    const checkpoint = await createCheckpoint({
-      projectId,
-      sessionId,
-      ...(activeTaskId ? { taskId: activeTaskId } : {}),
-      summary,
-    });
-
-    // PostCompact / PreCompact / Stop do not accept a `hookSpecificOutput`
-    // block in their return payload — Claude Code's schema validator
-    // rejects any hook that emits one for these events. The valid shape
-    // is only the top-level fields (continue, systemMessage, etc.). Use
-    // `systemMessage` to surface the operation result to the user.
-    return JSON.stringify({
-      systemMessage: `memorize: checkpoint ${checkpoint.id} recorded`,
-    });
-  }
-
-  if (params.eventName === 'Stop') {
-    return handleStop({
-      projectId,
-      agent: 'claude',
-      cwd: params.cwd,
-      rawPayload: params.stdinPayload,
-    });
-  }
-
-  // Default (including PreCompact): emit an empty object so Claude
-  // Code's schema validator accepts it. `hookSpecificOutput` is only
-  // defined for a small set of events (PreToolUse, UserPromptSubmit,
-  // PostToolUse, SessionStart), so do not include it here.
-  return JSON.stringify({});
+  const projectId = await ensureBoundProjectId(params.cwd);
+  const handler = claudeHookHandlers[params.eventName];
+  if (!handler) return EMPTY_HOOK_RESULT;
+  return handler({
+    projectId,
+    agent: 'claude',
+    cwd: params.cwd,
+    rawPayload: params.stdinPayload,
+  });
 }
 
 export async function runCodexHook(params: {
@@ -238,35 +230,19 @@ export async function runCodexHook(params: {
   cwd: string;
   stdinPayload?: string;
 }): Promise<string> {
-  // Codex hooks are registered globally in ~/.codex/hooks.json, so every
-  // codex session triggers them regardless of project. The handler must
-  // no-op fast when the cwd does not resolve to a memorize-bound project
-  // (via walk-up) so we do not pollute unrelated codex sessions. Note:
-  // unlike runClaudeHook, we use getBoundProjectId — never ensureProjectId
-  // — so memorize never auto-creates state from a codex hook.
+  // Codex hooks live globally in ~/.codex/hooks.json so every codex
+  // session fires them. Bail fast when cwd is not bound to memorize.
+  // Unlike runClaudeHook we use getBoundProjectId — never auto-create
+  // state from a codex hook.
   const projectId = await getBoundProjectId(params.cwd);
-  if (!projectId) {
-    return JSON.stringify({});
-  }
+  if (!projectId) return EMPTY_HOOK_RESULT;
 
-  if (params.eventName === 'SessionStart') {
-    return handleSessionStart({
-      projectId,
-      agent: 'codex',
-      cwd: params.cwd,
-    });
-  }
-
-  if (params.eventName === 'Stop') {
-    return handleStop({
-      projectId,
-      agent: 'codex',
-      cwd: params.cwd,
-      rawPayload: params.stdinPayload,
-    });
-  }
-
-  // PreToolUse / PostToolUse / UserPromptSubmit — not used yet.
-  // Return empty object so codex's hook validator accepts the output.
-  return JSON.stringify({});
+  const handler = codexHookHandlers[params.eventName];
+  if (!handler) return EMPTY_HOOK_RESULT;
+  return handler({
+    projectId,
+    agent: 'codex',
+    cwd: params.cwd,
+    rawPayload: params.stdinPayload,
+  });
 }

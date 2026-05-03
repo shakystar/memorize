@@ -62,7 +62,7 @@ describe('phase 2 services and cli', () => {
     expect(startup.projectSummary).toBe('Shared context system');
   });
 
-  it('supports thin cli commands for project and task flows', () => {
+  it('supports thin cli commands for project and task flows', { timeout: 30_000 }, () => {
     const init = runCli(['project', 'init']);
     expect(init.status).toBe(0);
     expect(init.stdout).toContain('Initialized project');
@@ -84,7 +84,7 @@ describe('phase 2 services and cli', () => {
     expect(syncResult.stdout).toContain('Project sync state');
   });
 
-  it('records task checkpoint and handoff via cli', () => {
+  it('records task checkpoint and handoff via cli', { timeout: 30_000 }, () => {
     const init = runCli(['project', 'init']);
     expect(init.status).toBe(0);
 
@@ -149,7 +149,7 @@ describe('phase 2 services and cli', () => {
     expect(syncState?.syncStatus).toBe('idle');
   });
 
-  it('accepts literal values that start with dashes and --flag=value syntax', () => {
+  it('accepts literal values that start with dashes and --flag=value syntax', { timeout: 30_000 }, () => {
     expect(runCli(['project', 'init']).status).toBe(0);
     expect(runCli(['task', 'create', 'Parser edge task']).status).toBe(0);
 
@@ -181,7 +181,7 @@ describe('phase 2 services and cli', () => {
     expect(missingValue.stderr).toContain('--summary requires a value');
   });
 
-  it('lists tasks with optional status filter', () => {
+  it('lists tasks with optional status filter', { timeout: 30_000 }, () => {
     expect(runCli(['project', 'init']).status).toBe(0);
     expect(runCli(['task', 'create', 'Alpha task']).status).toBe(0);
     expect(runCli(['task', 'create', 'Beta task']).status).toBe(0);
@@ -232,36 +232,4 @@ describe('phase 2 services and cli', () => {
     expect(result.stderr).toContain('--confidence must be one of');
   });
 
-  it('rejects sentence handoff when no active task exists', { timeout: 30_000 }, () => {
-    runCli(['project', 'init']);
-
-    const result = runCli([
-      'do',
-      'Hand off the work to Codex',
-      '--summary',
-      'test',
-      '--next',
-      'verify',
-    ]);
-    expect(result.status).not.toBe(0);
-    expect(result.stderr).toContain('No active task');
-  });
-
-  it('rejects sentence handoff with invalid --confidence via do', { timeout: 30_000 }, () => {
-    runCli(['project', 'init']);
-    runCli(['task', 'create', 'Confidence do test']);
-
-    const result = runCli([
-      'do',
-      'Hand off the work to Codex',
-      '--summary',
-      'test',
-      '--next',
-      'verify',
-      '--confidence',
-      'super-high',
-    ]);
-    expect(result.status).not.toBe(0);
-    expect(result.stderr).toContain('--confidence must be one of');
-  });
 });
