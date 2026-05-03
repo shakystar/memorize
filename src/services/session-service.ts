@@ -95,14 +95,20 @@ async function migrateLegacyPointer(cwd: string): Promise<void> {
  *   1. MEMORIZE_SESSION_ID env var (set by Claude via CLAUDE_ENV_FILE
  *      and inherited by every child `memorize` process).
  *   2. tty match — the current process's stdin tty rdev against the
- *      tty stored when each session started. Required for Codex which
- *      has no env-injection hook surface.
- *   3. Most-recently-started active pointer in this cwd. Final fallback
- *      for ambient CLI invocations (user opens a fresh shell, runs
- *      `memorize task list`).
+ *      tty stored when each session started.
+ *   3. (opt-in) Most-recently-started active pointer in this cwd.
+ *
+ * The most-recent fallback is OFF by default after the rc.2 dogfood
+ * surfaced cross-attribution bugs (Claude's Stop hook killing the most
+ * recent codex session because env injection didn't propagate to the
+ * subprocess). Only `getCurrentSessionId` opts in, since it is the
+ * ambient-CLI entry point that must always return some sessionId.
+ * Telemetry callers (`bumpHeartbeat`, `endSession`) prefer a silent
+ * miss to a wrong attribution.
  */
 async function findCwdSession(
   cwd: string,
+  options: { allowMostRecentFallback?: boolean } = {},
 ): Promise<CwdSessionPointer | undefined> {
   await migrateLegacyPointer(cwd);
 
@@ -123,6 +129,7 @@ async function findCwdSession(
     if (ttyMatch) return ttyMatch;
   }
 
+  if (!options.allowMostRecentFallback) return undefined;
   return all.sort((a, b) => (a.startedAt < b.startedAt ? 1 : -1))[0];
 }
 
@@ -175,8 +182,22 @@ export async function startSession(
   return sessionId;
 }
 
-export async function endSession(cwd: string): Promise<void> {
-  const pointer = await findCwdSession(cwd);
+export interface EndSessionOptions {
+  /** Explicit session id from a hook payload (e.g. Claude Stop hook
+   *  passes `session_id` in its JSON stdin). When provided we use it
+   *  directly and skip env/tty disambiguation, which is the only way
+   *  to attribute correctly when neither env propagation nor tty
+   *  matching is reliable in the calling subprocess. */
+  sessionId?: string;
+}
+
+export async function endSession(
+  cwd: string,
+  options: EndSessionOptions = {},
+): Promise<void> {
+  const pointer = options.sessionId
+    ? await readCwdPointer(cwd, options.sessionId)
+    : await findCwdSession(cwd);
   if (!pointer) return;
 
   if (pointer.projectId) {
@@ -253,7 +274,10 @@ export async function getCurrentSessionId(cwd: string): Promise<string> {
   const fromEnv = process.env[SESSION_ENV_VAR];
   if (fromEnv) return fromEnv;
 
-  const pointer = await findCwdSession(cwd);
+  // Ambient CLI entry point — opt into the most-recent fallback so the
+  // user can run `memorize task list` from a fresh shell without minting
+  // a new session every time.
+  const pointer = await findCwdSession(cwd, { allowMostRecentFallback: true });
   if (pointer?.sessionId) return pointer.sessionId;
 
   return startSession(cwd, { actor: 'ambient' });
