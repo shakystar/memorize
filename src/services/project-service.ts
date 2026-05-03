@@ -3,6 +3,7 @@ import { bindProject, resolveProjectIdForPath } from '../storage/bindings-store.
 import { getProjectFile, getWorkstreamFile } from '../storage/path-resolver.js';
 import { readJson, writeJson } from '../storage/fs-utils.js';
 import { rebuildProjectProjection } from './projection-store.js';
+import { ACTOR_SYSTEM } from '../domain/common.js';
 import type { CreateProjectInput } from '../domain/commands.js';
 import { createProject as createProjectEntity, createWorkstream } from '../domain/entities.js';
 import type { Project, ProjectSyncState, Workstream } from '../domain/entities.js';
@@ -34,7 +35,7 @@ export async function createProject(input: CreateProjectInput): Promise<Project>
     projectId: project.id,
     scopeType: 'project',
     scopeId: project.id,
-    actor: 'system',
+    actor: ACTOR_SYSTEM,
     payload: project,
   });
   await appendEvent({
@@ -42,7 +43,7 @@ export async function createProject(input: CreateProjectInput): Promise<Project>
     projectId: project.id,
     scopeType: 'workstream',
     scopeId: defaultWorkstream.id,
-    actor: 'system',
+    actor: ACTOR_SYSTEM,
     payload: defaultWorkstream,
   });
   await rebuildProjectProjection(project.id);
@@ -55,6 +56,14 @@ export async function getBoundProjectId(
   rootPath: string,
 ): Promise<string | undefined> {
   return resolveProjectIdForPath(rootPath);
+}
+
+export async function ensureBoundProjectId(cwd: string): Promise<string> {
+  const existing = await getBoundProjectId(cwd);
+  if (existing) return existing;
+  const { setupProject } = await import('./setup-service.js');
+  const setup = await setupProject(cwd);
+  return setup.project.id;
 }
 
 export async function requireBoundProjectId(rootPath: string): Promise<string> {

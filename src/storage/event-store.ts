@@ -7,7 +7,7 @@ import type {
   DomainEventPayload,
   DomainEventType,
 } from '../domain/events.js';
-import { appendLine, ensureDir, isEnoent, withFileLock } from './fs-utils.js';
+import { appendLine, ensureDir, isEnoent, readNdjson, withFileLock } from './fs-utils.js';
 import { getEventsFile, getProjectRoot } from './path-resolver.js';
 
 export interface AppendEventInput<TPayload extends DomainEventPayload> {
@@ -88,27 +88,19 @@ export async function readEventsWithIntegrity(
   }
 
   for (const file of files) {
-    let raw: string;
-    try {
-      raw = await fs.readFile(path.join(eventsDir, file), 'utf8');
-    } catch (error) {
-      if (isEnoent(error)) continue;
-      throw error;
-    }
-    const lines = raw.split('\n');
-    for (let i = 0; i < lines.length; i++) {
-      const trimmed = lines[i]!.trim();
-      if (!trimmed) continue;
-      try {
-        result.events.push(JSON.parse(trimmed) as DomainEvent);
-      } catch {
-        result.corruptLines.push({
-          file,
-          lineNumber: i + 1,
-          raw: trimmed.slice(0, 200),
-        });
-      }
-    }
+    const events = await readNdjson<DomainEvent>(
+      path.join(eventsDir, file),
+      {
+        onCorrupt: (line, _error, lineNumber) => {
+          result.corruptLines.push({
+            file,
+            lineNumber,
+            raw: line.slice(0, 200),
+          });
+        },
+      },
+    );
+    result.events.push(...events);
   }
 
   return result;

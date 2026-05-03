@@ -9,28 +9,10 @@ import type {
   SyncPushResponse,
 } from '../domain/sync-protocol.js';
 import type { SyncTransport } from '../domain/sync-transport.js';
-import { isEnoent } from '../storage/fs-utils.js';
+import { ensureParentDir, readNdjson } from '../storage/fs-utils.js';
 
 function remoteEventsFile(remoteRoot: string, remoteProjectId: string): string {
   return path.join(remoteRoot, remoteProjectId, 'events.ndjson');
-}
-
-async function readAllRemoteEvents(
-  filePath: string,
-): Promise<DomainEvent[]> {
-  try {
-    const raw = await fs.readFile(filePath, 'utf8');
-    return raw
-      .split('\n')
-      .map((line) => line.trim())
-      .filter((line) => line.length > 0)
-      .map((line) => JSON.parse(line) as DomainEvent);
-  } catch (error) {
-    if (isEnoent(error)) {
-      return [];
-    }
-    throw error;
-  }
 }
 
 export function createFileSyncTransport(remoteRoot: string): SyncTransport {
@@ -38,7 +20,7 @@ export function createFileSyncTransport(remoteRoot: string): SyncTransport {
     async push(request: SyncPushRequest): Promise<SyncPushResponse> {
       const remoteProjectId = request.remoteProjectId ?? request.projectId;
       const filePath = remoteEventsFile(remoteRoot, remoteProjectId);
-      await fs.mkdir(path.dirname(filePath), { recursive: true });
+      await ensureParentDir(filePath);
 
       const acceptedIds: string[] = [];
       for (const event of request.events) {
@@ -56,7 +38,7 @@ export function createFileSyncTransport(remoteRoot: string): SyncTransport {
 
     async pull(request: SyncPullRequest): Promise<SyncPullResponse> {
       const filePath = remoteEventsFile(remoteRoot, request.remoteProjectId);
-      const allEvents = await readAllRemoteEvents(filePath);
+      const allEvents = await readNdjson<DomainEvent>(filePath);
 
       const sliceStart = request.sincePulledEventId
         ? allEvents.findIndex(

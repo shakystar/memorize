@@ -1,4 +1,3 @@
-import fs from 'node:fs/promises';
 import path from 'node:path';
 
 import type {
@@ -7,7 +6,7 @@ import type {
   StartupContextPayload,
   Workstream,
 } from '../domain/entities.js';
-import { isEnoent, readJson } from '../storage/fs-utils.js';
+import { readJson, readJsonDir } from '../storage/fs-utils.js';
 import {
   getMemoryIndexFile,
   getProjectRoot,
@@ -22,23 +21,8 @@ import { readHandoff, readTask } from './task-service.js';
 
 async function readOpenConflicts(projectId: string): Promise<Conflict[]> {
   const conflictsDir = path.join(getProjectRoot(projectId), 'conflicts');
-  try {
-    const entries = (await fs.readdir(conflictsDir))
-      .filter((entry) => entry.endsWith('.json'))
-      .sort();
-    const conflicts = await Promise.all(
-      entries.map((entry) => readJson<Conflict>(path.join(conflictsDir, entry))),
-    );
-    return conflicts.filter(
-      (conflict): conflict is Conflict =>
-        Boolean(conflict && conflict.status !== 'resolved'),
-    );
-  } catch (error) {
-    if (isEnoent(error)) {
-      return [];
-    }
-    throw error;
-  }
+  const conflicts = await readJsonDir<Conflict>(conflictsDir);
+  return conflicts.filter((conflict) => conflict.status !== 'resolved');
 }
 
 async function readProjectRules(

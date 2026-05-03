@@ -2,7 +2,7 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 
-import { isEnoent } from '../storage/fs-utils.js';
+import { isEnoent, writeJson } from '../storage/fs-utils.js';
 
 // Using `npx @shakystar/memorize ...` (scoped, fully qualified) rather
 // than bare `memorize ...` so hooks work regardless of install mode:
@@ -105,10 +105,7 @@ function coerceLegacyList(
 }
 
 export async function installClaudeIntegration(cwd: string): Promise<string> {
-  const claudeDir = path.join(cwd, '.claude');
-  await fs.mkdir(claudeDir, { recursive: true });
-
-  const settingsPath = path.join(claudeDir, 'settings.local.json');
+  const settingsPath = path.join(cwd, '.claude', 'settings.local.json');
   let settings: { hooks?: Record<string, unknown> } = {};
   try {
     settings = JSON.parse(await fs.readFile(settingsPath, 'utf8')) as {
@@ -147,7 +144,7 @@ export async function installClaudeIntegration(cwd: string): Promise<string> {
     },
   };
 
-  await fs.writeFile(settingsPath, `${JSON.stringify(merged, null, 2)}\n`, 'utf8');
+  await writeJson(settingsPath, merged);
   return settingsPath;
 }
 
@@ -167,7 +164,6 @@ function codexHooksPath(): string {
 
 export async function installCodexHooks(): Promise<string> {
   const hooksPath = codexHooksPath();
-  await fs.mkdir(path.dirname(hooksPath), { recursive: true });
 
   let settings: { hooks?: Record<string, unknown> } = {};
   try {
@@ -222,7 +218,7 @@ export async function installCodexHooks(): Promise<string> {
     },
   };
 
-  await fs.writeFile(hooksPath, `${JSON.stringify(merged, null, 2)}\n`, 'utf8');
+  await writeJson(hooksPath, merged);
   return hooksPath;
 }
 

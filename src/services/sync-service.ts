@@ -1,6 +1,6 @@
 import fs from 'node:fs/promises';
 
-import { nowIso } from '../domain/common.js';
+import { ACTOR_SYSTEM, nowIso } from '../domain/common.js';
 import type { DomainEvent } from '../domain/events.js';
 import type { ProjectSyncState } from '../domain/entities.js';
 import type {
@@ -11,7 +11,7 @@ import type {
 } from '../domain/sync-protocol.js';
 import type { SyncTransport } from '../domain/sync-transport.js';
 import { appendEvent, readEvents } from '../storage/event-store.js';
-import { appendLine, isEnoent, readJson, withFileLock, writeJson } from '../storage/fs-utils.js';
+import { appendLine, isEnoent, readJson, readNdjson, withFileLock, writeJson } from '../storage/fs-utils.js';
 import {
   getSyncFile,
   getSyncInboundFile,
@@ -32,7 +32,7 @@ async function writeState(state: ProjectSyncState): Promise<void> {
     projectId: state.projectId,
     scopeType: 'project',
     scopeId: state.projectId,
-    actor: 'system',
+    actor: ACTOR_SYSTEM,
     payload: state,
   });
 }
@@ -108,26 +108,10 @@ export async function enqueueInbound(
 export async function drainInbound(
   projectId: string,
 ): Promise<DomainEvent[]> {
-  const filePath = getSyncInboundFile(projectId);
-  try {
-    const raw = await fs.readFile(filePath, 'utf8');
-    const events: DomainEvent[] = [];
-    for (const line of raw.split('\n')) {
-      const trimmed = line.trim();
-      if (!trimmed) continue;
-      try {
-        events.push(JSON.parse(trimmed) as DomainEvent);
-      } catch {
-        // Skip corrupt lines — may result from interrupted writes
-      }
-    }
-    return events;
-  } catch (error) {
-    if (isEnoent(error)) {
-      return [];
-    }
-    throw error;
-  }
+  return readNdjson<DomainEvent>(getSyncInboundFile(projectId), {
+    // Skip corrupt lines — may result from interrupted writes
+    onCorrupt: () => {},
+  });
 }
 
 export async function markPulled(

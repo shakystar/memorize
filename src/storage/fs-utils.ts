@@ -119,3 +119,53 @@ export async function appendLine(filePath: string, line: string): Promise<void> 
   await ensureParentDir(filePath);
   await fs.appendFile(filePath, `${line}\n`, 'utf8');
 }
+
+/** Read every `.json` file in `dir` and return the parsed values. Returns [] when the dir does not exist. */
+export async function readJsonDir<T>(dir: string): Promise<T[]> {
+  let entries: string[];
+  try {
+    entries = (await fs.readdir(dir))
+      .filter((entry) => entry.endsWith('.json'))
+      .sort();
+  } catch (error) {
+    if (isEnoent(error)) return [];
+    throw error;
+  }
+  const values = await Promise.all(
+    entries.map((entry) => readJson<T>(path.join(dir, entry))),
+  );
+  return values.filter((value): value is Awaited<T> => Boolean(value)) as T[];
+}
+
+export interface NdjsonReadOptions {
+  onCorrupt?: (line: string, error: unknown, lineNumber: number) => void;
+}
+
+export async function readNdjson<T>(
+  filePath: string,
+  options: NdjsonReadOptions = {},
+): Promise<T[]> {
+  let raw: string;
+  try {
+    raw = await fs.readFile(filePath, 'utf8');
+  } catch (error) {
+    if (isEnoent(error)) return [];
+    throw error;
+  }
+  const result: T[] = [];
+  const lines = raw.split('\n');
+  for (let i = 0; i < lines.length; i++) {
+    const trimmed = lines[i]!.trim();
+    if (!trimmed) continue;
+    try {
+      result.push(JSON.parse(trimmed) as T);
+    } catch (error) {
+      if (options.onCorrupt) {
+        options.onCorrupt(trimmed, error, i + 1);
+      } else {
+        throw error;
+      }
+    }
+  }
+  return result;
+}

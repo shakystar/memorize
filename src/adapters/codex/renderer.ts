@@ -3,6 +3,7 @@ import {
   UNTRUSTED_PREAMBLE,
   wrapUntrusted,
 } from '../../shared/content-safety.js';
+import { buildHandoffRows } from '../shared/handoff-rows.js';
 
 export function renderCodexStartupContext(
   payload: StartupContextPayload,
@@ -67,33 +68,9 @@ export function renderCodexStartupContext(
 
   if (payload.latestHandoff) {
     const handoff = payload.latestHandoff;
-    const handoffLines: string[] = [
-      '## Latest handoff',
-      `- From: ${handoff.fromActor} → ${handoff.toActor}`,
-    ];
-    if (handoff.fromActor === 'user') {
-      handoffLines.push(
-        '- Trust note: user-authored intent. Verify code/test state independently before trusting claims of "done".',
-      );
-    }
-    handoffLines.push(
-      `- Summary: ${handoff.summary}`,
-      `- Next action: ${handoff.nextAction}`,
-      `- Confidence: ${handoff.confidence}`,
-    );
-    if (handoff.doneItems.length > 0) {
-      handoffLines.push(`- Done: ${handoff.doneItems.join('; ')}`);
-    }
-    if (handoff.remainingItems.length > 0) {
-      handoffLines.push(`- Remaining: ${handoff.remainingItems.join('; ')}`);
-    }
-    if (handoff.warnings.length > 0) {
-      handoffLines.push(`- Warnings: ${handoff.warnings.join('; ')}`);
-    }
-    if (handoff.unresolvedQuestions.length > 0) {
-      handoffLines.push(
-        `- Unresolved questions: ${handoff.unresolvedQuestions.join('; ')}`,
-      );
+    const handoffLines = ['## Latest handoff'];
+    for (const row of buildHandoffRows(handoff)) {
+      handoffLines.push(`- ${row.label}: ${row.value}`);
     }
     blocks.push(
       wrapUntrusted(handoffLines.join('\n'), {

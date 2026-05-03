@@ -1,8 +1,8 @@
-import fs from 'node:fs/promises';
 import path from 'node:path';
 
+import { ACTOR_SYSTEM } from '../domain/common.js';
 import { appendEvent } from '../storage/event-store.js';
-import { isEnoent, readJson } from '../storage/fs-utils.js';
+import { readJson, readJsonDir } from '../storage/fs-utils.js';
 import {
   getCheckpointFile,
   getHandoffFile,
@@ -67,7 +67,7 @@ export async function createTask(input: CreateTaskInput): Promise<Task> {
     projectId: input.projectId,
     scopeType: 'task',
     scopeId: task.id,
-    actor: input.actor ?? 'system',
+    actor: input.actor ?? ACTOR_SYSTEM,
     payload: task,
   });
   await rebuildProjectProjection(input.projectId);
@@ -159,7 +159,7 @@ export async function createCheckpoint(
     projectId: input.projectId,
     scopeType: input.taskId ? 'task' : 'session',
     scopeId: input.taskId ?? input.sessionId,
-    actor: 'system',
+    actor: ACTOR_SYSTEM,
     payload: checkpoint,
   });
   if (input.taskId) {
@@ -168,7 +168,7 @@ export async function createCheckpoint(
       projectId: input.projectId,
       scopeType: 'task',
       scopeId: input.taskId,
-      actor: 'system',
+      actor: ACTOR_SYSTEM,
       payload: {
         latestCheckpointId: checkpoint.id,
       } satisfies Partial<Task>,
@@ -195,23 +195,8 @@ export async function listTasks(
   filters: ListTasksFilters = {},
 ): Promise<Task[]> {
   const tasksDir = path.join(getProjectRoot(projectId), 'tasks');
-  let entries: string[];
-  try {
-    entries = (await fs.readdir(tasksDir)).filter((entry) =>
-      entry.endsWith('.json'),
-    );
-  } catch (error) {
-    if (isEnoent(error)) {
-      return [];
-    }
-    throw error;
-  }
-
-  const tasks = await Promise.all(
-    entries.map((entry) => readJson<Task>(path.join(tasksDir, entry))),
-  );
+  const tasks = await readJsonDir<Task>(tasksDir);
   return tasks
-    .filter((task): task is Task => Boolean(task))
     .filter(
       (task) =>
         (!filters.status || task.status === filters.status) &&

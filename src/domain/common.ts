@@ -1,5 +1,9 @@
 export const CURRENT_SCHEMA_VERSION = '0.1.0';
 
+export const ACTOR_SYSTEM = 'system';
+export const ACTOR_USER = 'user';
+export const ACTOR_NEXT_AGENT = 'next-agent';
+
 export type EntityId = string;
 export type ISODateString = string;
 
