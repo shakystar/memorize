@@ -228,6 +228,65 @@ describe('install integration', () => {
     ).rejects.toMatchObject({ code: 'ENOENT' });
   });
 
+  it('install codex strips a pre-existing memorize v=1 block from AGENTS.md while preserving user content', async () => {
+    await writeFile(
+      join(sandbox, 'AGENTS.md'),
+      [
+        '# DuoPane',
+        '',
+        'Project description that the user authored.',
+        '',
+        '<!-- memorize:bootstrap v=1 start -->',
+        '- Stale bootstrap body',
+        '<!-- memorize:bootstrap v=1 end -->',
+        '',
+        '## Goals',
+        '- Ship fast',
+      ].join('\n'),
+      'utf8',
+    );
+
+    runCli(['install', 'codex']);
+
+    const agents = await readFile(join(sandbox, 'AGENTS.md'), 'utf8');
+    expect(agents).toContain('# DuoPane');
+    expect(agents).toContain('Project description that the user authored.');
+    expect(agents).toContain('## Goals');
+    expect(agents).not.toContain('memorize:bootstrap');
+    expect(agents).not.toContain('Stale bootstrap body');
+  });
+
+  it('install codex never deletes AGENTS.md even if the strip leaves it empty', async () => {
+    // AGENTS.md is user-owned. Even if the only content was the legacy
+    // memorize block, the file itself must survive — that deletion is
+    // the user's call to make, not ours.
+    await writeFile(
+      join(sandbox, 'AGENTS.md'),
+      [
+        '<!-- memorize:bootstrap v=1 start -->',
+        '- Old body',
+        '<!-- memorize:bootstrap v=1 end -->',
+      ].join('\n'),
+      'utf8',
+    );
+
+    runCli(['install', 'codex']);
+
+    const agents = await readFile(join(sandbox, 'AGENTS.md'), 'utf8');
+    expect(agents).not.toContain('memorize:bootstrap');
+    expect(agents).not.toContain('Old body');
+  });
+
+  it('install codex keeps unrelated AGENTS.md content untouched when no memorize block exists', async () => {
+    const content = '# DuoPane\n\n- spec line 1\n- spec line 2\n';
+    await writeFile(join(sandbox, 'AGENTS.md'), content, 'utf8');
+
+    runCli(['install', 'codex']);
+
+    const agents = await readFile(join(sandbox, 'AGENTS.md'), 'utf8');
+    expect(agents).toBe(content);
+  });
+
   it('install codex keeps unrelated AGENTS.override.md content untouched when no memorize block exists', async () => {
     const content = '# Team overrides\n\n- rule 1\n- rule 2\n';
     await writeFile(join(sandbox, 'AGENTS.override.md'), content, 'utf8');

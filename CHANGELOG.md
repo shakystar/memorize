@@ -7,6 +7,19 @@ loosely. The project adheres to [Semantic Versioning](https://semver.org/);
 major-version bumps are reserved for breaking changes to the on-disk event
 log layout or the public CLI surface.
 
+## [1.0.0-rc.1] — 2026-05-03
+
+Pre-dogfooding cleanup. Surfaced while preparing the duo-pane test
+project: legacy memorize bootstrap blocks were being left in `AGENTS.md`
+across `install codex` runs.
+
+### Fixed
+
+- `install codex` now also strips legacy `<!-- memorize:bootstrap -->`
+  blocks from `AGENTS.md` (in addition to `AGENTS.override.md`). The
+  `AGENTS.md` file is user-owned, so the strip never deletes it even if
+  the file ends up empty — that decision belongs to the user.
+
 ## [1.0.0-rc.0] — 2026-05-03
 
 First release candidate. The 1.0 promise: the on-disk layout described in
