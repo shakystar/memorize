@@ -1,7 +1,6 @@
 import type { BaseEntity, EntityId } from './common.js';
 import type {
   Checkpoint,
-  ChecklistItem,
   Conflict,
   Decision,
   Handoff,
@@ -17,10 +16,8 @@ export type DomainEventType =
   | 'project.created'
   | 'project.updated'
   | 'workstream.created'
-  | 'workstream.updated'
   | 'task.created'
   | 'task.updated'
-  | 'checklist.item.upserted'
   | 'handoff.created'
   | 'checkpoint.created'
   | 'decision.proposed'
@@ -48,7 +45,6 @@ export type DomainEventPayload =
   | Partial<Workstream>
   | Task
   | Partial<Task>
-  | ChecklistItem
   | Handoff
   | Checkpoint
   | Decision

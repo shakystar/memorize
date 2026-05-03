@@ -10,7 +10,6 @@ export type TaskStatus =
 
 export type Priority = 'low' | 'medium' | 'high';
 export type OwnerType = 'human' | 'agent' | 'unassigned';
-export type ChecklistStatus = 'todo' | 'doing' | 'done' | 'skipped';
 
 export interface Task extends BaseEntity {
   projectId: EntityId;
@@ -31,13 +30,6 @@ export interface Task extends BaseEntity {
   riskNotes: string[];
   latestHandoffId?: EntityId;
   latestCheckpointId?: EntityId;
-}
-
-export interface ChecklistItem extends BaseEntity {
-  taskId: EntityId;
-  text: string;
-  status: ChecklistStatus;
-  ownerId?: string;
 }
 
 export function createTask(input: {

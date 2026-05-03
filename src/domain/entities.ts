@@ -10,8 +10,6 @@ export {
   createWorkstream,
 } from './entities/workstream.js';
 export {
-  type ChecklistItem,
-  type ChecklistStatus,
   type OwnerType,
   type Priority,
   type Task,
