@@ -88,6 +88,40 @@ describe('multi-session per cwd — Sprint 3-5 fix', () => {
     expect(remaining).toEqual([`${b}.json`]);
   });
 
+  it('endSession without env/tty/sessionId is a no-op rather than killing the most-recent active session', async () => {
+    // Regression for the rc.2 dogfood finding: Claude's Stop hook was
+    // calling endSession with no env propagation and no tty match,
+    // and the old most-recent fallback marked an unrelated codex
+    // session as completed. After the fix endSession must silently
+    // return rather than guess.
+    delete process.env[SESSION_ENV_VAR];
+    const a = await startSession(sandbox);
+    delete process.env[SESSION_ENV_VAR];
+    const b = await startSession(sandbox);
+    delete process.env[SESSION_ENV_VAR];
+
+    await endSession(sandbox);
+
+    const remaining = await readdir(join(sandbox, '.memorize', 'sessions'));
+    expect(remaining.sort()).toEqual([`${a}.json`, `${b}.json`].sort());
+  });
+
+  it('endSession honours an explicit sessionId option (Claude Stop hook payload path)', async () => {
+    delete process.env[SESSION_ENV_VAR];
+    const a = await startSession(sandbox);
+    delete process.env[SESSION_ENV_VAR];
+    const b = await startSession(sandbox);
+    delete process.env[SESSION_ENV_VAR];
+
+    // Hook payload arrives carrying its own session_id. endSession
+    // must use it directly and bypass the env/tty disambiguation that
+    // would otherwise pick the wrong pointer.
+    await endSession(sandbox, { sessionId: a });
+
+    const remaining = await readdir(join(sandbox, '.memorize', 'sessions'));
+    expect(remaining).toEqual([`${b}.json`]);
+  });
+
   it('migrates a legacy current-session.json into the sessions/ directory and deletes the original', async () => {
     // Simulate a project that was last touched by rc.0/rc.1 — a single
     // pointer file at the legacy location, no sessions/ directory.

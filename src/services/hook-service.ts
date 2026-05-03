@@ -173,9 +173,16 @@ const handlePostCompact: HookHandler = async (ctx) => {
 const handleStop: HookHandler = async (ctx) => {
   const payload = parseStopPayload(ctx.rawPayload);
   const activeTaskId = await resolveActiveTaskId(ctx.projectId);
+  // Hook payloads include the agent's own session_id. Pass it through
+  // so endSession resolves correctly even when env/tty disambiguation
+  // would have failed (the rc.2 dogfood found Claude's Stop killing
+  // the most-recent codex session via the now-removed fallback).
+  const endOpts = payload.sessionId
+    ? { sessionId: payload.sessionId }
+    : {};
 
   if (!activeTaskId) {
-    await endSession(ctx.cwd);
+    await endSession(ctx.cwd, endOpts);
     return JSON.stringify({
       systemMessage:
         'memorize: session ended (no active task, skipped auto-handoff)',
@@ -196,7 +203,7 @@ const handleStop: HookHandler = async (ctx) => {
     summary,
     nextAction: `Continue from the latest ${agentDisplayName} output.`,
   });
-  await endSession(ctx.cwd);
+  await endSession(ctx.cwd, endOpts);
 
   return JSON.stringify({
     systemMessage: `memorize: handoff ${handoff.id} recorded`,

@@ -7,6 +7,42 @@ loosely. The project adheres to [Semantic Versioning](https://semver.org/);
 major-version bumps are reserved for breaking changes to the on-disk event
 log layout or the public CLI surface.
 
+## [1.0.0-rc.3] — 2026-05-03
+
+Two bugs surfaced by the rc.2 dogfood against the duo-pane test
+project. Both would have shipped to 1.0 had we not actually run four
+parallel agents.
+
+### Fixed
+
+- **Auto-picker now deconflicts against active sessions.** The
+  `loadStartContext` task picker used to return `candidateTasks[0]` as
+  a final fallback, with the result that four sessions started
+  90 seconds apart were all assigned the same first task. Now the
+  picker filters out tasks already claimed by other active sessions
+  (excluding `selfSessionId`) before falling back to a deterministic
+  pick. The `otherActiveTasks` list is no longer purely informational —
+  the picker itself uses the same data.
+- **`bumpHeartbeat` and `endSession` no longer guess.** The rc.2
+  most-recent-active fallback was attributing telemetry to the wrong
+  session whenever neither env propagation nor tty matching worked
+  (the common case for Claude's tool subprocesses and for Codex
+  entirely). The dogfood found Claude's Stop hook killing a codex
+  session via this path. Telemetry callers now silently no-op when
+  they cannot reliably identify the calling session — better a missed
+  heartbeat than a wrong attribution.
+- **`endSession` accepts an explicit `sessionId` option.** Stop hook
+  payloads carry the agent's `session_id`; the hook handler now
+  forwards it to `endSession` so attribution is correct even when env
+  and tty disambiguation both fail.
+
+### Notes
+
+- `getCurrentSessionId` keeps the most-recent-active fallback (opt-in
+  via `findCwdSession` flag) because it is the ambient-CLI entry point
+  that must always return a sessionId. Telemetry/lifecycle callers do
+  not opt in.
+
 ## [1.0.0-rc.2] — 2026-05-03
 
 Architectural fix surfaced while planning Sprint 3-4 dogfooding. The

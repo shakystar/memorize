@@ -40,11 +40,11 @@ async function readProjectRules(
 
 async function buildOtherActiveTasks(params: {
   projectId: string;
+  sessions: Awaited<ReturnType<typeof readActiveSessions>>;
   selfTaskId?: string;
   selfSessionId?: string;
 }): Promise<OtherActiveTask[]> {
-  const sessions = await readActiveSessions(params.projectId);
-  const otherSessions = sessions.filter((session) => {
+  const otherSessions = params.sessions.filter((session) => {
     if (params.selfSessionId && session.id === params.selfSessionId) return false;
     if (!session.taskId) return false;
     if (params.selfTaskId && session.taskId === params.selfTaskId) return false;
@@ -98,6 +98,19 @@ export async function loadStartContext(params: {
     ? await readTask(params.projectId, params.taskId)
     : undefined;
 
+  // Compute claimed-by-others up-front so the auto-picker can avoid
+  // duplicate work. The rc.2 dogfood surfaced that without this, four
+  // sessions started 1.5min apart all received the same first task.
+  const activeSessions = await readActiveSessions(params.projectId);
+  const claimedTaskIds = new Set(
+    activeSessions
+      .filter((s) =>
+        params.selfSessionId ? s.id !== params.selfSessionId : true,
+      )
+      .map((s) => s.taskId)
+      .filter((id): id is string => Boolean(id)),
+  );
+
   if (!task) {
     const candidateTasks = (
       await Promise.all(
@@ -107,9 +120,21 @@ export async function loadStartContext(params: {
       )
     ).filter((candidate): candidate is NonNullable<typeof candidate> => Boolean(candidate));
 
+    const isUnclaimed = (t: typeof candidateTasks[number]): boolean =>
+      !claimedTaskIds.has(t.id);
+    const findUnclaimedWithStatus = (status: string) =>
+      candidateTasks.find((c) => isUnclaimed(c) && c.status === status);
+
+    // Tier 1 — unclaimed, by status preference. Tier 2 — any unclaimed
+    // regardless of status. Final tier — original deterministic picker
+    // (claimed-but-prefer-in-progress) so we always return something
+    // when at least one candidate exists.
     task =
-      candidateTasks.find((candidate) => candidate.status === 'in_progress') ??
-      candidateTasks.find((candidate) => candidate.status === 'handoff_ready') ??
+      findUnclaimedWithStatus('in_progress') ??
+      findUnclaimedWithStatus('handoff_ready') ??
+      candidateTasks.find(isUnclaimed) ??
+      candidateTasks.find((c) => c.status === 'in_progress') ??
+      candidateTasks.find((c) => c.status === 'handoff_ready') ??
       candidateTasks[0];
   }
   const latestHandoff =
@@ -124,6 +149,7 @@ export async function loadStartContext(params: {
 
   const otherActiveTasks = await buildOtherActiveTasks({
     projectId: params.projectId,
+    sessions: activeSessions,
     ...(task?.id ? { selfTaskId: task.id } : {}),
     ...(params.selfSessionId ? { selfSessionId: params.selfSessionId } : {}),
   });
