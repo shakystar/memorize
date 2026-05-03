@@ -22,6 +22,9 @@ function runCli(args: string[]) {
       MEMORIZE_ROOT: memorizeRoot,
       // Override HOME so tests write to a sandboxed ~/.codex, not the real one.
       HOME: codexHome,
+      // Pin the hook command form for predictable assertions; bare
+      // form is covered by a dedicated test below.
+      MEMORIZE_HOOK_COMMAND_FORM: 'npx',
     },
   });
 }

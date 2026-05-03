@@ -21,6 +21,11 @@ function runCli(args: string[]) {
       ...process.env,
       MEMORIZE_ROOT: memorizeRoot,
       HOME: codexHome,
+      // Pin the hook command form: npm-linked test environments have
+      // memorize on PATH so detectHookCommandForm() would return
+      // 'bare', which mismatches the literal-string assertions below.
+      // The bare path is exercised by its own dedicated test.
+      MEMORIZE_HOOK_COMMAND_FORM: 'npx',
     },
   });
 }
@@ -341,5 +346,84 @@ describe('install integration', () => {
       checks: Array<{ id: string }>;
     };
     expect(report.checks.find((c) => c.id === 'install.codex')).toBeUndefined();
+  });
+
+  it('install claude with MEMORIZE_HOOK_COMMAND_FORM=bare uses bare `memorize` (faster, lets SessionEnd finish before Claude exits)', async () => {
+    // Why we care: Claude's SessionEnd hook is non-blocking — Claude
+    // reaps the subprocess as soon as it exits, so npx's cold-cache
+    // resolution latency was preventing cleanup work from completing
+    // (verified empirically during rc.5 dogfood). Using bare
+    // `memorize` when it's on PATH avoids npx entirely and gets the
+    // cleanup done in milliseconds.
+    const result = spawnSync(
+      'node',
+      [tsxCliPath, cliEntryPath, 'install', 'claude'],
+      {
+        cwd: sandbox,
+        encoding: 'utf8',
+        env: {
+          ...process.env,
+          MEMORIZE_ROOT: memorizeRoot,
+          HOME: codexHome,
+          MEMORIZE_HOOK_COMMAND_FORM: 'bare',
+        },
+      },
+    );
+    expect(result.status).toBe(0);
+
+    const settings = JSON.parse(
+      await readFile(join(sandbox, '.claude', 'settings.local.json'), 'utf8'),
+    ) as {
+      hooks: Record<
+        string,
+        Array<{ matcher?: string; hooks: Array<{ type: string; command: string }> }>
+      >;
+    };
+
+    for (const event of ['SessionStart', 'PreCompact', 'PostCompact', 'SessionEnd']) {
+      const groups = settings.hooks[event] ?? [];
+      const cmds = groups.flatMap((g) => g.hooks.map((h) => h.command));
+      const memorizeCmd = cmds.find((c) => /memorize\s+hook\s+claude/.test(c));
+      expect(memorizeCmd, `event ${event} has a memorize entry`).toBeDefined();
+      expect(memorizeCmd!).toBe(`memorize hook claude ${event}`);
+      expect(memorizeCmd!).not.toMatch(/^npx\s/);
+    }
+  });
+
+  it('re-installing with a different command form swaps it cleanly (no orphan duplicate entries)', async () => {
+    // Sequence: install once with npx → install again with bare. The
+    // file must end with exactly one memorize entry per event, in
+    // bare form. Catches a regression where strip-by-exact-string
+    // would leave the npx entry behind when bare was added.
+    spawnSync('node', [tsxCliPath, cliEntryPath, 'install', 'claude'], {
+      cwd: sandbox,
+      encoding: 'utf8',
+      env: { ...process.env, MEMORIZE_ROOT: memorizeRoot, HOME: codexHome,
+             MEMORIZE_HOOK_COMMAND_FORM: 'npx' },
+    });
+    spawnSync('node', [tsxCliPath, cliEntryPath, 'install', 'claude'], {
+      cwd: sandbox,
+      encoding: 'utf8',
+      env: { ...process.env, MEMORIZE_ROOT: memorizeRoot, HOME: codexHome,
+             MEMORIZE_HOOK_COMMAND_FORM: 'bare' },
+    });
+
+    const settings = JSON.parse(
+      await readFile(join(sandbox, '.claude', 'settings.local.json'), 'utf8'),
+    ) as {
+      hooks: Record<
+        string,
+        Array<{ hooks: Array<{ command: string }> }>
+      >;
+    };
+
+    for (const event of ['SessionStart', 'SessionEnd']) {
+      const cmds = (settings.hooks[event] ?? []).flatMap((g) =>
+        g.hooks.map((h) => h.command),
+      );
+      const memorizeCmds = cmds.filter((c) => /memorize\s+hook\s+claude/.test(c));
+      expect(memorizeCmds.length, `event ${event} should have exactly one memorize entry`).toBe(1);
+      expect(memorizeCmds[0]).toBe(`memorize hook claude ${event}`);
+    }
   });
 });

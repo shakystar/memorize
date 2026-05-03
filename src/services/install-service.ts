@@ -1,33 +1,79 @@
 import fs from 'node:fs/promises';
+import { existsSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
 import { isEnoent, writeJson } from '../storage/fs-utils.js';
 
-// Using `npx @shakystar/memorize ...` (scoped, fully qualified) rather
-// than bare `memorize ...` so hooks work regardless of install mode:
-// - local dev dep: npx resolves node_modules/.bin without a fetch
-// - global install: npx finds the global bin
-// - no install yet / non-Node project: npx fetches from the registry
-//   on first call and caches, subsequent runs are fast.
-// A bare `memorize` in the hook command would break in any environment
-// where memorize is not already on PATH (including most non-Node repos).
-const CLAUDE_HOOK_COMMANDS = {
-  SessionStart: 'npx @shakystar/memorize hook claude SessionStart',
-  PreCompact: 'npx @shakystar/memorize hook claude PreCompact',
-  PostCompact: 'npx @shakystar/memorize hook claude PostCompact',
-  SessionEnd: 'npx @shakystar/memorize hook claude SessionEnd',
-} as const;
+/**
+ * Pick the fastest hook command form available on this machine. We do
+ * this at install time (not hook fire time) so the choice is baked
+ * into settings.json and stays predictable.
+ *
+ * Why it matters: Claude waits for SessionStart's output (it's
+ * injected into context), so npx's ~500ms-2s of cold-cache resolution
+ * is tolerable there. SessionEnd is non-blocking — Claude exits as
+ * soon as the hook is fired, killing any subprocess that hadn't
+ * finished yet. With `npx ...`, the npx wrapper barely starts node
+ * before Claude reaps it; the actual cleanup never runs. With bare
+ * `memorize`, the binary launches in milliseconds and the cleanup
+ * completes in time.
+ *
+ * Override via MEMORIZE_HOOK_COMMAND_FORM=npx|bare for tests and
+ * unusual deployments.
+ */
+type HookCommandForm = 'bare' | 'npx';
 
-// Hook commands previous installs registered for memorize that the
-// current β-track design no longer wants. We strip these from the
-// merged settings so re-running `install claude` migrates an existing
-// project off the per-turn auto-handoff path. Keep the list narrow —
-// only memorize-owned commands; user-added Stop hooks for other tools
-// must be untouched.
-const CLAUDE_LEGACY_MEMORIZE_HOOK_COMMANDS = [
-  'npx @shakystar/memorize hook claude Stop',
-] as const;
+function detectHookCommandForm(): HookCommandForm {
+  const override = process.env.MEMORIZE_HOOK_COMMAND_FORM;
+  if (override === 'bare' || override === 'npx') return override;
+
+  const PATH = process.env.PATH ?? '';
+  for (const dir of PATH.split(path.delimiter)) {
+    if (!dir) continue;
+    if (existsSync(path.join(dir, 'memorize'))) return 'bare';
+  }
+  return 'npx';
+}
+
+function buildHookCommand(
+  form: HookCommandForm,
+  agent: 'claude' | 'codex',
+  event: string,
+): string {
+  return form === 'bare'
+    ? `memorize hook ${agent} ${event}`
+    : `npx @shakystar/memorize hook ${agent} ${event}`;
+}
+
+/**
+ * Matches any historical or current memorize hook command shape so
+ * re-installing migrates from one form to another (e.g. swap npx for
+ * bare when memorize lands on PATH, or strip a removed event like
+ * Stop) without leaving duplicates.
+ */
+function isMemorizeHookCommandFor(
+  command: string,
+  agent: 'claude' | 'codex',
+  event: string,
+): boolean {
+  const re = new RegExp(
+    `(@shakystar/)?memorize\\s+hook\\s+${agent}\\s+${event}\\b`,
+  );
+  return re.test(command);
+}
+
+// Hook events the β contract registers for Claude. Stop is intentionally
+// absent — see hook-service.ts for the rationale (Stop fires per-turn,
+// not per-session, and lifecycle moved to SessionEnd + reapStaleSessions).
+const CLAUDE_HOOK_EVENTS = ['SessionStart', 'PreCompact', 'PostCompact', 'SessionEnd'] as const;
+
+// Memorize hook events that previous installs may have registered but
+// the current β contract no longer wants. We strip these from the
+// merged settings on re-install. Keep narrow — only memorize-owned
+// entries; user-added entries for other tools under the same event
+// keys must be untouched.
+const CLAUDE_LEGACY_MEMORIZE_HOOK_EVENTS = ['Stop'] as const;
 
 // Claude Code expects each hook event to hold an array of matcher
 // groups, where every group itself carries a `hooks` array of
@@ -72,20 +118,28 @@ function ensureMemorizeCommand(
 }
 
 /**
- * Strip a memorize-owned hook command from a matcher-group list,
- * preserving any other entries the user may have added under the same
- * event. Returns undefined when removing our entry leaves the event
- * with no groups, so the caller can drop the event key entirely.
+ * Strip every memorize entry for a given (agent, event) regardless of
+ * which command form (`npx ...` vs bare `memorize`) was used. This
+ * lets re-install swap forms cleanly when memorize moves on/off PATH,
+ * and lets us fully retire a hook (e.g. Stop in β) without leaving an
+ * orphan entry pointing at a no-op handler. Other tools' entries
+ * under the same event key are preserved.
+ *
+ * Returns undefined when removing our entries empties the event
+ * entirely, so the caller can drop the event key from settings.
  */
-function stripMemorizeCommand(
+function stripMemorizeForEvent(
   list: HookMatcherGroup[] | undefined,
-  command: string,
+  agent: 'claude' | 'codex',
+  event: string,
 ): HookMatcherGroup[] | undefined {
   if (!list) return undefined;
   const cleaned = list
     .map((group) => ({
       ...group,
-      hooks: group.hooks.filter((entry) => entry.command !== command),
+      hooks: group.hooks.filter(
+        (entry) => !isMemorizeHookCommandFor(entry.command, agent, event),
+      ),
     }))
     .filter((group) => group.hooks.length > 0);
   return cleaned.length > 0 ? cleaned : undefined;
@@ -154,42 +208,34 @@ export async function installClaudeIntegration(cwd: string): Promise<string> {
     if (groups) migrated[event] = groups;
   }
 
-  // Strip legacy memorize-owned hook commands first so the merged
-  // result reflects only the current β contract. Anything user-added
-  // under the same event keys stays put.
+  const form = detectHookCommandForm();
   const purged: HooksMap = { ...migrated };
-  for (const legacyCommand of CLAUDE_LEGACY_MEMORIZE_HOOK_COMMANDS) {
-    for (const event of Object.keys(purged)) {
-      const cleaned = stripMemorizeCommand(purged[event], legacyCommand);
-      if (cleaned) {
-        purged[event] = cleaned;
-      } else {
-        delete purged[event];
-      }
+
+  // Strip every existing memorize entry (both active and legacy events,
+  // both npx and bare forms) so the rebuild below leaves exactly the
+  // β-contract entries with the freshly resolved command form.
+  const allEvents = [...CLAUDE_HOOK_EVENTS, ...CLAUDE_LEGACY_MEMORIZE_HOOK_EVENTS];
+  for (const event of allEvents) {
+    const cleaned = stripMemorizeForEvent(purged[event], 'claude', event);
+    if (cleaned) {
+      purged[event] = cleaned;
+    } else {
+      delete purged[event];
     }
+  }
+
+  // Re-add memorize entries for the active events only.
+  const rebuilt: HooksMap = { ...purged };
+  for (const event of CLAUDE_HOOK_EVENTS) {
+    rebuilt[event] = ensureMemorizeCommand(
+      purged[event],
+      buildHookCommand(form, 'claude', event),
+    );
   }
 
   const merged = {
     ...settings,
-    hooks: {
-      ...purged,
-      SessionStart: ensureMemorizeCommand(
-        purged.SessionStart,
-        CLAUDE_HOOK_COMMANDS.SessionStart,
-      ),
-      PreCompact: ensureMemorizeCommand(
-        purged.PreCompact,
-        CLAUDE_HOOK_COMMANDS.PreCompact,
-      ),
-      PostCompact: ensureMemorizeCommand(
-        purged.PostCompact,
-        CLAUDE_HOOK_COMMANDS.PostCompact,
-      ),
-      SessionEnd: ensureMemorizeCommand(
-        purged.SessionEnd,
-        CLAUDE_HOOK_COMMANDS.SessionEnd,
-      ),
-    },
+    hooks: rebuilt,
   };
 
   await writeJson(settingsPath, merged);
@@ -201,18 +247,16 @@ const CODEX_END_MARKER = '<!-- memorize:bootstrap v=1 end -->';
 const LEGACY_CODEX_START_MARKER = '<!-- Memorize:START -->';
 const LEGACY_CODEX_END_MARKER = '<!-- Memorize:END -->';
 
-const CODEX_HOOK_COMMANDS = {
-  SessionStart: 'npx @shakystar/memorize hook codex SessionStart',
-} as const;
+// Codex hook events the β contract registers. SessionStart only —
+// codex has no SessionEnd / Shutdown / Exit hook (verified against
+// developers.openai.com/codex/hooks 2026-05), so codex lifecycle is
+// owned entirely by reapStaleSessions.
+const CODEX_HOOK_EVENTS = ['SessionStart'] as const;
 
-// Codex has no SessionEnd / Shutdown / Exit hook of any kind (verified
-// against developers.openai.com/codex/hooks 2026-05). Codex Stop fires
-// per-turn just like Claude's, so the rc.X auto-handoff path was wrong
-// here too. Strip the legacy registration on re-install; lifecycle for
-// codex is owned entirely by reapStaleSessions.
-const CODEX_LEGACY_MEMORIZE_HOOK_COMMANDS = [
-  'npx @shakystar/memorize hook codex Stop',
-] as const;
+// Codex Stop fires per-turn just like Claude's, so the rc.X
+// auto-handoff path was wrong here too. Strip the legacy registration
+// on re-install.
+const CODEX_LEGACY_MEMORIZE_HOOK_EVENTS = ['Stop'] as const;
 
 function codexHooksPath(): string {
   return path.join(os.homedir(), '.codex', 'hooks.json');
@@ -237,18 +281,18 @@ export async function installCodexHooks(): Promise<string> {
     if (groups) migrated[event] = groups;
   }
 
-  // Drop legacy memorize-owned commands the β contract no longer
-  // wants. Same care as Claude install: only memorize-prefixed
-  // entries are removed.
+  const form = detectHookCommandForm();
   const purged: HooksMap = { ...migrated };
-  for (const legacyCommand of CODEX_LEGACY_MEMORIZE_HOOK_COMMANDS) {
-    for (const event of Object.keys(purged)) {
-      const cleaned = stripMemorizeCommand(purged[event], legacyCommand);
-      if (cleaned) {
-        purged[event] = cleaned;
-      } else {
-        delete purged[event];
-      }
+
+  // Strip every existing memorize entry so the rebuild leaves exactly
+  // the β-contract entries with the freshly resolved command form.
+  const allEvents = [...CODEX_HOOK_EVENTS, ...CODEX_LEGACY_MEMORIZE_HOOK_EVENTS];
+  for (const event of allEvents) {
+    const cleaned = stripMemorizeForEvent(purged[event], 'codex', event);
+    if (cleaned) {
+      purged[event] = cleaned;
+    } else {
+      delete purged[event];
     }
   }
 
@@ -276,16 +320,21 @@ export async function installCodexHooks(): Promise<string> {
     ];
   };
 
+  const rebuilt: HooksMap = { ...purged };
+  for (const event of CODEX_HOOK_EVENTS) {
+    // Codex SessionStart wants matcher 'startup|resume'; if we add new
+    // codex events later, we'll thread per-event matcher choice here.
+    const matcher = event === 'SessionStart' ? 'startup|resume' : undefined;
+    rebuilt[event] = prependMemorize(
+      purged[event],
+      buildHookCommand(form, 'codex', event),
+      matcher,
+    );
+  }
+
   const merged = {
     ...settings,
-    hooks: {
-      ...purged,
-      SessionStart: prependMemorize(
-        purged.SessionStart,
-        CODEX_HOOK_COMMANDS.SessionStart,
-        'startup|resume',
-      ),
-    },
+    hooks: rebuilt,
   };
 
   await writeJson(hooksPath, merged);
