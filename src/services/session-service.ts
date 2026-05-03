@@ -1,4 +1,5 @@
 import fs from 'node:fs/promises';
+import { fstatSync } from 'node:fs';
 import path from 'node:path';
 
 import {
@@ -13,22 +14,116 @@ import type {
 } from '../domain/entities.js';
 import { createSession } from '../domain/entities.js';
 import { appendEvent } from '../storage/event-store.js';
-import { isEnoent, readJson, readJsonDir, writeJson } from '../storage/fs-utils.js';
+import {
+  isEnoent,
+  readJson,
+  readJsonDir,
+  writeJson,
+} from '../storage/fs-utils.js';
 import { getSessionsDir } from '../storage/path-resolver.js';
 import { rebuildProjectProjection } from './projection-store.js';
 
 export const SESSION_ENV_VAR = 'MEMORIZE_SESSION_ID';
 
-interface CurrentSessionFile {
+interface CwdSessionPointer {
   sessionId: string;
   startedAt: string;
   startedBy?: string;
   projectId?: string;
   taskId?: string;
+  /** Numeric tty rdev (stringified) when the starting process was attached
+   *  to a terminal. Used to attribute heartbeats from CLI subprocesses
+   *  back to the right session in cwds that host more than one parallel
+   *  session — see findCwdSession for the full lookup chain. */
+  tty?: string;
 }
 
-function currentSessionFile(cwd: string): string {
+function cwdSessionsDir(cwd: string): string {
+  return path.join(cwd, '.memorize', 'sessions');
+}
+
+function cwdSessionFile(cwd: string, sessionId: string): string {
+  return path.join(cwdSessionsDir(cwd), `${sessionId}.json`);
+}
+
+/** Legacy single-pointer location from rc.0 / rc.1. Migrated on first
+ *  startSession call, then deleted. */
+function legacyCwdSessionFile(cwd: string): string {
   return path.join(cwd, '.memorize', 'current-session.json');
+}
+
+function currentTtyId(): string | undefined {
+  if (!process.stdin.isTTY) return undefined;
+  try {
+    return String(fstatSync(0).rdev);
+  } catch {
+    return undefined;
+  }
+}
+
+async function readCwdPointer(
+  cwd: string,
+  sessionId: string,
+): Promise<CwdSessionPointer | undefined> {
+  return readJson<CwdSessionPointer>(cwdSessionFile(cwd, sessionId));
+}
+
+async function listCwdPointers(cwd: string): Promise<CwdSessionPointer[]> {
+  return readJsonDir<CwdSessionPointer>(cwdSessionsDir(cwd));
+}
+
+async function migrateLegacyPointer(cwd: string): Promise<void> {
+  const legacyPath = legacyCwdSessionFile(cwd);
+  const legacy = await readJson<CwdSessionPointer>(legacyPath);
+  if (!legacy?.sessionId) return;
+  const target = cwdSessionFile(cwd, legacy.sessionId);
+  // Only migrate if there is no per-session file already at the target.
+  // Otherwise we would clobber a fresh pointer with stale data.
+  const existing = await readJson<CwdSessionPointer>(target);
+  if (!existing) {
+    await writeJson(target, legacy);
+  }
+  try {
+    await fs.unlink(legacyPath);
+  } catch (error) {
+    if (!isEnoent(error)) throw error;
+  }
+}
+
+/**
+ * Locate the cwd-side pointer for the calling session. Priority:
+ *   1. MEMORIZE_SESSION_ID env var (set by Claude via CLAUDE_ENV_FILE
+ *      and inherited by every child `memorize` process).
+ *   2. tty match — the current process's stdin tty rdev against the
+ *      tty stored when each session started. Required for Codex which
+ *      has no env-injection hook surface.
+ *   3. Most-recently-started active pointer in this cwd. Final fallback
+ *      for ambient CLI invocations (user opens a fresh shell, runs
+ *      `memorize task list`).
+ */
+async function findCwdSession(
+  cwd: string,
+): Promise<CwdSessionPointer | undefined> {
+  await migrateLegacyPointer(cwd);
+
+  const fromEnv = process.env[SESSION_ENV_VAR];
+  if (fromEnv) {
+    const direct = await readCwdPointer(cwd, fromEnv);
+    if (direct) return direct;
+  }
+
+  const all = await listCwdPointers(cwd);
+  if (all.length === 0) return undefined;
+
+  const tty = currentTtyId();
+  if (tty) {
+    const ttyMatch = all
+      .filter((p) => p.tty === tty)
+      .sort((a, b) => (a.startedAt < b.startedAt ? 1 : -1))[0];
+    if (ttyMatch) return ttyMatch;
+  }
+
+  return all.sort((a, b) => (a.startedAt < b.startedAt ? 1 : -1))[0];
 }
 
 export interface StartSessionOptions {
@@ -41,13 +136,12 @@ export async function startSession(
   cwd: string,
   options: StartSessionOptions = {},
 ): Promise<string> {
+  await migrateLegacyPointer(cwd);
+
   const actor = options.actor ?? 'ambient';
   let sessionId: string;
 
   if (options.projectId) {
-    // With a project context we emit a real session.started event so
-    // the projector can build the Session record. Without one we just
-    // mint an id (ambient sessions during read-only commands).
     const session = createSession({
       projectId: options.projectId,
       actor,
@@ -67,55 +161,58 @@ export async function startSession(
     sessionId = createId('session');
   }
 
-  const payload: CurrentSessionFile = {
+  const tty = currentTtyId();
+  const pointer: CwdSessionPointer = {
     sessionId,
     startedAt: nowIso(),
     startedBy: actor,
     ...(options.projectId ? { projectId: options.projectId } : {}),
     ...(options.taskId ? { taskId: options.taskId } : {}),
+    ...(tty ? { tty } : {}),
   };
-  await writeJson(currentSessionFile(cwd), payload);
+  await writeJson(cwdSessionFile(cwd, sessionId), pointer);
   process.env[SESSION_ENV_VAR] = sessionId;
   return sessionId;
 }
 
 export async function endSession(cwd: string): Promise<void> {
-  const current = await readJson<CurrentSessionFile>(currentSessionFile(cwd));
+  const pointer = await findCwdSession(cwd);
+  if (!pointer) return;
 
-  if (current?.projectId) {
+  if (pointer.projectId) {
     const endedAt = nowIso();
-    // Minimal Session-shaped payload — projector for session.completed
-    // reads scopeId; payload contents are advisory.
     const completedPayload: Session = {
-      id: current.sessionId,
+      id: pointer.sessionId,
       schemaVersion: CURRENT_SCHEMA_VERSION,
-      createdAt: current.startedAt,
+      createdAt: pointer.startedAt,
       updatedAt: endedAt,
-      projectId: current.projectId,
-      ...(current.taskId ? { taskId: current.taskId } : {}),
-      actor: current.startedBy ?? ACTOR_SYSTEM,
-      startedAt: current.startedAt,
+      projectId: pointer.projectId,
+      ...(pointer.taskId ? { taskId: pointer.taskId } : {}),
+      actor: pointer.startedBy ?? ACTOR_SYSTEM,
+      startedAt: pointer.startedAt,
       endedAt,
       lastSeenAt: endedAt,
       status: 'completed',
     };
     await appendEvent({
       type: 'session.completed',
-      projectId: current.projectId,
+      projectId: pointer.projectId,
       scopeType: 'session',
-      scopeId: current.sessionId,
-      actor: current.startedBy ?? ACTOR_SYSTEM,
+      scopeId: pointer.sessionId,
+      actor: pointer.startedBy ?? ACTOR_SYSTEM,
       payload: completedPayload,
     });
-    await rebuildProjectProjection(current.projectId);
+    await rebuildProjectProjection(pointer.projectId);
   }
 
   try {
-    await fs.unlink(currentSessionFile(cwd));
+    await fs.unlink(cwdSessionFile(cwd, pointer.sessionId));
   } catch (error) {
     if (!isEnoent(error)) throw error;
   }
-  delete process.env[SESSION_ENV_VAR];
+  if (process.env[SESSION_ENV_VAR] === pointer.sessionId) {
+    delete process.env[SESSION_ENV_VAR];
+  }
 }
 
 /**
@@ -125,28 +222,28 @@ export async function endSession(cwd: string): Promise<void> {
  * never fail because of telemetry.
  */
 export async function bumpHeartbeat(cwd: string): Promise<void> {
-  let current: CurrentSessionFile | undefined;
+  let pointer: CwdSessionPointer | undefined;
   try {
-    current = await readJson<CurrentSessionFile>(currentSessionFile(cwd));
+    pointer = await findCwdSession(cwd);
   } catch {
     return;
   }
-  if (!current?.projectId) return;
+  if (!pointer?.projectId) return;
 
   try {
     const payload: SessionHeartbeatPayload = {
-      sessionId: current.sessionId,
+      sessionId: pointer.sessionId,
       at: nowIso(),
     };
     await appendEvent({
       type: 'session.heartbeat',
-      projectId: current.projectId,
+      projectId: pointer.projectId,
       scopeType: 'session',
-      scopeId: current.sessionId,
-      actor: current.startedBy ?? ACTOR_SYSTEM,
+      scopeId: pointer.sessionId,
+      actor: pointer.startedBy ?? ACTOR_SYSTEM,
       payload,
     });
-    await rebuildProjectProjection(current.projectId);
+    await rebuildProjectProjection(pointer.projectId);
   } catch {
     // never let telemetry break a command
   }
@@ -156,10 +253,8 @@ export async function getCurrentSessionId(cwd: string): Promise<string> {
   const fromEnv = process.env[SESSION_ENV_VAR];
   if (fromEnv) return fromEnv;
 
-  const fromDisk = await readJson<CurrentSessionFile>(currentSessionFile(cwd));
-  if (fromDisk?.sessionId) {
-    return fromDisk.sessionId;
-  }
+  const pointer = await findCwdSession(cwd);
+  if (pointer?.sessionId) return pointer.sessionId;
 
   return startSession(cwd, { actor: 'ambient' });
 }

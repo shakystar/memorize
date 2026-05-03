@@ -95,7 +95,7 @@ describe('session id stability', () => {
     expect(secondSession).toBe(envSessionId);
   });
 
-  it('reuses the same sessionId across checkpoints via ambient .memorize/current-session.json', { timeout: 30_000 }, async () => {
+  it('reuses the same sessionId across checkpoints via the ambient cwd pointer', { timeout: 30_000 }, async () => {
     expect(runCli(['project', 'init']).status).toBe(0);
     expect(runCli(['task', 'create', 'Ambient session test']).status).toBe(0);
 

@@ -7,6 +7,41 @@ loosely. The project adheres to [Semantic Versioning](https://semver.org/);
 major-version bumps are reserved for breaking changes to the on-disk event
 log layout or the public CLI surface.
 
+## [1.0.0-rc.2] — 2026-05-03
+
+Architectural fix surfaced while planning Sprint 3-4 dogfooding. The
+"one cwd = one session" assumption baked into the rc.0/rc.1 session
+pointer broke the common case of running two Claude (or Claude + Codex)
+sessions in the same project directory — heartbeats from the second
+session would clobber the first's pointer and the assignment-model
+freshness label would lie.
+
+### Changed
+
+- **Session pointer layout.** `<cwd>/.memorize/current-session.json`
+  (single pointer) → `<cwd>/.memorize/sessions/<sessionId>.json`
+  (one file per active session). Each pointer stores the starting tty
+  rdev so subprocesses can attribute themselves back to the right
+  session.
+- **Session resolution priority** for `bumpHeartbeat`, `endSession`,
+  `getCurrentSessionId`: `MEMORIZE_SESSION_ID` env (Claude path) → tty
+  match (Codex path) → most-recently-started active pointer (ambient
+  CLI fallback).
+
+### Migration
+
+- A legacy `current-session.json` is migrated automatically the first
+  time any session-service entry point runs in that cwd; the original
+  file is then removed. No user action required.
+
+### Why this matters for 1.0
+
+The Sprint 2 lock-free assignment model only works if heartbeats reach
+the right session. Without this fix, two parallel Claude sessions in
+the same project would each see the other as `stale (likely abandoned)`
+within minutes and start picking up each other's tasks — exactly the
+failure mode dogfooding is meant to validate against.
+
 ## [1.0.0-rc.1] — 2026-05-03
 
 Pre-dogfooding cleanup. Surfaced while preparing the duo-pane test
