@@ -73,12 +73,10 @@ function readStringField(
 
 interface PostCompactPayload {
   compactSummary?: string;
-  sessionId?: string;
 }
 
 interface StopPayload {
   lastAssistantMessage?: string;
-  sessionId?: string;
 }
 
 function parsePostCompactPayload(raw: string | undefined): PostCompactPayload {
@@ -87,10 +85,6 @@ function parsePostCompactPayload(raw: string | undefined): PostCompactPayload {
   const compactSummary = readStringField(obj, 'compact_summary');
   if (compactSummary !== undefined) {
     result.compactSummary = compactSummary;
-  }
-  const sessionId = readStringField(obj, 'session_id');
-  if (sessionId !== undefined) {
-    result.sessionId = sessionId;
   }
   return result;
 }
@@ -101,10 +95,6 @@ function parseStopPayload(raw: string | undefined): StopPayload {
   const lastAssistantMessage = readStringField(obj, 'last_assistant_message');
   if (lastAssistantMessage !== undefined) {
     result.lastAssistantMessage = lastAssistantMessage;
-  }
-  const sessionId = readStringField(obj, 'session_id');
-  if (sessionId !== undefined) {
-    result.sessionId = sessionId;
   }
   return result;
 }
@@ -163,8 +153,11 @@ const handlePostCompact: HookHandler = async (ctx) => {
   const activeTaskId =
     (await getCurrentSessionTaskId(ctx.cwd)) ??
     (await resolveActiveTaskId(ctx.projectId));
-  const sessionId =
-    payload.sessionId ?? (await getCurrentSessionId(ctx.cwd));
+  // payload.sessionId is the AGENT's own session id (Claude UUID, Codex
+  // turn id) — a different ID space from memorize's session_xxx. Using
+  // it would mis-attribute the checkpoint. Always resolve via env/tty
+  // (now reliable post Gap-B fix).
+  const sessionId = await getCurrentSessionId(ctx.cwd);
   const summary =
     prepareHookText(payload.compactSummary, 'hook.PostCompact.compact_summary') ??
     'Compact summary unavailable';
@@ -190,16 +183,15 @@ const handleStop: HookHandler = async (ctx) => {
   const activeTaskId =
     (await getCurrentSessionTaskId(ctx.cwd)) ??
     (await resolveActiveTaskId(ctx.projectId));
-  // Hook payloads include the agent's own session_id. Pass it through
-  // so endSession resolves correctly even when env/tty disambiguation
-  // would have failed (the rc.2 dogfood found Claude's Stop killing
-  // the most-recent codex session via the now-removed fallback).
-  const endOpts = payload.sessionId
-    ? { sessionId: payload.sessionId }
-    : {};
+  // Do NOT forward payload.sessionId: it's the agent's own ID (Claude
+  // UUID etc.), not a memorize session_xxx, so endSession's pointer
+  // lookup would always miss and silently no-op — exactly the rc.4
+  // dogfood Gap D where Stop fired but session.completed was never
+  // written and pointer files leaked. Env/tty disambiguation (now
+  // reliable post Gap-B) is the right path.
 
   if (!activeTaskId) {
-    await endSession(ctx.cwd, endOpts);
+    await endSession(ctx.cwd);
     return JSON.stringify({
       systemMessage:
         'memorize: session ended (no active task, skipped auto-handoff)',
@@ -220,7 +212,7 @@ const handleStop: HookHandler = async (ctx) => {
     summary,
     nextAction: `Continue from the latest ${agentDisplayName} output.`,
   });
-  await endSession(ctx.cwd, endOpts);
+  await endSession(ctx.cwd);
 
   return JSON.stringify({
     systemMessage: `memorize: handoff ${handoff.id} recorded`,

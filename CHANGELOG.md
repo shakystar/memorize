@@ -9,10 +9,10 @@ log layout or the public CLI surface.
 
 ## [1.0.0-rc.4] — 2026-05-03
 
-Three gaps surfaced by the rc.3 dogfood telemetry. Gap B is the most
-load-bearing: without it, Claude tool subprocesses never saw
-`MEMORIZE_SESSION_ID`, so every hook handler that depended on session
-disambiguation silently degraded.
+Four gaps surfaced by the rc.3 dogfood. Gap B is the most load-bearing
+(without it, every Claude tool subprocess saw `MEMORIZE_SESSION_ID` as
+unset, silently degrading every other session-aware code path); Gap D
+was discovered while verifying the Gap B fix.
 
 ### Fixed
 
@@ -30,6 +30,18 @@ disambiguation silently degraded.
   taskId the calling session itself claimed at `SessionStart` (via
   the new `getCurrentSessionTaskId`) and only fall back to the
   project-level guess when the session never claimed anything.
+- **Gap D — Stop hook silently leaking sessions.** The rc.3 fix
+  forwarded the agent's payload `session_id` to `endSession` as if
+  it were a memorize session id. Claude/Codex payloads speak their
+  own ID space (Claude UUIDs etc.), so the pointer lookup always
+  missed and `endSession` returned early — `session.completed` was
+  never written, pointer files leaked, and the projection
+  accumulated dead "active" sessions that blocked the picker.
+  Discovered in production: 13 stale active sessions claiming tasks
+  in the duo-pane dogfood project. Hook handlers now ignore
+  `payload.sessionId` and resolve the calling session via env/tty
+  (now reliable post Gap-B). The `endSession({ sessionId })` API
+  itself is preserved for memorize-aware callers (scripts, tests).
 
 ### Documented
 

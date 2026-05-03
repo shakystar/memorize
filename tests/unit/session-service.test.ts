@@ -107,16 +107,18 @@ describe('multi-session per cwd — Sprint 3-5 fix', () => {
     expect(remaining.sort()).toEqual([`${a}.json`, `${b}.json`].sort());
   });
 
-  it('endSession honours an explicit sessionId option (Claude Stop hook payload path)', async () => {
+  it('endSession honours an explicit sessionId option from a memorize-aware caller', async () => {
+    // The API surface allows callers that already know the memorize
+    // session id (scripts, tests, future tooling) to bypass env/tty
+    // disambiguation. Note: hook handlers MUST NOT use this path with
+    // agent-supplied session ids — Claude/Codex payloads speak their
+    // own ID space, not memorize's. See the rc.4 Gap D hook fix.
     delete process.env[SESSION_ENV_VAR];
     const a = await startSession(sandbox);
     delete process.env[SESSION_ENV_VAR];
     const b = await startSession(sandbox);
     delete process.env[SESSION_ENV_VAR];
 
-    // Hook payload arrives carrying its own session_id. endSession
-    // must use it directly and bypass the env/tty disambiguation that
-    // would otherwise pick the wrong pointer.
     await endSession(sandbox, { sessionId: a });
 
     const remaining = await readdir(join(sandbox, '.memorize', 'sessions'));
