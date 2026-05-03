@@ -279,23 +279,42 @@ function stripLegacyMemorizeBlock(source: string): string {
   return out;
 }
 
+async function stripMemorizeFromFile(
+  filePath: string,
+  options: { deleteIfEmpty: boolean },
+): Promise<void> {
+  let existing: string;
+  try {
+    existing = await fs.readFile(filePath, 'utf8');
+  } catch (error) {
+    if (isEnoent(error)) return;
+    throw error;
+  }
+  const cleaned = stripLegacyMemorizeBlock(existing);
+  if (cleaned === existing) return;
+  if (options.deleteIfEmpty && cleaned.trim().length === 0) {
+    await fs.unlink(filePath);
+    return;
+  }
+  await fs.writeFile(filePath, cleaned, 'utf8');
+}
+
 export async function installCodexIntegration(cwd: string): Promise<string> {
   const hooksPath = await installCodexHooks();
 
-  const overridePath = path.join(cwd, 'AGENTS.override.md');
-  try {
-    const existing = await fs.readFile(overridePath, 'utf8');
-    const cleaned = stripLegacyMemorizeBlock(existing);
-    if (cleaned !== existing) {
-      if (cleaned.trim().length === 0) {
-        await fs.unlink(overridePath);
-      } else {
-        await fs.writeFile(overridePath, cleaned, 'utf8');
-      }
-    }
-  } catch (error) {
-    if (!isEnoent(error)) throw error;
-  }
+  // AGENTS.override.md was the historical injection target — memorize
+  // owned it, so when our content is removed and the file is otherwise
+  // empty we delete it.
+  await stripMemorizeFromFile(path.join(cwd, 'AGENTS.override.md'), {
+    deleteIfEmpty: true,
+  });
+  // AGENTS.md is user-owned. Earlier install variants also injected
+  // here; we still strip those blocks for cleanup, but never delete the
+  // file even if the strip leaves it empty — that decision belongs to
+  // the user.
+  await stripMemorizeFromFile(path.join(cwd, 'AGENTS.md'), {
+    deleteIfEmpty: false,
+  });
 
   return hooksPath;
 }
