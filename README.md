@@ -24,6 +24,20 @@ of truth; projections and agent bootstraps are cheap to rebuild. The same
 event log feeds Claude and Codex, so a handoff you wrote during one
 session is visible to whichever agent picks up next.
 
+## See it in 30 seconds
+
+<!-- TODO: replace with asciinema embed once examples/quickstart.sh is recorded for the README. -->
+
+The full demo is committed as a runnable script:
+[examples/quickstart.sh](./examples/quickstart.sh). It spins up a throwaway
+project, sets memorize up, creates a task, prints the startup payload an
+agent would see, and records a checkpoint — all in a temporary directory
+that is cleaned up on exit.
+
+```sh
+bash examples/quickstart.sh
+```
+
 ## Set it up (5 seconds, your AI does it)
 
 Memorize is designed to be installed **by** your AI coding assistant, not
