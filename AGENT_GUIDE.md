@@ -180,7 +180,12 @@ Human-readable summary of the bound project (title, counts,
 workstreams, active tasks). Not structured; use `project show` if you
 need JSON.
 
-### `memorize project sync [flags]`
+### `memorize project sync [flags]` (experimental)
+
+> **Experimental in 1.x.** The file transport works and is roundtrip-tested,
+> but real cross-machine dogfooding is post-1.0. Flags and on-disk wire
+> format may change in a 1.x minor release. Do not depend on it for
+> production sharing yet.
 
 Event sync with a remote path.
 
