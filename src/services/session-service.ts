@@ -54,6 +54,13 @@ interface CwdSessionPointer {
    *  back to the right session in cwds that host more than one parallel
    *  session — see findCwdSession for the full lookup chain. */
   tty?: string;
+  /** The host agent's own session id (Claude UUID, codex turn id, etc.)
+   *  captured from the SessionStart hook payload. We persist it here so
+   *  later hook events can map back to the right memorize session even
+   *  when env propagation fails — Claude's SessionEnd subprocess for
+   *  example does NOT inherit MEMORIZE_SESSION_ID, but its payload
+   *  carries the same Claude UUID we saw at SessionStart. */
+  agentSessionId?: string;
 }
 
 function cwdSessionsDir(cwd: string): string {
@@ -245,6 +252,10 @@ export interface StartSessionOptions {
   actor?: string;
   projectId?: string;
   taskId?: string;
+  /** The host agent's session id (e.g. Claude's UUID). Persisted on
+   *  the cwd pointer so a later hook event whose env was lost (Claude
+   *  SessionEnd) can still resolve to the right memorize session. */
+  agentSessionId?: string;
 }
 
 export async function startSession(
@@ -289,10 +300,27 @@ export async function startSession(
     ...(options.projectId ? { projectId: options.projectId } : {}),
     ...(options.taskId ? { taskId: options.taskId } : {}),
     ...(tty ? { tty } : {}),
+    ...(options.agentSessionId ? { agentSessionId: options.agentSessionId } : {}),
   };
   await writeJson(cwdSessionFile(cwd, sessionId), pointer);
   process.env[SESSION_ENV_VAR] = sessionId;
   return sessionId;
+}
+
+/**
+ * Look up the cwd pointer whose stored agentSessionId matches `agentId`.
+ * Used by hook handlers (notably SessionEnd) when env propagation
+ * cannot be relied on but the hook payload carries the agent's own
+ * session id — the SessionStart hook stamped that id on the pointer
+ * so we can map it back here.
+ */
+export async function findCwdSessionByAgentId(
+  cwd: string,
+  agentId: string,
+): Promise<{ sessionId: string } | undefined> {
+  const pointers = await listCwdPointers(cwd);
+  const match = pointers.find((p) => p.agentSessionId === agentId);
+  return match ? { sessionId: match.sessionId } : undefined;
 }
 
 export interface EndSessionOptions {

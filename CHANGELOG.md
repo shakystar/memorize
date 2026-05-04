@@ -9,7 +9,26 @@ log layout or the public CLI surface.
 
 ## [1.0.0-rc.5] — 2026-05-03
 
-Session lifecycle redesign (β track). The rc.0..rc.4 line treated
+### Fixed (β verification follow-ups)
+
+- **SessionEnd hook env propagation** — verified empirically that
+  Claude does NOT pass `MEMORIZE_SESSION_ID` into the SessionEnd hook
+  subprocess (despite SessionStart's exported env reaching every other
+  Bash/tool subprocess). Without env, `endSession` couldn't find its
+  cwd pointer and silently returned, so `session.completed` never
+  fired and pointers leaked on every real `/exit` or `Ctrl+C`. Fix:
+  the SessionStart hook now stamps the agent's own session id (Claude
+  UUID, etc.) on the cwd pointer as `agentSessionId`, and SessionEnd
+  resolves the calling memorize session via `payload.session_id` →
+  `agentSessionId` lookup. Env/tty fall back as a safety net.
+- **Bare `memorize` hook command when on PATH** — Claude doesn't wait
+  for SessionEnd to finish before exiting; the npx wrapper barely
+  loaded node before getting reaped. Install now uses bare `memorize
+  hook ...` when memorize is on PATH (launches in milliseconds) and
+  falls back to `npx ...` only when it isn't. Override via
+  `MEMORIZE_HOOK_COMMAND_FORM=npx|bare`.
+
+### Session lifecycle redesign (β track). The rc.0..rc.4 line treated
 Claude's `Stop` hook as session-end; in fact `Stop` fires per assistant
 turn, which produced one bogus auto-handoff per turn and (in rc.3+)
 caused per-turn `session.completed` event attempts. Verified by data:

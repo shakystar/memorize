@@ -16,6 +16,7 @@ import {
 import {
   SESSION_ENV_VAR,
   endSession,
+  findCwdSessionByAgentId,
   getCurrentSessionId,
   getCurrentSessionTaskId,
   startSession,
@@ -74,6 +75,10 @@ interface PostCompactPayload {
   compactSummary?: string;
 }
 
+interface IdentityPayload {
+  agentSessionId?: string;
+}
+
 function parsePostCompactPayload(raw: string | undefined): PostCompactPayload {
   const obj = parseJsonObject(raw);
   const result: PostCompactPayload = {};
@@ -82,6 +87,17 @@ function parsePostCompactPayload(raw: string | undefined): PostCompactPayload {
     result.compactSummary = compactSummary;
   }
   return result;
+}
+
+/** Pulls the agent's own session id out of any hook payload that
+ *  carries one. SessionStart, SessionEnd, Stop, and PostCompact all
+ *  include it under `session_id`. We use it as a stable handle to the
+ *  calling session so later events can look up what SessionStart
+ *  claimed even when env propagation fails. */
+function parseIdentityPayload(raw: string | undefined): IdentityPayload {
+  const obj = parseJsonObject(raw);
+  const agentSessionId = readStringField(obj, 'session_id');
+  return agentSessionId ? { agentSessionId } : {};
 }
 
 function prepareHookText(
@@ -103,10 +119,16 @@ const handleSessionStart: HookHandler = async (ctx) => {
     agent: ctx.agent,
     cwd: ctx.cwd,
   });
+  // Stamp the agent's own session id (Claude UUID, etc.) on the
+  // pointer. Lets later hook subprocesses with broken env propagation
+  // (notably Claude SessionEnd) map back to this memorize session by
+  // payload.session_id alone.
+  const identity = parseIdentityPayload(ctx.rawPayload);
   const sessionId = await startSession(ctx.cwd, {
     actor: ctx.agent,
     projectId: ctx.projectId,
     ...(composed.taskId ? { taskId: composed.taskId } : {}),
+    ...(identity.agentSessionId ? { agentSessionId: identity.agentSessionId } : {}),
   });
   const additionalContext = composed.startupContext;
 
@@ -174,15 +196,33 @@ const handlePostCompact: HookHandler = async (ctx) => {
 const handleStop: HookHandler = async () => EMPTY_HOOK_RESULT;
 
 const handleSessionEnd: HookHandler = async (ctx) => {
-  // Claude Code's SessionEnd fires regardless of how the session
-  // terminated (clean /exit, Ctrl+C, terminal close — see hook docs
-  // `reason` field: clear/resume/logout/prompt_input_exit/other).
-  // Best-effort cleanup: write session.completed and unlink the cwd
-  // pointer for whichever session this hook resolves to via env/tty.
-  // If the resolution misses (e.g. env propagation lost), the session
-  // stays as 'active' until the next reapStaleSessions sweep abandons
-  // it — graceful degradation, not data loss.
-  await endSession(ctx.cwd);
+  // Claude Code's SessionEnd fires on every termination path it
+  // exposes (clean /exit, Ctrl+C twice, terminal close — see hook
+  // docs `reason` field). Resolution chain, in priority order:
+  //
+  //   1. Map by payload.session_id → cwd pointer's stored
+  //      agentSessionId. This is the only reliable path because
+  //      Claude does NOT propagate MEMORIZE_SESSION_ID into the
+  //      SessionEnd subprocess env (verified empirically — the
+  //      subprocess starts with a different env than tool/Bash
+  //      subprocesses do, despite the docs implying otherwise).
+  //   2. Fall back to env/tty resolution via endSession() with no
+  //      explicit sessionId. Mostly a safety net for cases where the
+  //      agent payload didn't carry an id we recognized.
+  //
+  // If both miss, the session stays 'active' until the next
+  // reapStaleSessions sweep abandons it — graceful degradation, not
+  // data loss.
+  const identity = parseIdentityPayload(ctx.rawPayload);
+  let resolvedSessionId: string | undefined;
+  if (identity.agentSessionId) {
+    const match = await findCwdSessionByAgentId(ctx.cwd, identity.agentSessionId);
+    if (match) resolvedSessionId = match.sessionId;
+  }
+  await endSession(
+    ctx.cwd,
+    resolvedSessionId ? { sessionId: resolvedSessionId } : {},
+  );
   return JSON.stringify({
     systemMessage: 'memorize: session ended',
   });

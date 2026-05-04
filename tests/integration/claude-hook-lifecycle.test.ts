@@ -173,4 +173,58 @@ describe('claude hook lifecycle', () => {
     }
     expect(sawCompleted).toBe(true);
   });
+
+  it('SessionEnd resolves via payload.session_id when MEMORIZE_SESSION_ID env is missing (β fallback)', async () => {
+    // The empirical finding from rc.5 dogfood: Claude does NOT
+    // propagate MEMORIZE_SESSION_ID into the SessionEnd hook
+    // subprocess (despite SessionStart's exported env reaching every
+    // other tool/Bash subprocess). The β safety net is to stamp the
+    // agent's own session id (Claude UUID) on the cwd pointer at
+    // SessionStart, then look it up here from payload.session_id.
+    // Without this fallback, SessionEnd would silently no-op on every
+    // real-world Ctrl+C / /exit and pointers would leak forever.
+    const claudeUuid = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee';
+    const sessionStart = runHook('SessionStart', {
+      cwd: sandbox,
+      hook_event_name: 'SessionStart',
+      session_id: claudeUuid,
+    });
+    expect(sessionStart.status).toBe(0);
+
+    // Drive SessionEnd with NO MEMORIZE_SESSION_ID env, only the
+    // payload session_id — the production failure mode.
+    const sessionEnd = spawnSync(
+      'node',
+      [tsxCliPath, cliEntryPath, 'hook', 'claude', 'SessionEnd'],
+      {
+        cwd: sandbox,
+        input: JSON.stringify({
+          cwd: sandbox,
+          hook_event_name: 'SessionEnd',
+          session_id: claudeUuid,
+          reason: 'other',
+        }),
+        encoding: 'utf8',
+        env: { ...process.env, MEMORIZE_ROOT: memorizeRoot },
+      },
+    );
+    expect(sessionEnd.status).toBe(0);
+
+    const sessionsAfter = await readdir(join(sandbox, '.memorize', 'sessions')).catch(
+      () => [] as string[],
+    );
+    expect(sessionsAfter.length).toBe(0);
+
+    const projectDirs = await readdir(join(memorizeRoot, 'projects'));
+    const events = await readdir(join(memorizeRoot, 'projects', projectDirs[0]!, 'events'));
+    let sawCompleted = false;
+    for (const ev of events) {
+      const body = await readFile(
+        join(memorizeRoot, 'projects', projectDirs[0]!, 'events', ev),
+        'utf8',
+      );
+      if (body.includes('"session.completed"')) sawCompleted = true;
+    }
+    expect(sawCompleted).toBe(true);
+  });
 });
