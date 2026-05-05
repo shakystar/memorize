@@ -7,6 +7,64 @@ loosely. The project adheres to [Semantic Versioning](https://semver.org/);
 major-version bumps are reserved for breaking changes to the on-disk event
 log layout or the public CLI surface.
 
+## [1.0.0-rc.11] — 2026-05-06
+
+### Fixed — codex `task resume` returns the wrong task on macOS
+
+Round-5 dogfood, with the rc.10 instrumentation: codex `task resume`
+emitted `via=none walked=[1727,90450,90373,90372,415]
+pointerPids=[…,99604]`. The walked ancestor chain bottomed out at
+launchd before reaching codex's pid (99604), even though codex was
+the agent that started the subprocess. The Claude/codex shell tool
+worker subsystems detach their workers and the OS reparents them
+to launchd, so a CLI subprocess walking up `process.ppid` never
+encounters the agent root pid. The agent-pid path is structurally
+broken on macOS for both agents — Claude was only working because
+of the parallel `MEMORIZE_SESSION_ID` env injection via
+`CLAUDE_ENV_FILE`. Codex had no equivalent injection, so it fell
+all the way through to `none` and the picker returned the first
+project todo.
+
+`env | grep -i codex` inside a codex subprocess revealed
+`CODEX_THREAD_ID=<codex session UUID>` propagates natively. We
+already stamp that same UUID as `agentSessionId` on the cwd
+pointer at SessionStart, so a one-line resolver path closes the
+hole:
+
+- New resolution path `agent-env`, slotted between our own `env`
+  and the (now defensive) `agent-pid`. Reads `CODEX_THREAD_ID`,
+  matches against `agentSessionId` on cwd pointers. Returns
+  `none` on miss rather than silently picking an unrelated codex
+  pointer — the priority chain stays exact.
+- Belt-and-suspenders precedence: when both `MEMORIZE_SESSION_ID`
+  and `CODEX_THREAD_ID` are set, our explicit injection still
+  wins. The codex env path is the codex-only fallback for the
+  case where our injection never happened.
+
+Verified directly: `CODEX_THREAD_ID=<uuid> memorize task resume`
+in the duo-pane sandbox now returns `via=agent-env session=…
+task=task_moplj40r_oi7j35wh actor=codex` instead of `via=none`
++ first-todo. Round-6 dogfood will pin it inside a real codex
+session.
+
+### Added — diagnostic refinements
+
+- Debug emit now includes `walked=[…]` (the ancestor pid chain
+  the resolver actually walked) and `pointerPids=[…]` (the set
+  of `agentPid` values stamped on cwd pointers in this cwd).
+  These two fields are what made the macOS reparenting cause
+  diagnosable in one line — keep them in for the next surprise.
+
+### Tests
+
+- 3 new cases in `tests/unit/session-context.test.ts` for
+  `agent-env`: resolves codex pointer when `CODEX_THREAD_ID`
+  matches; our `MEMORIZE_SESSION_ID` env wins when both are
+  set; non-matching `CODEX_THREAD_ID` falls through to `none`
+  (no silent wrong attribution to an unrelated codex pointer).
+
+### Tests count: 197 → 200
+
 ## [1.0.0-rc.10] — 2026-05-06
 
 ### Added — diagnostic-only, no behavior change

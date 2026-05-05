@@ -101,6 +101,79 @@ describe('resolveSessionContext — single source of truth for "which session am
     expect(ctx.sessionId).toBe('session_env_wins');
   });
 
+  it('matches by agent-env (CODEX_THREAD_ID) when codex propagates its own thread UUID', async () => {
+    // Round-5 dogfood: codex CLI subprocesses inherit
+    // CODEX_THREAD_ID = the codex session UUID, which we stamp as
+    // agentSessionId on the cwd pointer at SessionStart. This path
+    // closes the macOS reparenting hole that broke agent-pid walk
+    // for codex (workers detach to launchd, ancestor chain never
+    // reaches codex root pid).
+    await plantPointer({
+      sessionId: 'session_codex',
+      startedAt: '2026-05-05T00:00:00.000Z',
+      startedBy: 'codex',
+      projectId: 'proj_codex',
+      taskId: 'task_codex',
+      agentSessionId: '019df8e4-8a1c-77f1-8d50-8ca03980b4a7',
+    });
+    process.env.CODEX_THREAD_ID = '019df8e4-8a1c-77f1-8d50-8ca03980b4a7';
+    try {
+      const ctx = await resolveSessionContext(sandbox);
+      expect(ctx.resolvedVia).toBe('agent-env');
+      expect(ctx.sessionId).toBe('session_codex');
+      expect(ctx.taskId).toBe('task_codex');
+      expect(ctx.actor).toBe('codex');
+    } finally {
+      delete process.env.CODEX_THREAD_ID;
+    }
+  });
+
+  it('our env (MEMORIZE_SESSION_ID) wins over agent-env (CODEX_THREAD_ID)', async () => {
+    // Belt and suspenders: when both envs are present and point at
+    // different pointers, our explicit injection wins. The codex
+    // env path is the codex-only fallback for the case where our
+    // injection never happened.
+    await plantPointer({
+      sessionId: 'session_ours',
+      startedAt: '2026-05-05T00:00:00.000Z',
+      startedBy: 'codex',
+    });
+    await plantPointer({
+      sessionId: 'session_codex_native',
+      startedAt: '2026-05-05T00:00:01.000Z',
+      startedBy: 'codex',
+      agentSessionId: '019df8e4-8a1c-77f1-8d50-8ca03980b4a7',
+    });
+    process.env[SESSION_ENV_VAR] = 'session_ours';
+    process.env.CODEX_THREAD_ID = '019df8e4-8a1c-77f1-8d50-8ca03980b4a7';
+    try {
+      const ctx = await resolveSessionContext(sandbox);
+      expect(ctx.resolvedVia).toBe('env');
+      expect(ctx.sessionId).toBe('session_ours');
+    } finally {
+      delete process.env.CODEX_THREAD_ID;
+    }
+  });
+
+  it('CODEX_THREAD_ID with no matching pointer falls through to later paths (does not return wrong session)', async () => {
+    await plantPointer({
+      sessionId: 'session_unrelated',
+      startedAt: '2026-05-05T00:00:00.000Z',
+      startedBy: 'codex',
+      agentSessionId: 'totally-different-uuid',
+    });
+    process.env.CODEX_THREAD_ID = '019df8e4-8a1c-77f1-8d50-8ca03980b4a7';
+    try {
+      const ctx = await resolveSessionContext(sandbox);
+      // No agent-pid stamped, no tty, allowMostRecent off → none.
+      // Critical: must NOT silently return the unrelated pointer
+      // just because it's a codex session.
+      expect(ctx.resolvedVia).toBe('none');
+    } finally {
+      delete process.env.CODEX_THREAD_ID;
+    }
+  });
+
   it('refuses most-recent fallback by default (telemetry callers prefer silent miss to wrong attribution)', async () => {
     // No env, no agent-pid stamp, no tty — only an unrelated pointer
     // exists. Without opt-in, the resolver returns nothing rather
