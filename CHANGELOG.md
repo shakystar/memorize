@@ -7,6 +7,67 @@ loosely. The project adheres to [Semantic Versioning](https://semver.org/);
 major-version bumps are reserved for breaking changes to the on-disk event
 log layout or the public CLI surface.
 
+## [1.0.0-rc.6] — 2026-05-05
+
+### Picker-aware session lifecycle (β step 1+2, dogfood-verified)
+
+The rc.5 β redesign moved lifecycle off the per-turn `Stop` hook onto
+`SessionEnd` + an auto-reap inside `startSession`. Dogfood feedback:
+users who routinely `claude --resume` a long-lived role session would
+see their pointer wiped the next time an unrelated session started in
+the same cwd, because auto-reap couldn't tell "abandoned" from
+"intentionally idle." rc.6 separates the two concerns.
+
+### Changed (no breaking surface, but the contract has shifted)
+
+- **Picker view filters stale sessions without mutating their status.**
+  `readActiveSessions` now hides sessions whose `lastSeenAt` is older
+  than `MEMORIZE_STALE_SESSION_MS` (default 30 min) from the
+  startup-context picker. Their on-disk status stays `active` and the
+  cwd pointer stays where it is; only the picker view changes. A
+  long-idle role session is invisible to other agents but instantly
+  reattachable on resume.
+- **`startSession` no longer auto-reaps prior pointers in the same
+  cwd.** Status mutation (`active` → `abandoned`) is now reachable
+  only through the explicit `memorize session reap [--force]` command.
+  Three sequential `startSession` calls with `MEMORIZE_STALE_SESSION_MS=0`
+  leave all three pointers on disk — locked into the test suite as a
+  contract.
+- **Resume detection on SessionStart.** When the SessionStart hook
+  payload carries an `agent session_id` (Claude UUID, Codex session
+  UUID) that already matches a cwd pointer's stored `agentSessionId`,
+  the handler reattaches to that memorize session instead of minting
+  a new one. New event type `session.resumed` records the reattach
+  on the projection without a status transition.
+- **`agentPid` captured on SessionStart.** The hook walks up its
+  parent process tree (`ps -o pid,ppid,comm`) looking for a `claude`
+  or `codex` ancestor, then stamps the resulting pid on the cwd
+  pointer. Resume rewrites it with the new agent process pid.
+
+### Verified end-to-end
+
+- **`claude --resume <uuid>`** — Claude preserves its session UUID
+  across resume; resume detection reattaches to the same memorize
+  session. Locked in as a regression in
+  `tests/integration/claude-hook-lifecycle.test.ts` (one
+  `session.started`, ≥1 `session.resumed`, single pointer survives).
+- **`codex resume`** — verified by dogfood in the duo-pane fixture.
+  Codex preserves its agent session UUID across resume too, so the
+  same code path works for both agents. Caveat: codex fires
+  SessionStart **lazily** — not on the `codex resume` command itself,
+  but on the first user turn after the resumed session starts. By
+  the time anything observable happens, our hook has already run; the
+  laziness is invisible at the memorize layer.
+- **Picker stale-hide** — locked in as
+  `tests/integration/picker-deconflict.test.ts`: a back-dated session
+  disappears from `loadStartContext.otherActiveTasks` while its
+  on-disk record still reads `status: "active"`.
+
+### Tests
+
+- 180 → 184 (added: resume reuse, picker stale-hide, resumeSession
+  unit coverage, process-tree liveness/walk).
+
 ## [1.0.0-rc.5] — 2026-05-03
 
 ### Fixed (β verification follow-ups)
