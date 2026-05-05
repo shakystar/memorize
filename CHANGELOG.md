@@ -7,6 +7,84 @@ loosely. The project adheres to [Semantic Versioning](https://semver.org/);
 major-version bumps are reserved for breaking changes to the on-disk event
 log layout or the public CLI surface.
 
+## [1.0.0] — 2026-05-06
+
+First stable release. The 1.0 cut closes the rc.5..rc.12 alpha
+stabilization series and establishes the data, lifecycle, and
+attribution invariants the project is willing to support
+indefinitely. No new features over rc.12 — this is a repackaging.
+
+### What 1.0 commits to
+
+- **Per-cwd multi-session.** Multiple agent sessions in the same
+  directory at the same time are a first-class case. Each
+  SessionStart claims a distinct task atomically (file lock); the
+  picker hides heartbeat-stale sessions from view but never
+  silently mutates their on-disk status.
+- **"1 agent conversation = 1 memorize session" across resume.**
+  Both Claude (`claude --resume`) and codex (`codex resume`)
+  preserve their session UUID, and memorize stamps that UUID on
+  the cwd pointer at SessionStart so the resume path reattaches
+  to the same memorize session instead of minting a new one. The
+  Model C lifecycle (rc.12) keeps the cwd pointer alive across
+  SessionEnd by transitioning the session to `paused` rather
+  than deleting the pointer; resume flips it back to `active`.
+- **Single resolver for "which session am I?"** Every CLI command
+  and hook handler that asks "which memorize session is calling
+  me?" goes through `resolveSessionContext` (the SSoT, rc.8).
+  The priority chain is the same everywhere: env
+  (`MEMORIZE_SESSION_ID`) → agent-native env
+  (`CODEX_THREAD_ID`, rc.11) → process-tree agent-pid →
+  tty → opt-in most-recent. No code path rolls its own.
+- **Heartbeat-driven liveness, explicit reap.** A pointer's
+  `lastSeenAt` is bumped by every memorize CLI call; the picker
+  filter and the reap sweep both consult it. The only mutator of
+  session status is `memorize session reap`. Auto-reap on
+  startSession was removed in the alpha series and is not coming
+  back: long-lived role sessions need their pointer to survive
+  unrelated session starts.
+- **Append-only event log + projection rebuild.** Domain state
+  changes go through events; projections are rebuilt from the log
+  on every write. There is no in-place mutation of projected
+  records. `session.paused` joins the existing `session.started`
+  / `session.resumed` / `session.completed` / `session.abandoned`
+  / `session.heartbeat` set.
+
+### Known platform asymmetries (intentional, documented)
+
+- **Codex has no SessionEnd hook.** Its registered hook surface is
+  SessionStart / PreToolUse / PostToolUse / UserPromptSubmit /
+  Stop. Codex sessions therefore skip the `paused` transition
+  entirely — they stay `active` until heartbeat-stale, then the
+  next reap sweep marks them `abandoned`. Picker hides them via
+  heartbeat staleness in the meantime, so the asymmetry is
+  invisible to attribution and to the picker. Listed here so an
+  inspector who reads the projection isn't surprised that two
+  agents leave different artifacts behind on a clean exit.
+- **`memorize task handoff --help` is unconventional.** The flag
+  parser treats `--help` as a value-bearing flag and errors
+  rather than printing usage. Codex agents recover by trial; no
+  data correctness impact. Tracked for a 1.0.x patch.
+
+### Diagnostic surface
+
+- `MEMORIZE_DEBUG=1` causes every labeled call to
+  `resolveSessionContext` / `resolveByAgentSessionId` to emit one
+  stderr line tagged `label=… via=… session=… task=… actor=…
+  agentPid=… agentSession=… ppid=… walked=[…] pointerPids=[…]`.
+  Off by default — zero overhead in normal operation. This was
+  what made the rc.10 → rc.11 codex resolver hole diagnosable in
+  one round of dogfood; keep it in for the next surprise.
+
+### Tests
+
+201 tests across 42 files, all green. The suite covers: resolver
+priority chain (env / agent-env / agent-pid / tty / most-recent /
+none), file-lock serialization (race regression for picker
+deconfliction), Model C pause→resume cycle, agent-pid debug
+emit, install/doctor/handoff/checkpoint paths, and the cumulative
+β session-lifecycle redesign.
+
 ## [1.0.0-rc.12] — 2026-05-06
 
 ### Changed — session lifecycle: end is now pause-by-default (Model C)
