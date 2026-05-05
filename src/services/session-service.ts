@@ -61,6 +61,13 @@ interface CwdSessionPointer {
    *  example does NOT inherit MEMORIZE_SESSION_ID, but its payload
    *  carries the same Claude UUID we saw at SessionStart. */
   agentSessionId?: string;
+  /** PID of the host agent process (claude / codex), discovered by
+   *  walking up the SessionStart hook subprocess's process tree. Used
+   *  by the picker to detect dead-but-not-yet-reaped sessions without
+   *  changing their status — the pointer file stays on disk so an
+   *  explicit `memorize session reap` is still required. Omitted when
+   *  process-tree lookup failed (non-Unix runtime, ps unavailable). */
+  agentPid?: number;
 }
 
 function cwdSessionsDir(cwd: string): string {
@@ -173,9 +180,14 @@ export interface ReapResult {
  * Replaces what rc.0..rc.4 mistakenly tried to do via the per-turn
  * `Stop` hook. The hook-driven path was never able to distinguish
  * "agent finished a turn" from "session ended" (and Codex has no
- * session-end hook at all), so lifecycle authority now lives here:
- * triggered by `startSession` (next-Start-reaps-stale) and by the
- * `memorize session reap` command.
+ * session-end hook at all), so reap is now the only mutator of
+ * session status — and the only entry point is the explicit
+ * `memorize session reap` command. startSession deliberately does
+ * NOT auto-sweep on entry, so resume-heavy users (long-lived role
+ * sessions reattached via `claude --resume`) keep their pointers
+ * across unrelated session starts in the same cwd. The picker
+ * filter (readActiveSessions) hides stale pointers from its view
+ * without touching their on-disk status.
  */
 export async function reapStaleSessions(
   cwd: string,
@@ -256,6 +268,8 @@ export interface StartSessionOptions {
    *  the cwd pointer so a later hook event whose env was lost (Claude
    *  SessionEnd) can still resolve to the right memorize session. */
   agentSessionId?: string;
+  /** PID of the host agent process. See CwdSessionPointer.agentPid. */
+  agentPid?: number;
 }
 
 export async function startSession(
@@ -263,11 +277,12 @@ export async function startSession(
   options: StartSessionOptions = {},
 ): Promise<string> {
   await migrateLegacyPointer(cwd);
-  // Sweep prior abandoned pointers in this cwd before minting a new
-  // session. Live concurrent sessions (heartbeating within the
-  // staleness threshold) are spared — only truly stale pointers get
-  // reaped here.
-  await reapStaleSessions(cwd);
+  // No auto-reap here. Step 1 made the picker filter stale pointers
+  // out of its view without mutating their status, so the only
+  // remaining reason to mark a session abandoned is an explicit
+  // `memorize session reap`. This protects users who routinely
+  // `claude --resume` a long-lived role session — their pointer must
+  // survive until they themselves decide to clean up.
 
   const actor = options.actor ?? 'ambient';
   let sessionId: string;
@@ -301,6 +316,7 @@ export async function startSession(
     ...(options.taskId ? { taskId: options.taskId } : {}),
     ...(tty ? { tty } : {}),
     ...(options.agentSessionId ? { agentSessionId: options.agentSessionId } : {}),
+    ...(options.agentPid ? { agentPid: options.agentPid } : {}),
   };
   await writeJson(cwdSessionFile(cwd, sessionId), pointer);
   process.env[SESSION_ENV_VAR] = sessionId;
@@ -317,10 +333,65 @@ export async function startSession(
 export async function findCwdSessionByAgentId(
   cwd: string,
   agentId: string,
-): Promise<{ sessionId: string } | undefined> {
+): Promise<{ sessionId: string; projectId?: string; taskId?: string } | undefined> {
   const pointers = await listCwdPointers(cwd);
   const match = pointers.find((p) => p.agentSessionId === agentId);
-  return match ? { sessionId: match.sessionId } : undefined;
+  if (!match) return undefined;
+  return {
+    sessionId: match.sessionId,
+    ...(match.projectId ? { projectId: match.projectId } : {}),
+    ...(match.taskId ? { taskId: match.taskId } : {}),
+  };
+}
+
+export interface ResumeSessionOptions {
+  /** New agent pid for this resume attempt — captured by the caller
+   *  via process-tree walk. Persisted onto the pointer so future
+   *  picker liveness checks see the live process, not the dead one. */
+  agentPid?: number;
+}
+
+/**
+ * Re-attaches an existing cwd pointer to a freshly started agent
+ * process (Claude --resume on the same UUID, codex resume, …). Bumps
+ * the pointer's agentPid + tty + lastSeenAt, emits a `session.resumed`
+ * event so the projection sees fresh activity, and seeds the env var
+ * so subsequent CLI calls in this subprocess attribute correctly.
+ *
+ * Returns false (no-op) when the cwd pointer is gone — caller should
+ * fall back to startSession in that case.
+ */
+export async function resumeSession(
+  cwd: string,
+  sessionId: string,
+  options: ResumeSessionOptions = {},
+): Promise<boolean> {
+  const pointer = await readCwdPointer(cwd, sessionId);
+  if (!pointer) return false;
+
+  const tty = currentTtyId();
+  const updated: CwdSessionPointer = {
+    ...pointer,
+    ...(tty ? { tty } : {}),
+    ...(options.agentPid ? { agentPid: options.agentPid } : {}),
+  };
+  await writeJson(cwdSessionFile(cwd, sessionId), updated);
+  process.env[SESSION_ENV_VAR] = sessionId;
+
+  if (pointer.projectId) {
+    const at = nowIso();
+    const heartbeat: SessionHeartbeatPayload = { sessionId, at };
+    await appendEvent({
+      type: 'session.resumed',
+      projectId: pointer.projectId,
+      scopeType: 'session',
+      scopeId: sessionId,
+      actor: pointer.startedBy ?? ACTOR_SYSTEM,
+      payload: heartbeat,
+    });
+    await rebuildProjectProjection(pointer.projectId);
+  }
+  return true;
 }
 
 export interface EndSessionOptions {
@@ -439,5 +510,26 @@ export async function getCurrentSessionTaskId(
 
 export async function readActiveSessions(projectId: string): Promise<Session[]> {
   const sessions = await readJsonDir<Session>(getSessionsDir(projectId));
-  return sessions.filter((s) => s.status === 'active');
+  // The picker view: status === 'active' AND we've seen a heartbeat
+  // within the staleness threshold. We deliberately do NOT mutate the
+  // on-disk session status here — a stale-but-alive session (long
+  // human turn between memorize CLI calls) just disappears from the
+  // picker until the next heartbeat. Reaping (status → abandoned)
+  // remains explicit, owned by `memorize session reap`.
+  const threshold = staleThresholdMs();
+  if (threshold === 0) {
+    // Tests using MEMORIZE_STALE_SESSION_MS=0 want every active
+    // session visible regardless of age (otherwise nothing would
+    // show up in synthetic in-memory fixtures). Treat 0 as "no
+    // staleness filter" for the picker, distinct from its reap
+    // semantics ("reap immediately").
+    return sessions.filter((s) => s.status === 'active');
+  }
+  const now = Date.now();
+  return sessions.filter((s) => {
+    if (s.status !== 'active') return false;
+    const lastSeenMs = Date.parse(s.lastSeenAt);
+    if (!Number.isFinite(lastSeenMs)) return true;
+    return now - lastSeenMs < threshold;
+  });
 }

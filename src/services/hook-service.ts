@@ -7,6 +7,7 @@ import {
   truncateContent,
   warnInjectionMarkers,
 } from '../shared/content-safety.js';
+import { findAncestorPidByName } from '../shared/process-tree.js';
 import { composeStartupContext } from './startup-context-service.js';
 import {
   ensureBoundProjectId,
@@ -19,6 +20,7 @@ import {
   findCwdSessionByAgentId,
   getCurrentSessionId,
   getCurrentSessionTaskId,
+  resumeSession,
   startSession,
 } from './session-service.js';
 import { createCheckpoint } from './task-service.js';
@@ -111,25 +113,68 @@ function prepareHookText(
 }
 
 const handleSessionStart: HookHandler = async (ctx) => {
-  // Order matters: composeStartupContext must run BEFORE startSession so
-  // the new session is not yet in the projection when otherActiveTasks is
-  // computed. Reversing this would make every starting session see itself
-  // as a competing other-active-task.
+  const identity = parseIdentityPayload(ctx.rawPayload);
+  // Walk up from this hook subprocess to find the agent's pid. Stored
+  // on the pointer so the picker can later detect "agent process
+  // exited but the pointer was never reaped" without changing the
+  // session's status.
+  const agentPid = process.ppid
+    ? findAncestorPidByName({
+        startPid: process.ppid,
+        targetNames: ['claude', 'codex'],
+      })
+    : undefined;
+
+  // Resume detection: Claude Code preserves its session UUID across
+  // `claude --resume`. If we already have a cwd pointer with that
+  // agentSessionId, the agent is re-attaching to the same memorize
+  // session — reuse the pointer instead of minting a new one.
+  // Preserves the "1 agent conversation = 1 memorize session"
+  // invariant for users who routinely resume role-assigned sessions.
+  let sessionId: string | undefined;
+  let resumedTaskId: string | undefined;
+  if (identity.agentSessionId) {
+    const existing = await findCwdSessionByAgentId(
+      ctx.cwd,
+      identity.agentSessionId,
+    );
+    if (existing) {
+      const reattached = await resumeSession(ctx.cwd, existing.sessionId, {
+        ...(agentPid ? { agentPid } : {}),
+      });
+      if (reattached) {
+        sessionId = existing.sessionId;
+        resumedTaskId = existing.taskId;
+      }
+    }
+  }
+
+  // composeStartupContext must run BEFORE startSession so the new
+  // session is not yet in the projection when otherActiveTasks is
+  // computed. Reversing this would make every starting session see
+  // itself as a competing other-active-task. (Resume path follows the
+  // same rule — we passed selfSessionId through so the projection
+  // picker hides the just-resumed session from its own context.)
   const composed = await composeStartupContext({
     agent: ctx.agent,
     cwd: ctx.cwd,
+    ...(sessionId ? { selfSessionId: sessionId } : {}),
   });
-  // Stamp the agent's own session id (Claude UUID, etc.) on the
-  // pointer. Lets later hook subprocesses with broken env propagation
-  // (notably Claude SessionEnd) map back to this memorize session by
-  // payload.session_id alone.
-  const identity = parseIdentityPayload(ctx.rawPayload);
-  const sessionId = await startSession(ctx.cwd, {
-    actor: ctx.agent,
-    projectId: ctx.projectId,
-    ...(composed.taskId ? { taskId: composed.taskId } : {}),
-    ...(identity.agentSessionId ? { agentSessionId: identity.agentSessionId } : {}),
-  });
+
+  if (!sessionId) {
+    sessionId = await startSession(ctx.cwd, {
+      actor: ctx.agent,
+      projectId: ctx.projectId,
+      ...(composed.taskId ? { taskId: composed.taskId } : {}),
+      ...(identity.agentSessionId ? { agentSessionId: identity.agentSessionId } : {}),
+      ...(agentPid ? { agentPid } : {}),
+    });
+  }
+  // On resume, we keep the previously-claimed task — the user came
+  // back to continue the same work. composed.taskId (which would auto-
+  // pick a new candidate) is intentionally ignored here.
+  void resumedTaskId;
+
   const additionalContext = composed.startupContext;
 
   // Claude Code passes a writable env-file path so memorize can hand

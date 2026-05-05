@@ -174,6 +174,58 @@ describe('claude hook lifecycle', () => {
     expect(sawCompleted).toBe(true);
   });
 
+  it('SessionStart with a known agent UUID reuses the existing pointer (resume seamless)', async () => {
+    // Simulates `claude --resume <uuid>`: a fresh SessionStart hook
+    // fires, but its session_id matches the UUID we stamped on a prior
+    // pointer. The handler must reuse that pointer (no new
+    // session.started event, no new sessions/<id>.json file) and emit
+    // a session.resumed event so the projection sees fresh activity.
+    // This is what preserves "1 agent conversation = 1 memorize
+    // session" for users who routinely resume role-assigned sessions.
+    const claudeUuid = '11111111-2222-3333-4444-555555555555';
+    const first = runHook('SessionStart', {
+      cwd: sandbox,
+      hook_event_name: 'SessionStart',
+      session_id: claudeUuid,
+    });
+    expect(first.status).toBe(0);
+
+    const sessionsBefore = await readdir(join(sandbox, '.memorize', 'sessions'));
+    expect(sessionsBefore.length).toBe(1);
+    const memorizeSessionId = sessionsBefore[0]!.replace(/\.json$/, '');
+
+    const second = runHook('SessionStart', {
+      cwd: sandbox,
+      hook_event_name: 'SessionStart',
+      session_id: claudeUuid,
+      source: 'resume',
+    });
+    expect(second.status).toBe(0);
+
+    // Same single pointer, same memorize session id — no new session
+    // file was created.
+    const sessionsAfter = await readdir(join(sandbox, '.memorize', 'sessions'));
+    expect(sessionsAfter).toEqual([`${memorizeSessionId}.json`]);
+
+    // Exactly one session.started event in the log; at least one
+    // session.resumed event followed it.
+    const projectsRoot = join(memorizeRoot, 'projects');
+    const projectDirs = await readdir(projectsRoot);
+    const events = await readdir(join(projectsRoot, projectDirs[0]!, 'events'));
+    let started = 0;
+    let resumed = 0;
+    for (const ev of events) {
+      const body = await readFile(
+        join(projectsRoot, projectDirs[0]!, 'events', ev),
+        'utf8',
+      );
+      if (body.includes('"session.started"')) started += 1;
+      if (body.includes('"session.resumed"')) resumed += 1;
+    }
+    expect(started).toBe(1);
+    expect(resumed).toBeGreaterThanOrEqual(1);
+  });
+
   it('SessionEnd resolves via payload.session_id when MEMORIZE_SESSION_ID env is missing (β fallback)', async () => {
     // The empirical finding from rc.5 dogfood: Claude does NOT
     // propagate MEMORIZE_SESSION_ID into the SessionEnd hook

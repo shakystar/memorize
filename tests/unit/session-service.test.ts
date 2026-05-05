@@ -8,9 +8,11 @@ import {
   SESSION_ENV_VAR,
   bumpHeartbeat,
   endSession,
+  findCwdSessionByAgentId,
   getCurrentSessionId,
   getCurrentSessionTaskId,
   reapStaleSessions,
+  resumeSession,
   startSession,
 } from '../../src/services/session-service.js';
 
@@ -188,6 +190,47 @@ describe('multi-session per cwd — Sprint 3-5 fix', () => {
   });
 });
 
+describe('resumeSession — picker-smartens / resume seamless', () => {
+  it('returns false (no-op) when the cwd pointer is gone', async () => {
+    // No sessions/ dir, no pointer. Caller (SessionStart) must fall
+    // back to startSession in that case.
+    const ok = await resumeSession(sandbox, 'session_does_not_exist');
+    expect(ok).toBe(false);
+  });
+
+  it('reuses the existing pointer and bumps agentPid without a new session.started', async () => {
+    delete process.env[SESSION_ENV_VAR];
+    const sessionId = await startSession(sandbox, {
+      actor: 'claude',
+      agentSessionId: 'agent_uuid_42',
+      agentPid: 1111,
+    });
+
+    // findCwdSessionByAgentId resolves the pointer back from the
+    // agent UUID — same lookup the SessionStart handler does on
+    // resume.
+    const found = await findCwdSessionByAgentId(sandbox, 'agent_uuid_42');
+    expect(found?.sessionId).toBe(sessionId);
+
+    delete process.env[SESSION_ENV_VAR];
+    const ok = await resumeSession(sandbox, sessionId, { agentPid: 2222 });
+    expect(ok).toBe(true);
+
+    // Pointer still single, agentPid bumped to the new value.
+    const remaining = await readdir(join(sandbox, '.memorize', 'sessions'));
+    expect(remaining).toEqual([`${sessionId}.json`]);
+    const pointer = JSON.parse(
+      await readFile(join(sandbox, '.memorize', 'sessions', `${sessionId}.json`), 'utf8'),
+    );
+    expect(pointer.agentPid).toBe(2222);
+    expect(pointer.agentSessionId).toBe('agent_uuid_42');
+
+    // Env var seeded so the rest of this hook subprocess attributes
+    // CLI calls back to this session.
+    expect(process.env[SESSION_ENV_VAR]).toBe(sessionId);
+  });
+});
+
 describe('reapStaleSessions — β lifecycle ownership', () => {
   it('does not reap a freshly started session (within the staleness threshold)', async () => {
     delete process.env[SESSION_ENV_VAR];
@@ -212,24 +255,25 @@ describe('reapStaleSessions — β lifecycle ownership', () => {
     expect(remaining).toEqual([]);
   });
 
-  it('startSession sweeps prior pointers in the same cwd via force-aware reap (env override)', async () => {
-    // MEMORIZE_STALE_SESSION_MS=0 means "every existing pointer is
-    // already past the threshold," so the next startSession will reap
-    // them on the way in. This is the production path that prevents
-    // accumulation of dead Codex pointers across runs (Codex has no
-    // session-end hook so reap is the only cleanup mechanism).
+  it('startSession does NOT auto-reap stale pointers — reap must be explicit (Step 2 of picker-aware redesign)', async () => {
+    // Step 2 removed the auto-reap-on-start sweep. Even when every
+    // existing pointer is past the staleness threshold
+    // (MEMORIZE_STALE_SESSION_MS=0), starting a new session must
+    // leave them on disk. The picker hides them from its view (Step
+    // 1) without status mutation; only `memorize session reap`
+    // transitions them to abandoned. This protects users who
+    // routinely `claude --resume` a long-lived role session — their
+    // pointer must outlive an unrelated startSession in the same cwd.
     process.env.MEMORIZE_STALE_SESSION_MS = '0';
     try {
       delete process.env[SESSION_ENV_VAR];
-      await startSession(sandbox);
+      const a = await startSession(sandbox);
       delete process.env[SESSION_ENV_VAR];
-      await startSession(sandbox);
+      const b = await startSession(sandbox);
       delete process.env[SESSION_ENV_VAR];
       const c = await startSession(sandbox);
       const remaining = await readdir(join(sandbox, '.memorize', 'sessions'));
-      // Only the latest pointer survives — older ones reaped by c's
-      // entry into startSession.
-      expect(remaining).toEqual([`${c}.json`]);
+      expect(remaining.sort()).toEqual([`${a}.json`, `${b}.json`, `${c}.json`].sort());
     } finally {
       delete process.env.MEMORIZE_STALE_SESSION_MS;
     }

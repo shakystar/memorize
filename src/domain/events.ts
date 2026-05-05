@@ -27,6 +27,7 @@ export type DomainEventType =
   | 'conflict.detected'
   | 'conflict.resolved'
   | 'session.started'
+  | 'session.resumed'
   | 'session.completed'
   | 'session.abandoned'
   | 'session.heartbeat'

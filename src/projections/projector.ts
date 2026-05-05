@@ -111,6 +111,20 @@ export function reduceProjectState(events: DomainEvent[]): ProjectState {
           };
         }
         break;
+      case 'session.resumed':
+        {
+          // Same agent session re-attached (Claude --resume on the same
+          // UUID). Status stays 'active'; we just bump activity so the
+          // picker sees it as fresh again.
+          const existing = state.sessions[event.scopeId];
+          if (!existing) break;
+          state.sessions[event.scopeId] = {
+            ...existing,
+            lastSeenAt: event.createdAt,
+            updatedAt: event.createdAt,
+          };
+        }
+        break;
       case 'session.heartbeat':
         {
           const payload = event.payload as SessionHeartbeatPayload;
