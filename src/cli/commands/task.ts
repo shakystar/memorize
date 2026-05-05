@@ -9,7 +9,11 @@ import {
   requireBoundProjectId,
   resolveActiveTaskId,
 } from '../../services/project-service.js';
-import { getCurrentSessionId } from '../../services/session-service.js';
+import {
+  getCurrentSessionActor,
+  getCurrentSessionId,
+  getCurrentSessionTaskId,
+} from '../../services/session-service.js';
 import {
   createCheckpoint,
   createHandoff,
@@ -111,7 +115,15 @@ async function runCheckpointTask(
     single: ['summary', 'session', 'task'],
     multi: ['task-update', 'project-update', 'deferred', 'discard'],
   });
-  const resolvedTaskId = await resolveActiveTaskId(projectId, flags.single.task);
+  // Prefer the task this session claimed at SessionStart over the
+  // project-wide activeTaskIds[0] fallback. Without this the rc.6
+  // dogfood saw codex checkpoints land on whichever task happened
+  // to be first in the project's active list (Gap A leaked through
+  // the CLI surface even after the hook handler was patched).
+  const resolvedTaskId =
+    flags.single.task?.trim() ??
+    (await getCurrentSessionTaskId(ctx.cwd)) ??
+    (await resolveActiveTaskId(projectId));
   const summary = flags.single.summary;
   if (!summary) throw new Error('--summary is required for task checkpoint.');
   const sessionId =
@@ -137,14 +149,23 @@ async function runCheckpointTask(
 
 async function runHandoffTask(
   args: string[],
-  _ctx: CliContext,
+  ctx: CliContext,
   projectId: string,
 ): Promise<void> {
   const flags = parseFlags(args, {
     single: ['summary', 'next', 'from', 'to', 'task', 'confidence'],
     multi: ['done', 'remaining', 'warning', 'question'],
   });
-  const resolvedTaskId = await resolveActiveTaskId(projectId, flags.single.task);
+  // Session-aware fallback chain (Gap A fix at the CLI surface):
+  //   --task arg → session-claimed task → project's first active task.
+  // The middle hop is what was missing in rc.6 — without it, every
+  // codex handoff in a multi-session cwd attached itself to whichever
+  // task was first in project.activeTaskIds, regardless of which
+  // task the calling session actually claimed.
+  const resolvedTaskId =
+    flags.single.task?.trim() ??
+    (await getCurrentSessionTaskId(ctx.cwd)) ??
+    (await resolveActiveTaskId(projectId));
   if (!resolvedTaskId) {
     throw new Error(
       'Handoff requires a taskId (pass --task or ensure an active task exists).',
@@ -159,10 +180,16 @@ async function runHandoffTask(
     throw new Error('--confidence must be one of low|medium|high.');
   }
   const confidence = confidenceRaw as Confidence | undefined;
+  // fromActor fallback: --from arg → session's startedBy → ACTOR_USER.
+  // Without the middle hop, a handoff issued from inside a codex
+  // session reads as `fromActor: "user"`, erasing the audit trail of
+  // which agent actually did the work.
+  const fromActor =
+    flags.single.from ?? (await getCurrentSessionActor(ctx.cwd)) ?? ACTOR_USER;
   const handoff = await createHandoff({
     projectId,
     taskId: resolvedTaskId,
-    fromActor: flags.single.from ?? ACTOR_USER,
+    fromActor,
     toActor: flags.single.to ?? ACTOR_NEXT_AGENT,
     summary,
     nextAction,

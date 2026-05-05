@@ -7,6 +7,45 @@ loosely. The project adheres to [Semantic Versioning](https://semver.org/);
 major-version bumps are reserved for breaking changes to the on-disk event
 log layout or the public CLI surface.
 
+## [1.0.0-rc.7] — 2026-05-05
+
+### Fixed (rc.6 dogfood — Gap A leak at the CLI surface)
+
+The first 4-session mixed dogfood (2 Claude + 2 Codex in one cwd)
+exposed that the rc.4 Gap A fix only landed inside the hook handlers
+(`PostCompact`, etc.) — `memorize task handoff` and `memorize task
+checkpoint` invoked from inside an agent's Bash subprocess kept
+falling back to `project.activeTaskIds[0]` and `ACTOR_USER`. Result:
+both codex sessions' handoffs attached to whichever task happened to
+be first in the project's active list (always the same `task_moplj3xs`
+in the dogfood fixture), and `fromActor` was attributed to "user"
+instead of "codex". The third session out of four was the only one
+that came out clean — and only because it manually probed CLI flags
+and ended up passing `--task` and `--from` explicitly.
+
+- **`runHandoffTask` now resolves `taskId` via the session-aware
+  fallback chain.** `--task` arg → `getCurrentSessionTaskId(cwd)` →
+  `project.activeTaskIds[0]`. The middle hop is the fix.
+- **`runHandoffTask` now resolves `fromActor` from the session
+  pointer's `startedBy` when `--from` is omitted.** Falls back to
+  `ACTOR_USER` only when no session is resolvable in the cwd.
+- **`runCheckpointTask` gets the same `taskId` chain** for symmetry —
+  same Gap A pattern, same fix.
+- **New helper `getCurrentSessionActor(cwd)`** in `session-service.ts`
+  pairs with the existing `getCurrentSessionTaskId`.
+
+### Tests
+
+- `tests/integration/services-and-cli.test.ts`: two new regressions —
+  one starts a session that claims a non-first task and asserts the
+  CLI handoff lands on the claimed task with `fromActor: 'codex'`;
+  the other does the same for checkpoint via `latestCheckpointId`
+  inspection.
+- Test infra: `mkdtemp` results are now `realpath`-ed before use, so
+  the macOS `/var/folders` → `/private/var/folders` symlink mismatch
+  between the test process and spawned CLI subprocesses no longer
+  breaks bindings lookups.
+
 ## [1.0.0-rc.6] — 2026-05-05
 
 ### Picker-aware session lifecycle (β step 1+2, dogfood-verified)

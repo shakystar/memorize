@@ -497,15 +497,31 @@ export async function getCurrentSessionId(cwd: string): Promise<string> {
 
 /**
  * Returns the taskId this session claimed at startSession, if any.
- * Used by hook handlers to attribute checkpoints / handoffs to the
- * right task instead of falling back to project.activeTaskIds[0],
- * which would point at an arbitrary other agent's work.
+ * Used by hook handlers AND CLI commands to attribute checkpoints /
+ * handoffs to the right task instead of falling back to
+ * project.activeTaskIds[0], which would point at an arbitrary other
+ * agent's work (Gap A).
  */
 export async function getCurrentSessionTaskId(
   cwd: string,
 ): Promise<string | undefined> {
   const pointer = await findCwdSession(cwd);
   return pointer?.taskId;
+}
+
+/**
+ * Returns the actor (claude / codex / ambient) this session was
+ * started under. CLI commands use this so a `memorize task handoff`
+ * fired from inside a codex session attributes the handoff to codex
+ * rather than defaulting to "user". Returns undefined when there is
+ * no resolvable session in this cwd — caller decides whether to fall
+ * back to ACTOR_USER (the historical default).
+ */
+export async function getCurrentSessionActor(
+  cwd: string,
+): Promise<string | undefined> {
+  const pointer = await findCwdSession(cwd);
+  return pointer?.startedBy;
 }
 
 export async function readActiveSessions(projectId: string): Promise<Session[]> {
