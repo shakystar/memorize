@@ -23,7 +23,7 @@ import {
   resolveSessionContext,
 } from './session-context.js';
 import {
-  endSession,
+  pauseSession,
   getCurrentSessionId,
   resumeSession,
   startSession,
@@ -174,12 +174,18 @@ const handleSessionStart: HookHandler = async (ctx) => {
   // as `additionalContext`, so it has to be computed in either path.
   let additionalContext: string;
   if (sessionId) {
+    // Resume path: pin the previously-claimed task so the picker
+    // doesn't hand back a different unclaimed task on reattach.
+    // Without this pin the rc.11+Model-C dry-run showed codex
+    // resume returning the wrong task in additionalContext (the
+    // picker happily picked the next-best unclaimed candidate
+    // because the resumed session was excluded from its own view).
     const composed = await composeStartupContext({
       agent: ctx.agent,
       cwd: ctx.cwd,
       selfSessionId: sessionId,
+      ...(resumedTaskId ? { taskId: resumedTaskId } : {}),
     });
-    void resumedTaskId;
     additionalContext = composed.startupContext;
   } else {
     const claimed = await withFileLock(
@@ -270,22 +276,27 @@ const handleStop: HookHandler = async () => EMPTY_HOOK_RESULT;
 
 const handleSessionEnd: HookHandler = async (ctx) => {
   // Claude Code's SessionEnd fires on every termination path it
-  // exposes (clean /exit, Ctrl+C twice, terminal close — see hook
-  // docs `reason` field). Resolution chain, in priority order:
+  // exposes (clean /exit, Ctrl+C twice, terminal close). We map the
+  // payload's session_id to the cwd pointer via agentSessionId — the
+  // only reliable path, since Claude does NOT propagate
+  // MEMORIZE_SESSION_ID into the SessionEnd subprocess env
+  // (empirically verified, despite the docs implying otherwise).
   //
-  //   1. Map by payload.session_id → cwd pointer's stored
-  //      agentSessionId. This is the only reliable path because
-  //      Claude does NOT propagate MEMORIZE_SESSION_ID into the
-  //      SessionEnd subprocess env (verified empirically — the
-  //      subprocess starts with a different env than tool/Bash
-  //      subprocesses do, despite the docs implying otherwise).
-  //   2. Fall back to env/tty resolution via endSession() with no
-  //      explicit sessionId. Mostly a safety net for cases where the
-  //      agent payload didn't carry an id we recognized.
+  // We `pauseSession` rather than `endSession` here: marking the
+  // session 'paused' keeps the cwd pointer on disk so a later
+  // `claude --resume` can reattach via agentSessionId match. The
+  // SessionStart resume path then transitions status back to 'active'
+  // by emitting a session.resumed event. If the user never resumes,
+  // the heartbeat-staleness reap sweep catches the paused session
+  // exactly the way it would catch an active-but-stale one — no data
+  // loss, just delayed cleanup.
   //
-  // If both miss, the session stays 'active' until the next
-  // reapStaleSessions sweep abandons it — graceful degradation, not
-  // data loss.
+  // Codex has no SessionEnd hook event at all (its hook surface is
+  // SessionStart / PreToolUse / PostToolUse / UserPromptSubmit /
+  // Stop), so codex sessions skip pause entirely and rely on the
+  // same reap path as the fallback above. The asymmetry is harmless:
+  // `paused` and `active` are equivalent for the picker view and the
+  // reap threshold.
   const identity = parseIdentityPayload(ctx.rawPayload);
   let resolvedSessionId: string | undefined;
   if (identity.agentSessionId) {
@@ -296,12 +307,12 @@ const handleSessionEnd: HookHandler = async (ctx) => {
     );
     if (match.sessionId) resolvedSessionId = match.sessionId;
   }
-  await endSession(
+  await pauseSession(
     ctx.cwd,
     resolvedSessionId ? { sessionId: resolvedSessionId } : {},
   );
   return JSON.stringify({
-    systemMessage: 'memorize: session ended',
+    systemMessage: 'memorize: session paused (resumable)',
   });
 };
 

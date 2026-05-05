@@ -22,7 +22,12 @@ const workstreamTransitions: Record<WorkstreamStatus, WorkstreamStatus[]> = {
 };
 
 const sessionTransitions: Record<Session['status'], Session['status'][]> = {
-  active: ['completed', 'abandoned'],
+  active: ['paused', 'completed', 'abandoned'],
+  // `paused` ↔ `active` is the SessionEnd → resume cycle: SessionEnd
+  // pauses (pointer kept), claude --resume / codex resume reactivates.
+  // `paused → abandoned` is the reap path when no resume happens
+  // before the staleness threshold.
+  paused: ['active', 'completed', 'abandoned'],
   completed: [],
   abandoned: [],
 };

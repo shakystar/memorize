@@ -297,6 +297,51 @@ export async function resumeSession(
   return true;
 }
 
+export interface PauseSessionOptions {
+  sessionId?: string;
+}
+
+/**
+ * Marks a session as `paused` without deleting the cwd pointer. The
+ * SessionEnd hook calls this instead of `endSession` so a later
+ * `claude --resume` / `codex resume` can reattach via agentSessionId
+ * match — the pointer is the only artifact `resolveByAgentSessionId`
+ * can see, so deleting it (which the old `endSession` path did) was
+ * what broke "1 agent conversation = 1 memorize session" across
+ * resume.
+ *
+ * The reap sweep still catches a paused session that goes stale
+ * without a resume — `paused` and `active` are treated the same way
+ * by `reapStaleSessions`, since the only signal of true abandonment
+ * is the heartbeat staleness threshold.
+ */
+export async function pauseSession(
+  cwd: string,
+  options: PauseSessionOptions = {},
+): Promise<void> {
+  const pointer = options.sessionId
+    ? await readCwdPointer(cwd, options.sessionId)
+    : await findCwdSession(cwd);
+  if (!pointer?.projectId) return;
+
+  const at = nowIso();
+  const heartbeat: SessionHeartbeatPayload = {
+    sessionId: pointer.sessionId,
+    at,
+  };
+  await appendEvent({
+    type: 'session.paused',
+    projectId: pointer.projectId,
+    scopeType: 'session',
+    scopeId: pointer.sessionId,
+    actor: pointer.startedBy ?? ACTOR_SYSTEM,
+    payload: heartbeat,
+  });
+  await rebuildProjectProjection(pointer.projectId);
+  // Pointer intentionally preserved — that is the whole point of
+  // pause vs end. resumeSession() will find it on reattach.
+}
+
 export interface EndSessionOptions {
   /** Explicit session id from a hook payload (e.g. Claude Stop hook
    *  passes `session_id` in its JSON stdin). When provided we use it
@@ -425,24 +470,27 @@ export async function getCurrentSessionActor(
 
 export async function readActiveSessions(projectId: string): Promise<Session[]> {
   const sessions = await readJsonDir<Session>(getSessionsDir(projectId));
-  // The picker view: status === 'active' AND we've seen a heartbeat
-  // within the staleness threshold. We deliberately do NOT mutate the
-  // on-disk session status here — a stale-but-alive session (long
-  // human turn between memorize CLI calls) just disappears from the
-  // picker until the next heartbeat. Reaping (status → abandoned)
-  // remains explicit, owned by `memorize session reap`.
+  // The picker view: status is `active` OR `paused` AND we've seen a
+  // heartbeat within the staleness threshold. `paused` counts as a
+  // live claim because the session is intentionally resumable —
+  // until the user actually resumes (flipping back to active) or the
+  // reap sweep abandons it, no other session should steal its task.
+  // We deliberately do NOT mutate on-disk status here; reaping stays
+  // explicit and owned by `memorize session reap`.
+  const isClaiming = (s: Session): boolean =>
+    s.status === 'active' || s.status === 'paused';
   const threshold = staleThresholdMs();
   if (threshold === 0) {
-    // Tests using MEMORIZE_STALE_SESSION_MS=0 want every active
+    // Tests using MEMORIZE_STALE_SESSION_MS=0 want every claiming
     // session visible regardless of age (otherwise nothing would
     // show up in synthetic in-memory fixtures). Treat 0 as "no
     // staleness filter" for the picker, distinct from its reap
     // semantics ("reap immediately").
-    return sessions.filter((s) => s.status === 'active');
+    return sessions.filter(isClaiming);
   }
   const now = Date.now();
   return sessions.filter((s) => {
-    if (s.status !== 'active') return false;
+    if (!isClaiming(s)) return false;
     const lastSeenMs = Date.parse(s.lastSeenAt);
     if (!Number.isFinite(lastSeenMs)) return true;
     return now - lastSeenMs < threshold;

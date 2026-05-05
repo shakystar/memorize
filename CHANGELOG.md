@@ -7,6 +7,69 @@ loosely. The project adheres to [Semantic Versioning](https://semver.org/);
 major-version bumps are reserved for breaking changes to the on-disk event
 log layout or the public CLI surface.
 
+## [1.0.0-rc.12] — 2026-05-06
+
+### Changed — session lifecycle: end is now pause-by-default (Model C)
+
+The Claude SessionEnd hook used to mark the session `completed` and
+unlink the cwd pointer. That broke `claude --resume` for the same
+session: the resume's SessionStart fires with the same agent UUID,
+but `resolveByAgentSessionId` walks cwd pointers — and the pointer
+was gone. The resume path silently fell back to minting a new
+memorize session, breaking the "1 agent conversation = 1 memorize
+session" invariant the SessionStart resume detection was supposed
+to preserve.
+
+Lifecycle is now explicit:
+
+- New status `paused` between `active` and `completed`/`abandoned`.
+  `paused` keeps the cwd pointer and the projection record on
+  disk; the picker treats `paused` exactly like `active` (still
+  claims its task, still subject to heartbeat staleness).
+- New event `session.paused` with its own projector case.
+- New `pauseSession()` service function. SessionEnd hook now calls
+  `pauseSession` instead of `endSession`. The pointer survives,
+  resume reattaches via existing `resolveByAgentSessionId` →
+  `resumeSession()` path, and the projector flips `paused` back
+  to `active` on the `session.resumed` event.
+- Reap sweep picks up paused-and-stale sessions on the same
+  threshold as active-and-stale ones — `paused` is "agent went to
+  bed", `abandoned` is "agent never came back". `endSession` is
+  still in code for an eventual explicit `memorize session end`
+  CLI but no hook calls it now.
+- Codex has no SessionEnd event at all (its hook surface is
+  SessionStart / PreToolUse / PostToolUse / UserPromptSubmit /
+  Stop). Codex sessions therefore skip pause and rely on the same
+  reap path, which is fine: `paused` and `active` are equivalent
+  for picker and reap, so the asymmetry has no observable effect.
+
+### Fixed — resume returns the previously-claimed task
+
+The SessionStart resume path called `composeStartupContext` with
+only `selfSessionId` set. The picker excluded the just-resumed
+session from its own view and then returned whatever
+unclaimed-or-other task happened to surface — not the task the
+session previously claimed. Round-6 dry-fire reproduced this:
+codex session resume returned the claude session's task in the
+hook's `additionalContext`. `composeStartupContext` now accepts
+an explicit `taskId` and the resume path passes the resumed
+pointer's `taskId`; the explicit CLI `runResumeTask` already
+worked this way (rc.9), so this brings the hook path to parity.
+
+### Tests
+
+- `tests/integration/claude-hook-lifecycle.test.ts` — two existing
+  SessionEnd tests rewritten to assert pointer survival +
+  `session.paused` + projection status `paused` (was: pointer
+  unlinked + `session.completed`). One new end-to-end test pins
+  the full pause→resume cycle: same memorize session id is
+  preserved, status flips paused→active, no second pointer
+  minted.
+- `tests/integration/task-aware-hooks.test.ts` — same SessionEnd
+  test rewrite.
+
+### Tests count: 200 → 201
+
 ## [1.0.0-rc.11] — 2026-05-06
 
 ### Fixed — codex `task resume` returns the wrong task on macOS

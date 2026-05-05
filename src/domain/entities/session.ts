@@ -10,11 +10,16 @@ export interface Session extends BaseEntity {
   endedAt?: ISODateString;
   /** Most recent activity attributed to this session — bumped on heartbeat events. */
   lastSeenAt: ISODateString;
-  /** `active` while running, `completed` on a clean end (Claude SessionEnd
-   *  hook, explicit CLI), `abandoned` when reaped without a clean end
-   *  (heartbeat timeout, next SessionStart in the same cwd, or explicit
-   *  `memorize session reap`). */
-  status: 'active' | 'completed' | 'abandoned';
+  /** `active` while the host agent is running. `paused` when the agent
+   *  CLI has exited cleanly (Claude SessionEnd, eventual codex
+   *  equivalent) but the session is intentionally kept resumable —
+   *  `claude --resume` / `codex resume` will reattach via
+   *  agentSessionId match and the projector flips it back to `active`.
+   *  `completed` is reserved for explicit user termination via the
+   *  CLI. `abandoned` is what the reap sweep writes when an `active`
+   *  or `paused` session goes past its heartbeat staleness threshold
+   *  without a resume. */
+  status: 'active' | 'paused' | 'completed' | 'abandoned';
 }
 
 export interface SessionHeartbeatPayload {

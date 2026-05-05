@@ -111,15 +111,34 @@ export function reduceProjectState(events: DomainEvent[]): ProjectState {
           };
         }
         break;
-      case 'session.resumed':
+      case 'session.paused':
         {
-          // Same agent session re-attached (Claude --resume on the same
-          // UUID). Status stays 'active'; we just bump activity so the
-          // picker sees it as fresh again.
+          // Agent CLI exited cleanly (Claude SessionEnd) but the
+          // session is intentionally kept resumable. The cwd pointer
+          // stays so a later `claude --resume` / `codex resume` can
+          // reattach via agentSessionId match. Reap sweeps still
+          // catch this status if it goes stale without a resume.
           const existing = state.sessions[event.scopeId];
           if (!existing) break;
           state.sessions[event.scopeId] = {
             ...existing,
+            status: 'paused',
+            lastSeenAt: event.createdAt,
+            updatedAt: event.createdAt,
+          };
+        }
+        break;
+      case 'session.resumed':
+        {
+          // Same agent session re-attached (Claude --resume on the
+          // same UUID, codex resume). Flip back to 'active' if we had
+          // marked it 'paused' on the prior SessionEnd, and bump
+          // activity so the picker sees it as fresh again.
+          const existing = state.sessions[event.scopeId];
+          if (!existing) break;
+          state.sessions[event.scopeId] = {
+            ...existing,
+            status: 'active',
             lastSeenAt: event.createdAt,
             updatedAt: event.createdAt,
           };

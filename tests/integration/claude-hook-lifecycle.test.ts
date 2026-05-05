@@ -117,7 +117,13 @@ describe('claude hook lifecycle', () => {
     expect(handoffFiles.length).toBe(0);
   });
 
-  it('SessionEnd hook writes session.completed and unlinks the cwd pointer', async () => {
+  it('SessionEnd hook pauses the session and PRESERVES the cwd pointer for resume', async () => {
+    // Model C lifecycle (post rc.11): SessionEnd writes a session.paused
+    // event and intentionally KEEPS the cwd pointer. The pointer is the
+    // only artifact `resolveByAgentSessionId` can match on, so deleting
+    // it (the pre-Model-C `endSession` behavior) was what broke
+    // "1 agent conversation = 1 memorize session" across `claude --resume`.
+    // Reap still catches paused sessions that go stale without a resume.
     const sessionStart = runHook('SessionStart', {
       cwd: sandbox,
       hook_event_name: 'SessionStart',
@@ -153,25 +159,37 @@ describe('claude hook lifecycle', () => {
     );
     expect(sessionEnd.status).toBe(0);
 
-    // Cwd pointer gone.
-    const sessionsAfter = await readdir(join(sandbox, '.memorize', 'sessions')).catch(
-      () => [] as string[],
-    );
-    expect(sessionsAfter.length).toBe(0);
+    // Cwd pointer SURVIVES — this is the whole point of pause vs end.
+    const sessionsAfter = await readdir(join(sandbox, '.memorize', 'sessions'));
+    expect(sessionsAfter).toEqual([`${memorizeSessionId}.json`]);
 
-    // session.completed event landed in the project log.
+    // session.paused event landed in the project log; no session.completed.
     const projectsRoot = join(memorizeRoot, 'projects');
     const projectDirs = await readdir(projectsRoot);
     const events = await readdir(join(projectsRoot, projectDirs[0]!, 'events'));
+    let sawPaused = false;
     let sawCompleted = false;
     for (const ev of events) {
       const body = await readFile(
         join(projectsRoot, projectDirs[0]!, 'events', ev),
         'utf8',
       );
+      if (body.includes('"session.paused"')) sawPaused = true;
       if (body.includes('"session.completed"')) sawCompleted = true;
     }
-    expect(sawCompleted).toBe(true);
+    expect(sawPaused).toBe(true);
+    expect(sawCompleted).toBe(false);
+
+    // Projection reflects the paused status — picker can use this
+    // signal even though the cwd pointer alone doesn't carry status.
+    const sessionFile = join(
+      projectsRoot,
+      projectDirs[0]!,
+      'sessions',
+      `${memorizeSessionId}.json`,
+    );
+    const sessionRecord = JSON.parse(await readFile(sessionFile, 'utf8'));
+    expect(sessionRecord.status).toBe('paused');
   });
 
   it('SessionStart with a known agent UUID reuses the existing pointer (resume seamless)', async () => {
@@ -226,15 +244,15 @@ describe('claude hook lifecycle', () => {
     expect(resumed).toBeGreaterThanOrEqual(1);
   });
 
-  it('SessionEnd resolves via payload.session_id when MEMORIZE_SESSION_ID env is missing (β fallback)', async () => {
+  it('SessionEnd resolves via payload.session_id when MEMORIZE_SESSION_ID env is missing, and emits session.paused', async () => {
     // The empirical finding from rc.5 dogfood: Claude does NOT
     // propagate MEMORIZE_SESSION_ID into the SessionEnd hook
     // subprocess (despite SessionStart's exported env reaching every
     // other tool/Bash subprocess). The β safety net is to stamp the
     // agent's own session id (Claude UUID) on the cwd pointer at
     // SessionStart, then look it up here from payload.session_id.
-    // Without this fallback, SessionEnd would silently no-op on every
-    // real-world Ctrl+C / /exit and pointers would leak forever.
+    // Model C addition: even when the resolution path works, we now
+    // pause (not end) the session so the pointer survives for resume.
     const claudeUuid = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee';
     const sessionStart = runHook('SessionStart', {
       cwd: sandbox,
@@ -242,6 +260,10 @@ describe('claude hook lifecycle', () => {
       session_id: claudeUuid,
     });
     expect(sessionStart.status).toBe(0);
+
+    const memorizeSessionId = (
+      await readdir(join(sandbox, '.memorize', 'sessions'))
+    )[0]!.replace(/\.json$/, '');
 
     // Drive SessionEnd with NO MEMORIZE_SESSION_ID env, only the
     // payload session_id — the production failure mode.
@@ -262,21 +284,86 @@ describe('claude hook lifecycle', () => {
     );
     expect(sessionEnd.status).toBe(0);
 
-    const sessionsAfter = await readdir(join(sandbox, '.memorize', 'sessions')).catch(
-      () => [] as string[],
-    );
-    expect(sessionsAfter.length).toBe(0);
+    // Pointer survives — Model C invariant.
+    const sessionsAfter = await readdir(join(sandbox, '.memorize', 'sessions'));
+    expect(sessionsAfter).toEqual([`${memorizeSessionId}.json`]);
 
     const projectDirs = await readdir(join(memorizeRoot, 'projects'));
     const events = await readdir(join(memorizeRoot, 'projects', projectDirs[0]!, 'events'));
-    let sawCompleted = false;
+    let sawPaused = false;
     for (const ev of events) {
       const body = await readFile(
         join(memorizeRoot, 'projects', projectDirs[0]!, 'events', ev),
         'utf8',
       );
-      if (body.includes('"session.completed"')) sawCompleted = true;
+      if (body.includes('"session.paused"')) sawPaused = true;
     }
-    expect(sawCompleted).toBe(true);
+    expect(sawPaused).toBe(true);
+  });
+
+  it('SessionEnd → SessionStart resume cycle keeps the same memorize session and flips status paused→active', async () => {
+    // Model C end-to-end: a Claude session exits cleanly (status
+    // becomes 'paused', pointer survives), then `claude --resume`
+    // fires another SessionStart with the same UUID. The resume
+    // detection path matches the surviving pointer by agentSessionId
+    // and emits session.resumed; the projector flips status back to
+    // 'active'. Same memorize session id throughout — this is what
+    // "1 agent conversation = 1 memorize session" means in practice.
+    const claudeUuid = 'fffffffe-0000-1111-2222-333333333333';
+
+    const start1 = runHook('SessionStart', {
+      cwd: sandbox,
+      hook_event_name: 'SessionStart',
+      session_id: claudeUuid,
+    });
+    expect(start1.status).toBe(0);
+
+    const memorizeSessionId = (
+      await readdir(join(sandbox, '.memorize', 'sessions'))
+    )[0]!.replace(/\.json$/, '');
+
+    // Pause it.
+    const end = spawnSync(
+      'node',
+      [tsxCliPath, cliEntryPath, 'hook', 'claude', 'SessionEnd'],
+      {
+        cwd: sandbox,
+        input: JSON.stringify({
+          cwd: sandbox,
+          hook_event_name: 'SessionEnd',
+          session_id: claudeUuid,
+          reason: 'logout',
+        }),
+        encoding: 'utf8',
+        env: { ...process.env, MEMORIZE_ROOT: memorizeRoot },
+      },
+    );
+    expect(end.status).toBe(0);
+
+    const projectDirs = await readdir(join(memorizeRoot, 'projects'));
+    const sessionFile = join(
+      memorizeRoot,
+      'projects',
+      projectDirs[0]!,
+      'sessions',
+      `${memorizeSessionId}.json`,
+    );
+    expect(JSON.parse(await readFile(sessionFile, 'utf8')).status).toBe('paused');
+
+    // Resume.
+    const start2 = runHook('SessionStart', {
+      cwd: sandbox,
+      hook_event_name: 'SessionStart',
+      session_id: claudeUuid,
+      source: 'resume',
+    });
+    expect(start2.status).toBe(0);
+
+    // Same single pointer, same session id (no second session minted).
+    const sessionsAfter = await readdir(join(sandbox, '.memorize', 'sessions'));
+    expect(sessionsAfter).toEqual([`${memorizeSessionId}.json`]);
+
+    // Status flipped back to active.
+    expect(JSON.parse(await readFile(sessionFile, 'utf8')).status).toBe('active');
   });
 });

@@ -75,14 +75,14 @@ describe('task-aware hook semantics', () => {
     expect(taskContent).toContain('latestCheckpointId');
   });
 
-  it('SessionEnd hook completes the calling session and unlinks its cwd pointer', async () => {
-    // β redesign: lifecycle moved off the per-turn Stop hook to
-    // Claude's actual SessionEnd hook. Stop is now no-op (handoffs are
-    // agent-initiated). SessionEnd writes session.completed and unlinks
-    // the cwd pointer. The "session_id" the Claude payload carries is
-    // its own UUID (different ID space from memorize's session_xxx),
-    // so the handler resolves the calling session via env-propagated
-    // MEMORIZE_SESSION_ID — exactly the production wire format.
+  it('SessionEnd hook pauses the calling session and PRESERVES the cwd pointer (Model C)', async () => {
+    // Model C lifecycle: SessionEnd writes session.paused and keeps
+    // the cwd pointer on disk so a subsequent `claude --resume` /
+    // `codex resume` can reattach via agentSessionId match. The old
+    // Model A behavior (mark completed + unlink) broke that resume
+    // path because resolveByAgentSessionId only sees pointers, not
+    // projection records. Reap still catches a paused session that
+    // goes stale without a resume.
     runCli(['project', 'setup']);
     runCli(['task', 'create', 'SessionEnd', 'regression']);
 
@@ -109,24 +109,23 @@ describe('task-aware hook semantics', () => {
     );
     expect(sessionEnd.status).toBe(0);
 
-    const sessionsAfter = await readdir(join(sandbox, '.memorize', 'sessions')).catch(
-      () => [] as string[],
-    );
-    expect(sessionsAfter.length).toBe(0);
+    // Pointer survives — Model C invariant.
+    const sessionsAfter = await readdir(join(sandbox, '.memorize', 'sessions'));
+    expect(sessionsAfter).toEqual([`${memorizeSessionId}.json`]);
 
     const projectDirs = await readdir(join(memorizeRoot, 'projects'));
     const events = await readdir(join(memorizeRoot, 'projects', projectDirs[0]!, 'events'));
+    let sawPaused = false;
     let sawCompleted = false;
     for (const ev of events) {
       const body = await readFile(
         join(memorizeRoot, 'projects', projectDirs[0]!, 'events', ev),
         'utf8',
       );
-      if (body.includes('"session.completed"')) {
-        sawCompleted = true;
-        break;
-      }
+      if (body.includes('"session.paused"')) sawPaused = true;
+      if (body.includes('"session.completed"')) sawCompleted = true;
     }
-    expect(sawCompleted).toBe(true);
+    expect(sawPaused).toBe(true);
+    expect(sawCompleted).toBe(false);
   });
 });
