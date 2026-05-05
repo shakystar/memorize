@@ -9,6 +9,9 @@ import {
 } from '../shared/content-safety.js';
 import { findAncestorPidByName } from '../shared/process-tree.js';
 import { SESSION_ENV_VAR } from '../storage/cwd-session-store.js';
+import { withFileLock } from '../storage/file-lock.js';
+import { getProjectRoot } from '../storage/path-resolver.js';
+import path from 'node:path';
 import { composeStartupContext } from './startup-context-service.js';
 import {
   ensureBoundProjectId,
@@ -157,27 +160,50 @@ const handleSessionStart: HookHandler = async (ctx) => {
   // itself as a competing other-active-task. (Resume path follows the
   // same rule — we passed selfSessionId through so the projection
   // picker hides the just-resumed session from its own context.)
-  const composed = await composeStartupContext({
-    agent: ctx.agent,
-    cwd: ctx.cwd,
-    ...(sessionId ? { selfSessionId: sessionId } : {}),
-  });
-
-  if (!sessionId) {
-    sessionId = await startSession(ctx.cwd, {
-      actor: ctx.agent,
-      projectId: ctx.projectId,
-      ...(composed.taskId ? { taskId: composed.taskId } : {}),
-      ...(identity.agentSessionId ? { agentSessionId: identity.agentSessionId } : {}),
-      ...(agentPid ? { agentPid } : {}),
+  //
+  // The picker view → startSession write must happen atomically per
+  // project: rc.7 round-2 dogfood saw two SessionStart hooks fire
+  // 32ms apart and both pickers saw the same active set, so both
+  // newly-started sessions claimed the same task. The lock here
+  // serializes that critical section across hook subprocesses.
+  // Resume path skips the claim (no startSession call), so we only
+  // need the lock when we're actually going to mint a new session.
+  //
+  // The composed startup context is what we hand back to the agent
+  // as `additionalContext`, so it has to be computed in either path.
+  let additionalContext: string;
+  if (sessionId) {
+    const composed = await composeStartupContext({
+      agent: ctx.agent,
+      cwd: ctx.cwd,
+      selfSessionId: sessionId,
     });
+    void resumedTaskId;
+    additionalContext = composed.startupContext;
+  } else {
+    const claimed = await withFileLock(
+      path.join(getProjectRoot(ctx.projectId), 'locks'),
+      'session-start',
+      async () => {
+        const composed = await composeStartupContext({
+          agent: ctx.agent,
+          cwd: ctx.cwd,
+        });
+        const newSessionId = await startSession(ctx.cwd, {
+          actor: ctx.agent,
+          projectId: ctx.projectId,
+          ...(composed.taskId ? { taskId: composed.taskId } : {}),
+          ...(identity.agentSessionId
+            ? { agentSessionId: identity.agentSessionId }
+            : {}),
+          ...(agentPid ? { agentPid } : {}),
+        });
+        return { sessionId: newSessionId, startupContext: composed.startupContext };
+      },
+    );
+    sessionId = claimed.sessionId;
+    additionalContext = claimed.startupContext;
   }
-  // On resume, we keep the previously-claimed task — the user came
-  // back to continue the same work. composed.taskId (which would auto-
-  // pick a new candidate) is intentionally ignored here.
-  void resumedTaskId;
-
-  const additionalContext = composed.startupContext;
 
   // Claude Code passes a writable env-file path so memorize can hand
   // back the new session id. Codex has no equivalent — only Claude

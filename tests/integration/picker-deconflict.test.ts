@@ -1,10 +1,11 @@
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, readFile, readdir, realpath, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { loadStartContext } from '../../src/services/context-service.js';
+import { runClaudeHook } from '../../src/services/hook-service.js';
 import { createProject } from '../../src/services/project-service.js';
 import {
   SESSION_ENV_VAR,
@@ -17,7 +18,10 @@ let sandbox: string;
 let memorizeRoot: string;
 
 beforeEach(async () => {
-  sandbox = await mkdtemp(join(tmpdir(), 'memorize-picker-'));
+  // realpath because macOS mkdtemp returns the symlinked
+  // /var/folders path while bindings store keys by canonical
+  // /private/var form.
+  sandbox = await realpath(await mkdtemp(join(tmpdir(), 'memorize-picker-')));
   memorizeRoot = join(sandbox, '.memorize-home');
   process.env.MEMORIZE_ROOT = memorizeRoot;
   delete process.env[SESSION_ENV_VAR];
@@ -130,6 +134,71 @@ describe('loadStartContext picker — task deconfliction', () => {
     // But the session record on disk is unchanged — still 'active'.
     const onDisk = JSON.parse(await readFile(sessionFile, 'utf8'));
     expect(onDisk.status).toBe('active');
+  });
+
+  it('serializes parallel SessionStart hooks so each session claims a distinct task (rc.7 round-2 race)', async () => {
+    // rc.7 round-2 dogfood saw two Claude SessionStart hooks fire
+    // 32ms apart and BOTH pickers select the same first-unclaimed
+    // task — neither hook had observed the other's session.started
+    // event when its picker ran. The fix wraps the picker view +
+    // startSession write in a per-project file lock; this test fires
+    // four hooks in parallel and pins that they each get a different
+    // task. Without the lock this fails repeatably.
+    const project = await createProject({
+      title: 'parallel-claim',
+      rootPath: sandbox,
+      summary: 'race regression',
+    });
+    const tasks = await Promise.all(
+      [1, 2, 3, 4].map((i) =>
+        createTask({
+          projectId: project.id,
+          title: `Task ${i}`,
+          actor: 'user',
+        }),
+      ),
+    );
+    void tasks;
+
+    // Fire 4 SessionStart hooks in parallel. Each carries a distinct
+    // agentSessionId so the resume-detection path stays out of the
+    // way and every call goes through the new-session claim path
+    // (the one the lock protects).
+    const stdinPayload = (uuid: string): string =>
+      JSON.stringify({
+        cwd: sandbox,
+        hook_event_name: 'SessionStart',
+        session_id: uuid,
+      });
+    const uuids = [
+      'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa',
+      'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb',
+      'cccccccc-cccc-cccc-cccc-cccccccccccc',
+      'dddddddd-dddd-dddd-dddd-dddddddddddd',
+    ];
+    await Promise.all(
+      uuids.map((uuid) =>
+        runClaudeHook({
+          eventName: 'SessionStart',
+          cwd: sandbox,
+          stdinPayload: stdinPayload(uuid),
+        }),
+      ),
+    );
+
+    const sessionFiles = await readdir(join(sandbox, '.memorize', 'sessions'));
+    expect(sessionFiles).toHaveLength(4);
+
+    const claimedTaskIds = new Set<string>();
+    for (const file of sessionFiles) {
+      const pointer = JSON.parse(
+        await readFile(join(sandbox, '.memorize', 'sessions', file), 'utf8'),
+      );
+      expect(pointer.taskId).toBeDefined();
+      claimedTaskIds.add(pointer.taskId);
+    }
+    // Four distinct claims — no two sessions share a task.
+    expect(claimedTaskIds.size).toBe(4);
   });
 
   it('does not exclude the calling session itself when selfSessionId is passed', async () => {

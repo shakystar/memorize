@@ -96,10 +96,22 @@ async function runListTasks(
 
 async function runResumeTask(
   _args: string[],
-  _ctx: CliContext,
+  ctx: CliContext,
   projectId: string,
 ): Promise<void> {
-  const payload = await loadStartContext({ projectId });
+  // Round-3 dogfood finding (codex session 4): `memorize task resume`
+  // showed the project's first active task instead of the calling
+  // session's claimed task — the same Gap A pattern the handoff CLI
+  // had before rc.7. The fix mirrors what runHandoffTask does: ask
+  // the SSoT for the calling session, and pin both selfSessionId
+  // (so the picker excludes us from otherActiveTasks) and taskId
+  // (so we get OUR task back, not whatever happens to be first).
+  const sessionCtx = await resolveSessionContext(ctx.cwd);
+  const payload = await loadStartContext({
+    projectId,
+    ...(sessionCtx.taskId ? { taskId: sessionCtx.taskId } : {}),
+    ...(sessionCtx.sessionId ? { selfSessionId: sessionCtx.sessionId } : {}),
+  });
   console.log(JSON.stringify(payload, null, 2));
 }
 

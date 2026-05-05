@@ -7,6 +7,46 @@ loosely. The project adheres to [Semantic Versioning](https://semver.org/);
 major-version bumps are reserved for breaking changes to the on-disk event
 log layout or the public CLI surface.
 
+## [1.0.0-rc.9] — 2026-05-05
+
+### Fixed (rc.7 round-2 dogfood follow-ups, plus rc.8 round-3 finding)
+
+- **Picker race — atomic SessionStart claim.** Two SessionStart hooks
+  firing within ms of each other in the same project (round-2 dogfood:
+  32ms gap) both saw the same active set in their picker view, so
+  both newly-started sessions claimed the same task. The pick-then-
+  claim window is now serialized per project via a tiny file lock
+  (`<project_root>/locks/session-start.lock`, O_EXCL create with
+  retry-and-stale-reclaim). Resume path skips the lock — only fresh
+  claims need it.
+- **`memorize task resume` is session-aware.** Round-3 codex session
+  noticed `task resume` showed the project's first active task
+  instead of the calling session's claimed task — the same Gap A
+  pattern handoff/checkpoint had before rc.7. Now uses
+  `resolveSessionContext` to thread the calling session's `taskId`
+  and `selfSessionId` into `loadStartContext`.
+
+### Added
+
+- **`storage/file-lock.ts` — `withFileLock(lockDir, name, body, opts)`.**
+  Generic per-project advisory lock primitive built on O_EXCL create.
+  Holds for the duration of `body`, removes on completion (even on
+  throw), reclaims stale locks past `holdTimeoutMs` (default 5s) so
+  a crashed holder can't deadlock future entries.
+
+### Tests
+
+- `tests/unit/file-lock.test.ts` — 4 cases pinning the lock contract:
+  body runs and lock is removed; lock is removed on throw; concurrent
+  acquirers serialize (B's enter follows A's exit); stale lock is
+  force-reclaimed past `holdTimeoutMs`.
+- `tests/integration/picker-deconflict.test.ts` — new race regression
+  test fires 4 SessionStart hooks in parallel and pins that each
+  ends up with a distinct claimed task. Without the lock this fails
+  repeatably.
+
+### Tests count: 188 → 193
+
 ## [1.0.0-rc.8] — 2026-05-05
 
 ### ADR-1: single source of truth for session resolution
