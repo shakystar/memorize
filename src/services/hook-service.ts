@@ -8,6 +8,7 @@ import {
   warnInjectionMarkers,
 } from '../shared/content-safety.js';
 import { findAncestorPidByName } from '../shared/process-tree.js';
+import { SESSION_ENV_VAR } from '../storage/cwd-session-store.js';
 import { composeStartupContext } from './startup-context-service.js';
 import {
   ensureBoundProjectId,
@@ -15,11 +16,12 @@ import {
   resolveActiveTaskId,
 } from './project-service.js';
 import {
-  SESSION_ENV_VAR,
+  resolveByAgentSessionId,
+  resolveSessionContext,
+} from './session-context.js';
+import {
   endSession,
-  findCwdSessionByAgentId,
   getCurrentSessionId,
-  getCurrentSessionTaskId,
   resumeSession,
   startSession,
 } from './session-service.js';
@@ -134,11 +136,11 @@ const handleSessionStart: HookHandler = async (ctx) => {
   let sessionId: string | undefined;
   let resumedTaskId: string | undefined;
   if (identity.agentSessionId) {
-    const existing = await findCwdSessionByAgentId(
+    const existing = await resolveByAgentSessionId(
       ctx.cwd,
       identity.agentSessionId,
     );
-    if (existing) {
+    if (existing.sessionId) {
       const reattached = await resumeSession(ctx.cwd, existing.sessionId, {
         ...(agentPid ? { agentPid } : {}),
       });
@@ -197,19 +199,16 @@ const handleSessionStart: HookHandler = async (ctx) => {
 
 const handlePostCompact: HookHandler = async (ctx) => {
   const payload = parsePostCompactPayload(ctx.rawPayload);
-  // Prefer the task this session itself claimed at SessionStart over
-  // project.activeTaskIds[0]. The naive fallback was Gap A in the rc.3
-  // dogfood: it attached every checkpoint to whichever task happened to
-  // be first in the project's active list, even if the calling session
-  // was working on something else entirely.
+  // Single resolver call returns both the session id (for the
+  // checkpoint attribution) and the session-claimed task id (for the
+  // Gap A fix — never fall straight to project.activeTaskIds[0]).
+  // payload.session_id from the agent is in a different ID space
+  // (Claude UUID, codex session UUID) and is intentionally not
+  // consulted here.
+  const sessionCtx = await resolveSessionContext(ctx.cwd);
   const activeTaskId =
-    (await getCurrentSessionTaskId(ctx.cwd)) ??
-    (await resolveActiveTaskId(ctx.projectId));
-  // payload.sessionId is the AGENT's own session id (Claude UUID, Codex
-  // turn id) — a different ID space from memorize's session_xxx. Using
-  // it would mis-attribute the checkpoint. Always resolve via env/tty
-  // (now reliable post Gap-B fix).
-  const sessionId = await getCurrentSessionId(ctx.cwd);
+    sessionCtx.taskId ?? (await resolveActiveTaskId(ctx.projectId));
+  const sessionId = sessionCtx.sessionId ?? (await getCurrentSessionId(ctx.cwd));
   const summary =
     prepareHookText(payload.compactSummary, 'hook.PostCompact.compact_summary') ??
     'Compact summary unavailable';
@@ -261,8 +260,11 @@ const handleSessionEnd: HookHandler = async (ctx) => {
   const identity = parseIdentityPayload(ctx.rawPayload);
   let resolvedSessionId: string | undefined;
   if (identity.agentSessionId) {
-    const match = await findCwdSessionByAgentId(ctx.cwd, identity.agentSessionId);
-    if (match) resolvedSessionId = match.sessionId;
+    const match = await resolveByAgentSessionId(
+      ctx.cwd,
+      identity.agentSessionId,
+    );
+    if (match.sessionId) resolvedSessionId = match.sessionId;
   }
   await endSession(
     ctx.cwd,

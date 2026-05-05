@@ -7,6 +7,72 @@ loosely. The project adheres to [Semantic Versioning](https://semver.org/);
 major-version bumps are reserved for breaking changes to the on-disk event
 log layout or the public CLI surface.
 
+## [1.0.0-rc.8] — 2026-05-05
+
+### ADR-1: single source of truth for session resolution
+
+The rc.4 → rc.7 series fixed Gap A in three different code paths,
+each with its own slightly different env → tty → most-recent fallback
+chain. The 4-session round-2 dogfood showed that per-path duplication
+hadn't actually closed the hole — codex CLI subprocesses still
+attributed to `actor: user` against the wrong `taskId` because the
+CLI command's chain lacked an agent-pid hop. The pattern was on its
+way to becoming spaghetti: every new agent quirk meant another
+fallback in another caller.
+
+- **New `services/session-context.ts` is the only resolver of "which
+  session am I?".** Exposes `resolveSessionContext(cwd, { allowMostRecent })`
+  and `resolveByAgentSessionId(cwd, agentId)`. Returns
+  `ResolvedSessionContext` with `sessionId`, `taskId`, `actor`,
+  `projectId`, `agentSessionId`, `agentPid`, and a `resolvedVia` field
+  (`'env' | 'agent-pid' | 'tty' | 'most-recent' | 'none'`) so the
+  resolution path is observable when an attribution looks wrong.
+- **New `storage/cwd-session-store.ts`** owns the `CwdSessionPointer`
+  type and all pointer file I/O (read / write / list / delete /
+  legacy migration). Both `services/session-service` (lifecycle) and
+  `services/session-context` (resolution) read through this single
+  storage module — no more file paths scattered across services.
+- **All callers migrated.** `runHandoffTask`, `runCheckpointTask`,
+  `handlePostCompact`, `handleSessionEnd`, `bumpHeartbeat`,
+  `endSession`, `getCurrentSessionId`, the wrappers — every
+  identity-resolving call now goes through the SSoT.
+
+### Fixed (rc.7 dogfood — codex CLI env propagation hole)
+
+The new resolver adds an **agent-pid match** path the per-caller
+chains were missing. SessionStart already stamped the host agent's
+pid on the cwd pointer (rc.6); rc.8 walks up `process.ppid` in the
+CLI subprocess and looks for a pointer whose `agentPid` is in that
+chain. This is the only reliable identity path for codex (codex has
+no `CLAUDE_ENV_FILE` equivalent, so `MEMORIZE_SESSION_ID` never
+reaches its Bash subprocesses, so env-fallback always missed).
+Priority: `env` (fast, exact) → `agent-pid` (slower, exact, the new
+hop) → `tty` (best-effort) → opt-in `most-recent`.
+
+The rc.7 fix to `runHandoffTask` / `runCheckpointTask` stays in
+place — those handlers now ask `resolveSessionContext` directly
+instead of running their own short fallback chain, so the agent-pid
+hop reaches them automatically.
+
+### Tests
+
+- New `tests/unit/session-context.test.ts` — 6 cases pinning each
+  resolution path: `none` when no pointers, `env` exact match,
+  `agent-pid` ancestor walk match (planted with `process.ppid`),
+  env-wins-over-agent-pid priority, default refusal of most-recent
+  fallback, opt-in most-recent fallback.
+- All 182 prior tests still pass — refactor was behavior-preserving
+  for the existing surface; the codex hole closes via the new
+  agent-pid path.
+
+### Removed
+
+- `findCwdSessionByAgentId` (was a private helper in session-service)
+  superseded by `resolveByAgentSessionId` from session-context.
+- The duplicated env → tty → most-recent fallback in
+  `findCwdSession`, `runHandoffTask`, `runCheckpointTask`,
+  `handlePostCompact`. All now delegate to `resolveSessionContext`.
+
 ## [1.0.0-rc.7] — 2026-05-05
 
 ### Fixed (rc.6 dogfood — Gap A leak at the CLI surface)

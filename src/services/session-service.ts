@@ -1,5 +1,3 @@
-import fs from 'node:fs/promises';
-import { fstatSync } from 'node:fs';
 import path from 'node:path';
 
 import {
@@ -13,17 +11,28 @@ import type {
   SessionHeartbeatPayload,
 } from '../domain/entities.js';
 import { createSession } from '../domain/entities.js';
-import { appendEvent } from '../storage/event-store.js';
 import {
-  isEnoent,
-  readJson,
-  readJsonDir,
-  writeJson,
-} from '../storage/fs-utils.js';
+  type CwdSessionPointer,
+  SESSION_ENV_VAR,
+  currentTtyId,
+  deleteCwdPointer,
+  listCwdPointers,
+  migrateLegacyPointer,
+  readCwdPointer,
+  writeCwdPointer,
+} from '../storage/cwd-session-store.js';
+import { appendEvent } from '../storage/event-store.js';
+import { readJson, readJsonDir } from '../storage/fs-utils.js';
 import { getSessionsDir } from '../storage/path-resolver.js';
+import { resolveSessionContext } from './session-context.js';
 import { rebuildProjectProjection } from './projection-store.js';
 
-export const SESSION_ENV_VAR = 'MEMORIZE_SESSION_ID';
+// Re-exports so existing callers that imported these from session-service
+// continue to work. New code should prefer importing from
+// `storage/cwd-session-store` (raw pointer types / file I/O) and
+// `services/session-context` (resolution).
+export { SESSION_ENV_VAR } from '../storage/cwd-session-store.js';
+export type { CwdSessionPointer } from '../storage/cwd-session-store.js';
 
 /**
  * Pointers older than this without a heartbeat bump are treated as
@@ -43,126 +52,24 @@ function staleThresholdMs(): number {
     : DEFAULT_STALE_SESSION_MS;
 }
 
-interface CwdSessionPointer {
-  sessionId: string;
-  startedAt: string;
-  startedBy?: string;
-  projectId?: string;
-  taskId?: string;
-  /** Numeric tty rdev (stringified) when the starting process was attached
-   *  to a terminal. Used to attribute heartbeats from CLI subprocesses
-   *  back to the right session in cwds that host more than one parallel
-   *  session — see findCwdSession for the full lookup chain. */
-  tty?: string;
-  /** The host agent's own session id (Claude UUID, codex turn id, etc.)
-   *  captured from the SessionStart hook payload. We persist it here so
-   *  later hook events can map back to the right memorize session even
-   *  when env propagation fails — Claude's SessionEnd subprocess for
-   *  example does NOT inherit MEMORIZE_SESSION_ID, but its payload
-   *  carries the same Claude UUID we saw at SessionStart. */
-  agentSessionId?: string;
-  /** PID of the host agent process (claude / codex), discovered by
-   *  walking up the SessionStart hook subprocess's process tree. Used
-   *  by the picker to detect dead-but-not-yet-reaped sessions without
-   *  changing their status — the pointer file stays on disk so an
-   *  explicit `memorize session reap` is still required. Omitted when
-   *  process-tree lookup failed (non-Unix runtime, ps unavailable). */
-  agentPid?: number;
-}
-
-function cwdSessionsDir(cwd: string): string {
-  return path.join(cwd, '.memorize', 'sessions');
-}
-
-function cwdSessionFile(cwd: string, sessionId: string): string {
-  return path.join(cwdSessionsDir(cwd), `${sessionId}.json`);
-}
-
-/** Legacy single-pointer location from rc.0 / rc.1. Migrated on first
- *  startSession call, then deleted. */
-function legacyCwdSessionFile(cwd: string): string {
-  return path.join(cwd, '.memorize', 'current-session.json');
-}
-
-function currentTtyId(): string | undefined {
-  if (!process.stdin.isTTY) return undefined;
-  try {
-    return String(fstatSync(0).rdev);
-  } catch {
-    return undefined;
-  }
-}
-
-async function readCwdPointer(
-  cwd: string,
-  sessionId: string,
-): Promise<CwdSessionPointer | undefined> {
-  return readJson<CwdSessionPointer>(cwdSessionFile(cwd, sessionId));
-}
-
-async function listCwdPointers(cwd: string): Promise<CwdSessionPointer[]> {
-  return readJsonDir<CwdSessionPointer>(cwdSessionsDir(cwd));
-}
-
-async function migrateLegacyPointer(cwd: string): Promise<void> {
-  const legacyPath = legacyCwdSessionFile(cwd);
-  const legacy = await readJson<CwdSessionPointer>(legacyPath);
-  if (!legacy?.sessionId) return;
-  const target = cwdSessionFile(cwd, legacy.sessionId);
-  // Only migrate if there is no per-session file already at the target.
-  // Otherwise we would clobber a fresh pointer with stale data.
-  const existing = await readJson<CwdSessionPointer>(target);
-  if (!existing) {
-    await writeJson(target, legacy);
-  }
-  try {
-    await fs.unlink(legacyPath);
-  } catch (error) {
-    if (!isEnoent(error)) throw error;
-  }
-}
-
 /**
- * Locate the cwd-side pointer for the calling session. Priority:
- *   1. MEMORIZE_SESSION_ID env var (set by Claude via CLAUDE_ENV_FILE
- *      and inherited by every child `memorize` process).
- *   2. tty match — the current process's stdin tty rdev against the
- *      tty stored when each session started.
- *   3. (opt-in) Most-recently-started active pointer in this cwd.
- *
- * The most-recent fallback is OFF by default after the rc.2 dogfood
- * surfaced cross-attribution bugs (Claude's Stop hook killing the most
- * recent codex session because env injection didn't propagate to the
- * subprocess). Only `getCurrentSessionId` opts in, since it is the
- * ambient-CLI entry point that must always return some sessionId.
- * Telemetry callers (`bumpHeartbeat`, `endSession`) prefer a silent
- * miss to a wrong attribution.
+ * Returns the cwd-side pointer for the calling session. Thin wrapper
+ * over `resolveSessionContext` (the SSoT for "which session am I?")
+ * that re-reads the matched pointer file so the caller gets the full
+ * `CwdSessionPointer` shape rather than the resolver's projection of
+ * it. Kept as an internal helper so existing call sites that need the
+ * raw pointer (`endSession` for the unlink path, etc.) don't have to
+ * be rewritten to the new shape.
  */
 async function findCwdSession(
   cwd: string,
   options: { allowMostRecentFallback?: boolean } = {},
 ): Promise<CwdSessionPointer | undefined> {
-  await migrateLegacyPointer(cwd);
-
-  const fromEnv = process.env[SESSION_ENV_VAR];
-  if (fromEnv) {
-    const direct = await readCwdPointer(cwd, fromEnv);
-    if (direct) return direct;
-  }
-
-  const all = await listCwdPointers(cwd);
-  if (all.length === 0) return undefined;
-
-  const tty = currentTtyId();
-  if (tty) {
-    const ttyMatch = all
-      .filter((p) => p.tty === tty)
-      .sort((a, b) => (a.startedAt < b.startedAt ? 1 : -1))[0];
-    if (ttyMatch) return ttyMatch;
-  }
-
-  if (!options.allowMostRecentFallback) return undefined;
-  return all.sort((a, b) => (a.startedAt < b.startedAt ? 1 : -1))[0];
+  const ctx = await resolveSessionContext(cwd, {
+    ...(options.allowMostRecentFallback ? { allowMostRecent: true } : {}),
+  });
+  if (!ctx.sessionId) return undefined;
+  return readCwdPointer(cwd, ctx.sessionId);
 }
 
 export interface ReapResult {
@@ -249,11 +156,7 @@ export async function reapStaleSessions(
       await rebuildProjectProjection(pointer.projectId);
     }
 
-    try {
-      await fs.unlink(cwdSessionFile(cwd, pointer.sessionId));
-    } catch (error) {
-      if (!isEnoent(error)) throw error;
-    }
+    await deleteCwdPointer(cwd, pointer.sessionId);
     reaped.push(pointer.sessionId);
   }
 
@@ -318,7 +221,7 @@ export async function startSession(
     ...(options.agentSessionId ? { agentSessionId: options.agentSessionId } : {}),
     ...(options.agentPid ? { agentPid: options.agentPid } : {}),
   };
-  await writeJson(cwdSessionFile(cwd, sessionId), pointer);
+  await writeCwdPointer(cwd, pointer);
   process.env[SESSION_ENV_VAR] = sessionId;
   return sessionId;
 }
@@ -375,7 +278,7 @@ export async function resumeSession(
     ...(tty ? { tty } : {}),
     ...(options.agentPid ? { agentPid: options.agentPid } : {}),
   };
-  await writeJson(cwdSessionFile(cwd, sessionId), updated);
+  await writeCwdPointer(cwd, updated);
   process.env[SESSION_ENV_VAR] = sessionId;
 
   if (pointer.projectId) {
@@ -438,11 +341,7 @@ export async function endSession(
     await rebuildProjectProjection(pointer.projectId);
   }
 
-  try {
-    await fs.unlink(cwdSessionFile(cwd, pointer.sessionId));
-  } catch (error) {
-    if (!isEnoent(error)) throw error;
-  }
+  await deleteCwdPointer(cwd, pointer.sessionId);
   if (process.env[SESSION_ENV_VAR] === pointer.sessionId) {
     delete process.env[SESSION_ENV_VAR];
   }

@@ -78,3 +78,28 @@ export function findAncestorPidByName(params: {
   }
   return undefined;
 }
+
+/**
+ * Returns the chain of pids visited by walking up from `startPid`,
+ * inclusive of `startPid` itself. Stops at pid 1, missing rows, or
+ * `maxHops`. Used by session-context to check whether any ancestor
+ * pid matches a known agent pid stamped on a cwd pointer — the only
+ * reliable way to attribute a memorize CLI subprocess back to the
+ * codex session that spawned it (codex doesn't expose its session id
+ * via env the way Claude does through CLAUDE_ENV_FILE).
+ */
+export function walkAncestorPids(
+  startPid: number,
+  maxHops = 12,
+): number[] {
+  const out: number[] = [];
+  let cursor = startPid;
+  for (let hop = 0; hop < maxHops; hop += 1) {
+    const row = readPsRow(cursor);
+    if (!row) return out;
+    out.push(row.pid);
+    if (row.ppid <= 1) return out;
+    cursor = row.ppid;
+  }
+  return out;
+}

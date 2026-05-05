@@ -9,11 +9,8 @@ import {
   requireBoundProjectId,
   resolveActiveTaskId,
 } from '../../services/project-service.js';
-import {
-  getCurrentSessionActor,
-  getCurrentSessionId,
-  getCurrentSessionTaskId,
-} from '../../services/session-service.js';
+import { resolveSessionContext } from '../../services/session-context.js';
+import { getCurrentSessionId } from '../../services/session-service.js';
 import {
   createCheckpoint,
   createHandoff,
@@ -116,13 +113,13 @@ async function runCheckpointTask(
     multi: ['task-update', 'project-update', 'deferred', 'discard'],
   });
   // Prefer the task this session claimed at SessionStart over the
-  // project-wide activeTaskIds[0] fallback. Without this the rc.6
-  // dogfood saw codex checkpoints land on whichever task happened
-  // to be first in the project's active list (Gap A leaked through
-  // the CLI surface even after the hook handler was patched).
+  // project-wide activeTaskIds[0] fallback. Single resolver call
+  // — see services/session-context.ts for the priority chain
+  // (env → agent-pid → tty → opt-in most-recent).
+  const sessionCtx = await resolveSessionContext(ctx.cwd);
   const resolvedTaskId =
     flags.single.task?.trim() ??
-    (await getCurrentSessionTaskId(ctx.cwd)) ??
+    sessionCtx.taskId ??
     (await resolveActiveTaskId(projectId));
   const summary = flags.single.summary;
   if (!summary) throw new Error('--summary is required for task checkpoint.');
@@ -156,15 +153,15 @@ async function runHandoffTask(
     single: ['summary', 'next', 'from', 'to', 'task', 'confidence'],
     multi: ['done', 'remaining', 'warning', 'question'],
   });
-  // Session-aware fallback chain (Gap A fix at the CLI surface):
-  //   --task arg → session-claimed task → project's first active task.
-  // The middle hop is what was missing in rc.6 — without it, every
-  // codex handoff in a multi-session cwd attached itself to whichever
-  // task was first in project.activeTaskIds, regardless of which
-  // task the calling session actually claimed.
+  // Single resolver call — taskId and actor share the same session
+  // pointer, so we ask once and read both. The fallback chain lives
+  // in `resolveSessionContext` (env → agent-pid → tty → opt-in
+  // most-recent); the rc.6 codex Gap A leak happened because the CLI
+  // had its own simpler chain that lacked the agent-pid hop.
+  const sessionCtx = await resolveSessionContext(ctx.cwd);
   const resolvedTaskId =
     flags.single.task?.trim() ??
-    (await getCurrentSessionTaskId(ctx.cwd)) ??
+    sessionCtx.taskId ??
     (await resolveActiveTaskId(projectId));
   if (!resolvedTaskId) {
     throw new Error(
@@ -180,12 +177,8 @@ async function runHandoffTask(
     throw new Error('--confidence must be one of low|medium|high.');
   }
   const confidence = confidenceRaw as Confidence | undefined;
-  // fromActor fallback: --from arg → session's startedBy → ACTOR_USER.
-  // Without the middle hop, a handoff issued from inside a codex
-  // session reads as `fromActor: "user"`, erasing the audit trail of
-  // which agent actually did the work.
   const fromActor =
-    flags.single.from ?? (await getCurrentSessionActor(ctx.cwd)) ?? ACTOR_USER;
+    flags.single.from ?? sessionCtx.actor ?? ACTOR_USER;
   const handoff = await createHandoff({
     projectId,
     taskId: resolvedTaskId,
