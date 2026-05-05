@@ -106,7 +106,9 @@ async function runResumeTask(
   // the SSoT for the calling session, and pin both selfSessionId
   // (so the picker excludes us from otherActiveTasks) and taskId
   // (so we get OUR task back, not whatever happens to be first).
-  const sessionCtx = await resolveSessionContext(ctx.cwd);
+  const sessionCtx = await resolveSessionContext(ctx.cwd, {
+    debugLabel: 'task-resume',
+  });
   const payload = await loadStartContext({
     projectId,
     ...(sessionCtx.taskId ? { taskId: sessionCtx.taskId } : {}),
@@ -128,7 +130,9 @@ async function runCheckpointTask(
   // project-wide activeTaskIds[0] fallback. Single resolver call
   // — see services/session-context.ts for the priority chain
   // (env → agent-pid → tty → opt-in most-recent).
-  const sessionCtx = await resolveSessionContext(ctx.cwd);
+  const sessionCtx = await resolveSessionContext(ctx.cwd, {
+    debugLabel: 'task-checkpoint',
+  });
   const resolvedTaskId =
     flags.single.task?.trim() ??
     sessionCtx.taskId ??
@@ -170,7 +174,9 @@ async function runHandoffTask(
   // in `resolveSessionContext` (env → agent-pid → tty → opt-in
   // most-recent); the rc.6 codex Gap A leak happened because the CLI
   // had its own simpler chain that lacked the agent-pid hop.
-  const sessionCtx = await resolveSessionContext(ctx.cwd);
+  const sessionCtx = await resolveSessionContext(ctx.cwd, {
+    debugLabel: 'task-handoff',
+  });
   const resolvedTaskId =
     flags.single.task?.trim() ??
     sessionCtx.taskId ??

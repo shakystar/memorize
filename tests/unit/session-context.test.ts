@@ -131,3 +131,72 @@ describe('resolveSessionContext — single source of truth for "which session am
     expect(ctx.sessionId).toBe('session_newer');
   });
 });
+
+describe('resolveSessionContext — MEMORIZE_DEBUG instrumentation', () => {
+  // The dogfood gap that prompted this: codex `task resume` returned
+  // the wrong task while same-session `task handoff` attributed
+  // correctly. Without per-call-site visibility into which path the
+  // resolver actually took, we can't tell whether the resume CLI hit
+  // a different branch (env-miss → tty-miss → none) than handoff did.
+  // The debug emit is the cheapest way to expose `resolvedVia` per
+  // call site in the next dogfood round.
+  let stderrCalls: string[];
+  let originalWrite: typeof process.stderr.write;
+
+  beforeEach(() => {
+    stderrCalls = [];
+    originalWrite = process.stderr.write.bind(process.stderr);
+    process.stderr.write = ((chunk: unknown): boolean => {
+      stderrCalls.push(typeof chunk === 'string' ? chunk : String(chunk));
+      return true;
+    }) as typeof process.stderr.write;
+  });
+
+  afterEach(() => {
+    process.stderr.write = originalWrite;
+    delete process.env.MEMORIZE_DEBUG;
+  });
+
+  it('emits nothing when MEMORIZE_DEBUG is unset, even with a debugLabel', async () => {
+    delete process.env.MEMORIZE_DEBUG;
+    await resolveSessionContext(sandbox, { debugLabel: 'task-resume' });
+    expect(stderrCalls.filter((s) => s.includes('memorize-debug'))).toHaveLength(0);
+  });
+
+  it('emits nothing when MEMORIZE_DEBUG is set but no debugLabel is passed', async () => {
+    process.env.MEMORIZE_DEBUG = '1';
+    await resolveSessionContext(sandbox);
+    expect(stderrCalls.filter((s) => s.includes('memorize-debug'))).toHaveLength(0);
+  });
+
+  it('emits one tagged line when both MEMORIZE_DEBUG and debugLabel are set', async () => {
+    await plantPointer({
+      sessionId: 'session_debug',
+      startedAt: '2026-05-05T00:00:00.000Z',
+      startedBy: 'codex',
+      projectId: 'proj_debug',
+      taskId: 'task_debug',
+    });
+    process.env[SESSION_ENV_VAR] = 'session_debug';
+    process.env.MEMORIZE_DEBUG = '1';
+
+    await resolveSessionContext(sandbox, { debugLabel: 'task-resume' });
+    const debugLines = stderrCalls.filter((s) => s.includes('memorize-debug'));
+    expect(debugLines).toHaveLength(1);
+    const line = debugLines[0]!;
+    expect(line).toContain('label=task-resume');
+    expect(line).toContain('via=env');
+    expect(line).toContain('session=session_debug');
+    expect(line).toContain('task=task_debug');
+    expect(line).toContain('actor=codex');
+  });
+
+  it('emits via=none for a miss so we can tell "no pointer" from "wrong pointer"', async () => {
+    process.env.MEMORIZE_DEBUG = '1';
+    await resolveSessionContext(sandbox, { debugLabel: 'task-resume' });
+    const debugLines = stderrCalls.filter((s) => s.includes('memorize-debug'));
+    expect(debugLines).toHaveLength(1);
+    expect(debugLines[0]).toContain('via=none');
+    expect(debugLines[0]).toContain('session=-');
+  });
+});

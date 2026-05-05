@@ -50,9 +50,30 @@ export interface ResolveOptions {
    *  opt in. Telemetry callers (`bumpHeartbeat`, `endSession`) prefer a
    *  silent miss to a wrong attribution. */
   allowMostRecent?: boolean;
+  /** When `MEMORIZE_DEBUG` is set, emit one stderr line tagged with
+   *  this label showing which resolution path was taken. Used to
+   *  diagnose attribution mismatches in dogfood without changing the
+   *  resolution logic itself. */
+  debugLabel?: string;
 }
 
 const NONE: ResolvedSessionContext = { resolvedVia: 'none' };
+
+function emitDebug(label: string | undefined, ctx: ResolvedSessionContext): void {
+  if (!label) return;
+  if (!process.env.MEMORIZE_DEBUG) return;
+  const parts = [
+    `label=${label}`,
+    `via=${ctx.resolvedVia}`,
+    `session=${ctx.sessionId ?? '-'}`,
+    `task=${ctx.taskId ?? '-'}`,
+    `actor=${ctx.actor ?? '-'}`,
+    `agentPid=${ctx.agentPid ?? '-'}`,
+    `agentSession=${ctx.agentSessionId ?? '-'}`,
+    `ppid=${process.ppid ?? '-'}`,
+  ];
+  process.stderr.write(`[memorize-debug] resolve ${parts.join(' ')}\n`);
+}
 
 function pointerToContext(
   pointer: CwdSessionPointer,
@@ -107,11 +128,18 @@ export async function resolveSessionContext(
   const fromEnv = process.env[SESSION_ENV_VAR];
   if (fromEnv) {
     const direct = await readCwdPointer(cwd, fromEnv);
-    if (direct) return pointerToContext(direct, 'env');
+    if (direct) {
+      const ctx = pointerToContext(direct, 'env');
+      emitDebug(options.debugLabel, ctx);
+      return ctx;
+    }
   }
 
   const all = await listCwdPointers(cwd);
-  if (all.length === 0) return NONE;
+  if (all.length === 0) {
+    emitDebug(options.debugLabel, NONE);
+    return NONE;
+  }
 
   // Build a pid → pointer map once so we can ask "is any walked
   // ancestor pid known?" in O(1) per hop.
@@ -123,7 +151,11 @@ export async function resolveSessionContext(
     const chain = walkAncestorPids(process.ppid);
     for (const pid of chain) {
       const match = byAgentPid.get(pid);
-      if (match) return pointerToContext(match, 'agent-pid');
+      if (match) {
+        const ctx = pointerToContext(match, 'agent-pid');
+        emitDebug(options.debugLabel, ctx);
+        return ctx;
+      }
     }
   }
 
@@ -131,14 +163,19 @@ export async function resolveSessionContext(
   if (tty) {
     const ttyMatches = all.filter((p) => p.tty === tty);
     if (ttyMatches.length > 0) {
-      return pointerToContext(newestPointer(ttyMatches), 'tty');
+      const ctx = pointerToContext(newestPointer(ttyMatches), 'tty');
+      emitDebug(options.debugLabel, ctx);
+      return ctx;
     }
   }
 
   if (options.allowMostRecent) {
-    return pointerToContext(newestPointer(all), 'most-recent');
+    const ctx = pointerToContext(newestPointer(all), 'most-recent');
+    emitDebug(options.debugLabel, ctx);
+    return ctx;
   }
 
+  emitDebug(options.debugLabel, NONE);
   return NONE;
 }
 
@@ -151,8 +188,11 @@ export async function resolveSessionContext(
 export async function resolveByAgentSessionId(
   cwd: string,
   agentId: string,
+  options: { debugLabel?: string } = {},
 ): Promise<ResolvedSessionContext> {
   const pointers = await listCwdPointers(cwd);
   const match = pointers.find((p) => p.agentSessionId === agentId);
-  return match ? pointerToContext(match, 'agent-pid') : NONE;
+  const ctx = match ? pointerToContext(match, 'agent-pid') : NONE;
+  emitDebug(options.debugLabel, ctx);
+  return ctx;
 }

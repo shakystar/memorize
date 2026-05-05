@@ -7,6 +7,44 @@ loosely. The project adheres to [Semantic Versioning](https://semver.org/);
 major-version bumps are reserved for breaking changes to the on-disk event
 log layout or the public CLI surface.
 
+## [1.0.0-rc.10] — 2026-05-06
+
+### Added — diagnostic-only, no behavior change
+
+- **`MEMORIZE_DEBUG=1` resolver instrumentation.** Round-4 dogfood found
+  codex `task resume` returning the first project todo instead of the
+  calling session's claimed task, while same-session `task handoff`
+  attributed correctly. Both paths use `resolveSessionContext`, so the
+  divergence had to be inside the resolver — but with no per-call-site
+  visibility we couldn't tell which branch (env / agent-pid / tty /
+  none) `task resume` actually hit. With `MEMORIZE_DEBUG=1` set, every
+  resolver call from a labeled call site now emits one stderr line:
+
+  ```
+  [memorize-debug] resolve label=task-resume via=none session=- task=- actor=- agentPid=- agentSession=- ppid=12345
+  ```
+
+  Labels wired in: `task-resume`, `task-handoff`, `task-checkpoint`
+  (CLI), `hook-session-start-resume`, `hook-post-compact`,
+  `hook-session-end` (hooks). Unlabeled calls stay silent. Off when
+  the env var is unset — no overhead in normal operation.
+
+  Local smoke run from a non-session shell already reproduced the
+  bug pattern: `via=none` → picker falls back to first todo
+  (`task_mos7v3iw`, exactly the task codex was reporting). Round-5
+  dogfood will surface whether codex's `task resume` subprocess hits
+  the same branch (env propagation gap) or a different one (process
+  tree depth, lazy SessionStart timing).
+
+### Tests
+
+- `tests/unit/session-context.test.ts` — 4 new cases for the debug
+  emit: silent when `MEMORIZE_DEBUG` unset, silent when no label,
+  one tagged line when both set, `via=none` for misses so we can
+  tell "no pointer" from "wrong pointer".
+
+### Tests count: 193 → 197
+
 ## [1.0.0-rc.9] — 2026-05-05
 
 ### Fixed (rc.7 round-2 dogfood follow-ups, plus rc.8 round-3 finding)

@@ -142,6 +142,7 @@ const handleSessionStart: HookHandler = async (ctx) => {
     const existing = await resolveByAgentSessionId(
       ctx.cwd,
       identity.agentSessionId,
+      { debugLabel: 'hook-session-start-resume' },
     );
     if (existing.sessionId) {
       const reattached = await resumeSession(ctx.cwd, existing.sessionId, {
@@ -231,7 +232,9 @@ const handlePostCompact: HookHandler = async (ctx) => {
   // payload.session_id from the agent is in a different ID space
   // (Claude UUID, codex session UUID) and is intentionally not
   // consulted here.
-  const sessionCtx = await resolveSessionContext(ctx.cwd);
+  const sessionCtx = await resolveSessionContext(ctx.cwd, {
+    debugLabel: 'hook-post-compact',
+  });
   const activeTaskId =
     sessionCtx.taskId ?? (await resolveActiveTaskId(ctx.projectId));
   const sessionId = sessionCtx.sessionId ?? (await getCurrentSessionId(ctx.cwd));
@@ -289,6 +292,7 @@ const handleSessionEnd: HookHandler = async (ctx) => {
     const match = await resolveByAgentSessionId(
       ctx.cwd,
       identity.agentSessionId,
+      { debugLabel: 'hook-session-end' },
     );
     if (match.sessionId) resolvedSessionId = match.sessionId;
   }
