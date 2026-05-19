@@ -62,8 +62,8 @@ export function runHook(opts: HookRunOptions): HookRunResult {
   }
 
   return {
-    stdout: result.stdout ?? '',
-    stderr: result.stderr ?? '',
+    stdout: typeof result.stdout === 'string' ? result.stdout : (result.stdout?.toString('utf8') ?? ''),
+    stderr: typeof result.stderr === 'string' ? result.stderr : (result.stderr?.toString('utf8') ?? ''),
     exitCode: result.status,
     envFileLines,
   };
