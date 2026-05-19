@@ -1,3 +1,6 @@
+import { tmpdir } from 'node:os';
+import path from 'node:path';
+
 import { describe, expect, it } from 'vitest';
 
 import {
@@ -13,18 +16,20 @@ import {
   CURRENT_SCHEMA_VERSION,
 } from '../../src/domain/index.js';
 
+const FIXTURE_ROOT = path.join(tmpdir(), 'memorize-test-domain-contracts');
+
 describe('domain constructors', () => {
   it('creates project-shaped entities with stable core metadata', () => {
     const project = createProject({
       title: 'Memorize',
-      rootPath: '/tmp/memorize',
+      rootPath: FIXTURE_ROOT,
       summary: 'Shared context memory',
       goals: ['Reliable handoff'],
     });
 
     expect(project.schemaVersion).toBe(CURRENT_SCHEMA_VERSION);
     expect(project.title).toBe('Memorize');
-    expect(project.rootPath).toBe('/tmp/memorize');
+    expect(project.rootPath).toBe(FIXTURE_ROOT);
     expect(project.activeTaskIds).toEqual([]);
   });
 

@@ -1,4 +1,4 @@
-import { spawnSync } from 'node:child_process';
+import psList from 'ps-list';
 
 /**
  * Returns `true` when `pid` corresponds to a live process visible to
@@ -25,26 +25,13 @@ interface PsRow {
   comm: string;
 }
 
-function readPsRow(pid: number): PsRow | undefined {
-  // `comm` truncates to 16 chars on macOS/Linux but that's enough to
-  // distinguish 'claude' / 'codex' from 'node' / 'sh'. Avoid `command`
-  // (full argv) — it pulls in unbounded data and hits BSD vs GNU
-  // formatting quirks.
-  const result = spawnSync(
-    'ps',
-    ['-o', 'pid=,ppid=,comm=', '-p', String(pid)],
-    { encoding: 'utf8' },
-  );
-  if (result.status !== 0) return undefined;
-  const line = result.stdout.trim().split('\n')[0];
-  if (!line) return undefined;
-  const match = line.trim().match(/^(\d+)\s+(\d+)\s+(.*)$/);
-  if (!match) return undefined;
-  return {
-    pid: Number(match[1]),
-    ppid: Number(match[2]),
-    comm: (match[3] ?? '').trim(),
-  };
+async function loadProcessMap(): Promise<Map<number, PsRow>> {
+  const rows = await psList();
+  const map = new Map<number, PsRow>();
+  for (const r of rows) {
+    map.set(r.pid, { pid: r.pid, ppid: r.ppid, comm: r.name });
+  }
+  return map;
 }
 
 /**
@@ -58,16 +45,17 @@ function readPsRow(pid: number): PsRow | undefined {
  * best-effort: any failure returns undefined and the caller falls
  * back to heartbeat-only liveness.
  */
-export function findAncestorPidByName(params: {
+export async function findAncestorPidByName(params: {
   startPid: number;
   targetNames: readonly string[];
   maxHops?: number;
-}): number | undefined {
+}): Promise<number | undefined> {
   const { startPid, targetNames } = params;
   const maxHops = params.maxHops ?? 12;
+  const map = await loadProcessMap();
   let cursor = startPid;
   for (let hop = 0; hop < maxHops; hop += 1) {
-    const row = readPsRow(cursor);
+    const row = map.get(cursor);
     if (!row) return undefined;
     const lowerComm = row.comm.toLowerCase();
     if (targetNames.some((name) => lowerComm.includes(name.toLowerCase()))) {
@@ -88,14 +76,15 @@ export function findAncestorPidByName(params: {
  * codex session that spawned it (codex doesn't expose its session id
  * via env the way Claude does through CLAUDE_ENV_FILE).
  */
-export function walkAncestorPids(
+export async function walkAncestorPids(
   startPid: number,
   maxHops = 12,
-): number[] {
+): Promise<number[]> {
+  const map = await loadProcessMap();
   const out: number[] = [];
   let cursor = startPid;
   for (let hop = 0; hop < maxHops; hop += 1) {
-    const row = readPsRow(cursor);
+    const row = map.get(cursor);
     if (!row) return out;
     out.push(row.pid);
     if (row.ppid <= 1) return out;

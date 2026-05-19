@@ -1,3 +1,6 @@
+import { tmpdir } from 'node:os';
+import path from 'node:path';
+
 import { describe, expect, it } from 'vitest';
 
 import { CURRENT_SCHEMA_VERSION } from '../../src/domain/common.js';
@@ -8,6 +11,8 @@ import {
   buildMemoryIndex,
   reduceProjectState,
 } from '../../src/projections/projector.js';
+
+const FIXTURE_ROOT = path.join(tmpdir(), 'memorize-test-projector');
 
 function makeEvent(overrides: Partial<DomainEvent>): DomainEvent {
   return {
@@ -39,7 +44,7 @@ describe('projector', () => {
           summary: 'Shared context system',
           goals: [],
           status: 'active',
-          rootPath: '/tmp/memorize',
+          rootPath: FIXTURE_ROOT,
           activeWorkstreamIds: [],
           activeTaskIds: [],
           acceptedDecisionIds: [],
@@ -252,7 +257,7 @@ function projectCreated(): DomainEvent {
       summary: 'Shared context system',
       goals: [],
       status: 'active',
-      rootPath: '/tmp/memorize',
+      rootPath: FIXTURE_ROOT,
       activeWorkstreamIds: [],
       activeTaskIds: [],
       acceptedDecisionIds: [],

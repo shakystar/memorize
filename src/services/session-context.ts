@@ -160,14 +160,14 @@ export async function resolveSessionContext(
     const direct = await readCwdPointer(cwd, fromEnv);
     if (direct) {
       const ctx = pointerToContext(direct, 'env');
-      emitDebug(options.debugLabel, ctx, debugExtras([direct]));
+      emitDebug(options.debugLabel, ctx, await debugExtras([direct]));
       return ctx;
     }
   }
 
   const all = await listCwdPointers(cwd);
   if (all.length === 0) {
-    emitDebug(options.debugLabel, NONE, debugExtras([]));
+    emitDebug(options.debugLabel, NONE, await debugExtras([]));
     return NONE;
   }
 
@@ -183,7 +183,7 @@ export async function resolveSessionContext(
     const match = all.find((p) => p.agentSessionId === codexThreadId);
     if (match) {
       const ctx = pointerToContext(match, 'agent-env');
-      emitDebug(options.debugLabel, ctx, debugExtras(all));
+      emitDebug(options.debugLabel, ctx, await debugExtras(all));
       return ctx;
     }
   }
@@ -196,12 +196,12 @@ export async function resolveSessionContext(
   }
   let chain: number[] = [];
   if (byAgentPid.size > 0 && process.ppid) {
-    chain = walkAncestorPids(process.ppid);
+    chain = await walkAncestorPids(process.ppid);
     for (const pid of chain) {
       const match = byAgentPid.get(pid);
       if (match) {
         const ctx = pointerToContext(match, 'agent-pid');
-        emitDebug(options.debugLabel, ctx, debugExtras(all, chain));
+        emitDebug(options.debugLabel, ctx, await debugExtras(all, chain));
         return ctx;
       }
     }
@@ -212,25 +212,25 @@ export async function resolveSessionContext(
     const ttyMatches = all.filter((p) => p.tty === tty);
     if (ttyMatches.length > 0) {
       const ctx = pointerToContext(newestPointer(ttyMatches), 'tty');
-      emitDebug(options.debugLabel, ctx, debugExtras(all, chain));
+      emitDebug(options.debugLabel, ctx, await debugExtras(all, chain));
       return ctx;
     }
   }
 
   if (options.allowMostRecent) {
     const ctx = pointerToContext(newestPointer(all), 'most-recent');
-    emitDebug(options.debugLabel, ctx, debugExtras(all, chain));
+    emitDebug(options.debugLabel, ctx, await debugExtras(all, chain));
     return ctx;
   }
 
-  emitDebug(options.debugLabel, NONE, debugExtras(all, chain));
+  emitDebug(options.debugLabel, NONE, await debugExtras(all, chain));
   return NONE;
 }
 
-function debugExtras(
+async function debugExtras(
   pointers: CwdSessionPointer[],
   walked?: number[],
-): DebugExtras {
+): Promise<DebugExtras> {
   if (!process.env.MEMORIZE_DEBUG) return {};
   // When DEBUG is set but the agent-pid branch was skipped (env hit
   // first, or the byAgentPid map was empty), still walk the chain so
@@ -239,7 +239,7 @@ function debugExtras(
     walked && walked.length > 0
       ? walked
       : process.ppid
-        ? walkAncestorPids(process.ppid)
+        ? await walkAncestorPids(process.ppid)
         : [];
   return {
     walked: computedWalked,

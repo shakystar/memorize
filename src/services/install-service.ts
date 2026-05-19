@@ -1,7 +1,8 @@
 import fs from 'node:fs/promises';
-import { existsSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+
+import which from 'which';
 
 import { isEnoent, writeJson } from '../storage/fs-utils.js';
 
@@ -27,13 +28,7 @@ type HookCommandForm = 'bare' | 'npx';
 function detectHookCommandForm(): HookCommandForm {
   const override = process.env.MEMORIZE_HOOK_COMMAND_FORM;
   if (override === 'bare' || override === 'npx') return override;
-
-  const PATH = process.env.PATH ?? '';
-  for (const dir of PATH.split(path.delimiter)) {
-    if (!dir) continue;
-    if (existsSync(path.join(dir, 'memorize'))) return 'bare';
-  }
-  return 'npx';
+  return which.sync('memorize', { nothrow: true }) ? 'bare' : 'npx';
 }
 
 function buildHookCommand(

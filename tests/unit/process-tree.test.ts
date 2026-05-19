@@ -24,11 +24,11 @@ describe('isProcessAlive', () => {
 });
 
 describe('findAncestorPidByName', () => {
-  it('returns undefined when no ancestor matches the target names', () => {
+  it('returns undefined when no ancestor matches the target names', async () => {
     // Vitest itself does not run under a process named 'claude' or
     // 'codex', so a walk from the current ppid must miss within the
     // hop limit. Pure best-effort guarantee: undefined, never throws.
-    const result = findAncestorPidByName({
+    const result = await findAncestorPidByName({
       startPid: process.pid,
       targetNames: ['this-name-will-never-match-xyz'],
       maxHops: 4,
@@ -36,9 +36,9 @@ describe('findAncestorPidByName', () => {
     expect(result).toBeUndefined();
   });
 
-  it('returns undefined for a pid that no longer exists', () => {
+  it('returns undefined for a pid that no longer exists', async () => {
     expect(
-      findAncestorPidByName({
+      await findAncestorPidByName({
         startPid: 99_999_999,
         targetNames: ['anything'],
       }),
