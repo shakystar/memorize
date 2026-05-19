@@ -36,6 +36,7 @@
   "bin": {
     "memorize": "dist/cli/index.js"
   },
+  "packageManager": "pnpm@10.30.3",
   "scripts": {
     "dev": "tsx src/cli/index.ts",
     "build": "rm -rf dist && tsc -p tsconfig.build.json && node scripts/validate/write-cli-shebang.cjs",
