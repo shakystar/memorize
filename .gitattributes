@@ -1,1 +1,9 @@
 tests/fixtures/** text eol=lf
+* text=auto eol=lf
+*.ndjson text eol=lf
+*.json text eol=lf
+*.md text eol=lf
+*.ts text eol=lf
+*.js text eol=lf
+*.yml text eol=lf
+*.lock binary

@@ -1,6 +1,8 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 
+import writeFileAtomic from 'write-file-atomic';
+
 export function isEnoent(error: unknown): boolean {
   return (error as NodeJS.ErrnoException | undefined)?.code === 'ENOENT';
 }
@@ -80,14 +82,7 @@ export async function withFileLock<T>(
 
 export async function writeJson(filePath: string, value: unknown): Promise<void> {
   await ensureParentDir(filePath);
-  const tmpPath = `${filePath}.${process.pid}.${Date.now()}.tmp`;
-  await fs.writeFile(tmpPath, `${JSON.stringify(value, null, 2)}\n`, 'utf8');
-  try {
-    await fs.rename(tmpPath, filePath);
-  } catch (err) {
-    await fs.rm(tmpPath, { force: true }).catch(() => {});
-    throw err;
-  }
+  await writeFileAtomic(filePath, `${JSON.stringify(value, null, 2)}\n`, 'utf8');
 }
 
 export async function readJson<T>(filePath: string): Promise<T | undefined> {
