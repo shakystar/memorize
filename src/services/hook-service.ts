@@ -78,15 +78,15 @@ function readStringField(
   return typeof value === 'string' ? value : undefined;
 }
 
-interface PostCompactPayload {
+export interface PostCompactPayload {
   compactSummary?: string;
 }
 
-interface IdentityPayload {
+export interface IdentityPayload {
   agentSessionId?: string;
 }
 
-function parsePostCompactPayload(raw: string | undefined): PostCompactPayload {
+export function parsePostCompactPayload(raw: string | undefined): PostCompactPayload {
   const obj = parseJsonObject(raw);
   const result: PostCompactPayload = {};
   const compactSummary = readStringField(obj, 'compact_summary');
@@ -101,7 +101,7 @@ function parsePostCompactPayload(raw: string | undefined): PostCompactPayload {
  *  include it under `session_id`. We use it as a stable handle to the
  *  calling session so later events can look up what SessionStart
  *  claimed even when env propagation fails. */
-function parseIdentityPayload(raw: string | undefined): IdentityPayload {
+export function parseIdentityPayload(raw: string | undefined): IdentityPayload {
   const obj = parseJsonObject(raw);
   const agentSessionId = readStringField(obj, 'session_id');
   return agentSessionId ? { agentSessionId } : {};
