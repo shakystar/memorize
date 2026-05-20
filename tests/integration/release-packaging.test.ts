@@ -7,7 +7,10 @@ describe('release packaging', () => {
   it(
     'builds a real executable CLI entrypoint at dist/cli.js',
     async () => {
-      const build = spawnSync('pnpm', ['build'], { encoding: 'utf8' });
+      const build = spawnSync('pnpm', ['build'], {
+        encoding: 'utf8',
+        shell: true,
+      });
       expect(build.status).toBe(0);
 
       const cliOutput = await readFile('dist/cli.js', 'utf8');
@@ -19,6 +22,7 @@ describe('release packaging', () => {
   it('keeps tests and validation assets out of the publish tarball', () => {
     const result = spawnSync('npm', ['pack', '--dry-run', '--json'], {
       encoding: 'utf8',
+      shell: true,
     });
     expect(result.status).toBe(0);
 
