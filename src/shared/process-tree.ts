@@ -25,7 +25,7 @@ interface PsRow {
   comm: string;
 }
 
-function readPsRow(pid: number): PsRow | undefined {
+function readPsRowPosix(pid: number): PsRow | undefined {
   // `comm` truncates to 16 chars on macOS/Linux but that's enough to
   // distinguish 'claude' / 'codex' from 'node' / 'sh'. Avoid `command`
   // (full argv) — it pulls in unbounded data and hits BSD vs GNU
@@ -45,6 +45,37 @@ function readPsRow(pid: number): PsRow | undefined {
     ppid: Number(match[2]),
     comm: (match[3] ?? '').trim(),
   };
+}
+
+function readPsRowWindows(pid: number): PsRow | undefined {
+  // Windows has no POSIX `ps`. Win32_Process via PowerShell exposes
+  // ProcessId / ParentProcessId / Name. We format the row as
+  // "<pid> <ppid> <name>" to reuse the POSIX regex parser below.
+  const script =
+    `$ErrorActionPreference = 'SilentlyContinue'; ` +
+    `$p = Get-CimInstance Win32_Process -Filter "ProcessId=${pid}"; ` +
+    `if ($p) { "$($p.ProcessId) $($p.ParentProcessId) $($p.Name)" }`;
+  const result = spawnSync(
+    'powershell.exe',
+    ['-NoProfile', '-NonInteractive', '-Command', script],
+    { encoding: 'utf8' },
+  );
+  if (result.status !== 0) return undefined;
+  const line = result.stdout.trim().split('\n')[0];
+  if (!line) return undefined;
+  const match = line.trim().match(/^(\d+)\s+(\d+)\s+(.*)$/);
+  if (!match) return undefined;
+  return {
+    pid: Number(match[1]),
+    ppid: Number(match[2]),
+    comm: (match[3] ?? '').trim(),
+  };
+}
+
+function readPsRow(pid: number): PsRow | undefined {
+  return process.platform === 'win32'
+    ? readPsRowWindows(pid)
+    : readPsRowPosix(pid);
 }
 
 /**
