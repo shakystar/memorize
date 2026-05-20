@@ -21,7 +21,9 @@ function runCli(args: string[]) {
       ...process.env,
       MEMORIZE_ROOT: memorizeRoot,
       // Override HOME so tests write to a sandboxed ~/.codex, not the real one.
+      // os.homedir() reads USERPROFILE on Windows, so override both.
       HOME: codexHome,
+      USERPROFILE: codexHome,
       // Pin the hook command form for predictable assertions; bare
       // form is covered by a dedicated test below.
       MEMORIZE_HOOK_COMMAND_FORM: 'npx',
