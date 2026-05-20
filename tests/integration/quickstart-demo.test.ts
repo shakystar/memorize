@@ -8,7 +8,9 @@ import { describe, expect, it } from 'vitest';
 // public demo would break too — we lock the sequence here so a future
 // rename or signature change cannot silently rot the user-facing asset.
 describe('examples/quickstart.sh — README demo lock', () => {
-  it(
+  // POSIX bash script: skip on Windows where bash isn't reliably present
+  // and script paths get backslash-mangled. CI covers it on ubuntu/macos.
+  it.skipIf(process.platform === 'win32')(
     'runs end-to-end against the local CLI and prints expected milestones',
     { timeout: 60_000 },
     () => {
