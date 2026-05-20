@@ -25,7 +25,7 @@ interface PsRow {
   comm: string;
 }
 
-function readPsRowPosix(pid: number): PsRow | undefined {
+function readPosixPsRow(pid: number): PsRow | undefined {
   // `comm` truncates to 16 chars on macOS/Linux but that's enough to
   // distinguish 'claude' / 'codex' from 'node' / 'sh'. Avoid `command`
   // (full argv) — it pulls in unbounded data and hits BSD vs GNU
@@ -47,35 +47,34 @@ function readPsRowPosix(pid: number): PsRow | undefined {
   };
 }
 
-function readPsRowWindows(pid: number): PsRow | undefined {
-  // Windows has no POSIX `ps`. Win32_Process via PowerShell exposes
-  // ProcessId / ParentProcessId / Name. We format the row as
-  // "<pid> <ppid> <name>" to reuse the POSIX regex parser below.
+function snapshotWindowsProcessTable(): Map<number, PsRow> {
+  // Windows has no per-pid POSIX `ps`. Win32_Process via PowerShell is
+  // the only portable way to read ParentProcessId, but on GitHub Actions
+  // windows-latest each `powershell.exe` cold start runs ~500ms — twelve
+  // sequential spawns blow past vitest's 5s default. Pay one spawn to
+  // fetch the entire process table, then walk the chain in memory.
   const script =
     `$ErrorActionPreference = 'SilentlyContinue'; ` +
-    `$p = Get-CimInstance Win32_Process -Filter "ProcessId=${pid}"; ` +
-    `if ($p) { "$($p.ProcessId) $($p.ParentProcessId) $($p.Name)" }`;
+    `Get-CimInstance Win32_Process | ForEach-Object { ` +
+    `"$($_.ProcessId) $($_.ParentProcessId) $($_.Name)" }`;
   const result = spawnSync(
     'powershell.exe',
     ['-NoProfile', '-NonInteractive', '-Command', script],
     { encoding: 'utf8' },
   );
-  if (result.status !== 0) return undefined;
-  const line = result.stdout.trim().split('\n')[0];
-  if (!line) return undefined;
-  const match = line.trim().match(/^(\d+)\s+(\d+)\s+(.*)$/);
-  if (!match) return undefined;
-  return {
-    pid: Number(match[1]),
-    ppid: Number(match[2]),
-    comm: (match[3] ?? '').trim(),
-  };
-}
-
-function readPsRow(pid: number): PsRow | undefined {
-  return process.platform === 'win32'
-    ? readPsRowWindows(pid)
-    : readPsRowPosix(pid);
+  const table = new Map<number, PsRow>();
+  if (result.status !== 0) return table;
+  for (const raw of result.stdout.split(/\r?\n/)) {
+    const match = raw.trim().match(/^(\d+)\s+(\d+)\s+(.*)$/);
+    if (!match) continue;
+    const pid = Number(match[1]);
+    table.set(pid, {
+      pid,
+      ppid: Number(match[2]),
+      comm: (match[3] ?? '').trim(),
+    });
+  }
+  return table;
 }
 
 /**
@@ -96,9 +95,12 @@ export function findAncestorPidByName(params: {
 }): number | undefined {
   const { startPid, targetNames } = params;
   const maxHops = params.maxHops ?? 12;
+  const winTable = process.platform === 'win32'
+    ? snapshotWindowsProcessTable()
+    : undefined;
   let cursor = startPid;
   for (let hop = 0; hop < maxHops; hop += 1) {
-    const row = readPsRow(cursor);
+    const row = winTable ? winTable.get(cursor) : readPosixPsRow(cursor);
     if (!row) return undefined;
     const lowerComm = row.comm.toLowerCase();
     if (targetNames.some((name) => lowerComm.includes(name.toLowerCase()))) {
@@ -124,9 +126,12 @@ export function walkAncestorPids(
   maxHops = 12,
 ): number[] {
   const out: number[] = [];
+  const winTable = process.platform === 'win32'
+    ? snapshotWindowsProcessTable()
+    : undefined;
   let cursor = startPid;
   for (let hop = 0; hop < maxHops; hop += 1) {
-    const row = readPsRow(cursor);
+    const row = winTable ? winTable.get(cursor) : readPosixPsRow(cursor);
     if (!row) return out;
     out.push(row.pid);
     if (row.ppid <= 1) return out;
