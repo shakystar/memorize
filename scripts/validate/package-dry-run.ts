@@ -3,6 +3,7 @@ import { spawnSync } from 'node:child_process';
 
 const packResult = spawnSync('npm', ['pack', '--dry-run', '--json'], {
   encoding: 'utf8',
+  shell: true,
 });
 
 if (packResult.status !== 0) {

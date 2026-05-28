@@ -8,6 +8,7 @@ function runScript(script: string, arg?: string) {
     ['exec', 'tsx', script, ...(arg ? [arg] : [])],
     {
       encoding: 'utf8',
+      shell: true,
     },
   );
 }

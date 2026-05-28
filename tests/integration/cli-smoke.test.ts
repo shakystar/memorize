@@ -5,6 +5,7 @@ describe('CLI smoke', () => {
   it('prints usage successfully and advertises the day-to-day commands', () => {
     const result = spawnSync('pnpm', ['exec', 'tsx', 'src/cli/index.ts'], {
       encoding: 'utf8',
+      shell: true,
     });
 
     expect(result.status).toBe(0);
