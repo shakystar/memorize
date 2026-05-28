@@ -53,6 +53,19 @@ describe('detectAgents', () => {
     expect(r.claude.present).toBe(true);
   });
 
+  it('splits a windows-shaped PATH on the `;` delimiter', () => {
+    const r = detectAgents(
+      deps({
+        isWindows: true,
+        pathDelimiter: ';',
+        pathValue: 'C:\\Program Files\\nodejs;C:\\tools\\bin',
+        exists: (p) => p.endsWith('codex.cmd') && p.includes('tools'),
+      }),
+    );
+    expect(r.codex).toEqual({ present: true, via: 'path' });
+    expect(r.claude.present).toBe(false);
+  });
+
   it('does not look for .cmd shims when not on windows', () => {
     const r = detectAgents(
       deps({ isWindows: false, pathValue: 'X', exists: (p) => p.endsWith('claude.cmd') }),
