@@ -10,6 +10,7 @@ export function renderScaffoldUsage(): string {
     '  memorize task handoff ...    Record a handoff to the next agent',
     '',
     'Setup (usually run by the AI assistant):',
+    '  memorize setup               Detect installed agents + wire global integration',
     '  memorize project setup       Bind cwd + import AGENTS.md / CLAUDE.md / rules',
     '  memorize install claude      Wire Memorize into .claude/settings.local.json',
     '  memorize install codex       Wire Memorize bootstrap into AGENTS.override.md',
