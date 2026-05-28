@@ -12,6 +12,7 @@
 
 # Claude Code local workflow settings
 /.claude/
+/CLAUDE.md
 
 # Logs and temp files
 *.log
@@ -42,3 +43,4 @@ __pycache__/
 
 # Local project link
 .memorize/
+gitPAT.txt
