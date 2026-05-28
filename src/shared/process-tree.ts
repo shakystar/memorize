@@ -25,7 +25,7 @@ interface PsRow {
   comm: string;
 }
 
-function readPsRow(pid: number): PsRow | undefined {
+function readPosixPsRow(pid: number): PsRow | undefined {
   // `comm` truncates to 16 chars on macOS/Linux but that's enough to
   // distinguish 'claude' / 'codex' from 'node' / 'sh'. Avoid `command`
   // (full argv) — it pulls in unbounded data and hits BSD vs GNU
@@ -47,6 +47,36 @@ function readPsRow(pid: number): PsRow | undefined {
   };
 }
 
+function snapshotWindowsProcessTable(): Map<number, PsRow> {
+  // Windows has no per-pid POSIX `ps`. Win32_Process via PowerShell is
+  // the only portable way to read ParentProcessId, but on GitHub Actions
+  // windows-latest each `powershell.exe` cold start runs ~500ms — twelve
+  // sequential spawns blow past vitest's 5s default. Pay one spawn to
+  // fetch the entire process table, then walk the chain in memory.
+  const script =
+    `$ErrorActionPreference = 'SilentlyContinue'; ` +
+    `Get-CimInstance Win32_Process | ForEach-Object { ` +
+    `"$($_.ProcessId) $($_.ParentProcessId) $($_.Name)" }`;
+  const result = spawnSync(
+    'powershell.exe',
+    ['-NoProfile', '-NonInteractive', '-Command', script],
+    { encoding: 'utf8' },
+  );
+  const table = new Map<number, PsRow>();
+  if (result.status !== 0) return table;
+  for (const raw of result.stdout.split(/\r?\n/)) {
+    const match = raw.trim().match(/^(\d+)\s+(\d+)\s+(.*)$/);
+    if (!match) continue;
+    const pid = Number(match[1]);
+    table.set(pid, {
+      pid,
+      ppid: Number(match[2]),
+      comm: (match[3] ?? '').trim(),
+    });
+  }
+  return table;
+}
+
 /**
  * Walks up the process tree from `startPid` looking for an ancestor
  * whose `comm` matches one of `targetNames`. Returns the matching pid,
@@ -65,9 +95,12 @@ export function findAncestorPidByName(params: {
 }): number | undefined {
   const { startPid, targetNames } = params;
   const maxHops = params.maxHops ?? 12;
+  const winTable = process.platform === 'win32'
+    ? snapshotWindowsProcessTable()
+    : undefined;
   let cursor = startPid;
   for (let hop = 0; hop < maxHops; hop += 1) {
-    const row = readPsRow(cursor);
+    const row = winTable ? winTable.get(cursor) : readPosixPsRow(cursor);
     if (!row) return undefined;
     const lowerComm = row.comm.toLowerCase();
     if (targetNames.some((name) => lowerComm.includes(name.toLowerCase()))) {
@@ -93,9 +126,12 @@ export function walkAncestorPids(
   maxHops = 12,
 ): number[] {
   const out: number[] = [];
+  const winTable = process.platform === 'win32'
+    ? snapshotWindowsProcessTable()
+    : undefined;
   let cursor = startPid;
   for (let hop = 0; hop < maxHops; hop += 1) {
-    const row = readPsRow(cursor);
+    const row = winTable ? winTable.get(cursor) : readPosixPsRow(cursor);
     if (!row) return out;
     out.push(row.pid);
     if (row.ppid <= 1) return out;

@@ -20,7 +20,9 @@ function runCli(args: string[]) {
     env: {
       ...process.env,
       MEMORIZE_ROOT: memorizeRoot,
+      // os.homedir() reads USERPROFILE on Windows, so override both.
       HOME: codexHome,
+      USERPROFILE: codexHome,
       // Pin the hook command form: npm-linked test environments have
       // memorize on PATH so detectHookCommandForm() would return
       // 'bare', which mismatches the literal-string assertions below.
@@ -365,6 +367,7 @@ describe('install integration', () => {
           ...process.env,
           MEMORIZE_ROOT: memorizeRoot,
           HOME: codexHome,
+          USERPROFILE: codexHome,
           MEMORIZE_HOOK_COMMAND_FORM: 'bare',
         },
       },
@@ -399,13 +402,13 @@ describe('install integration', () => {
       cwd: sandbox,
       encoding: 'utf8',
       env: { ...process.env, MEMORIZE_ROOT: memorizeRoot, HOME: codexHome,
-             MEMORIZE_HOOK_COMMAND_FORM: 'npx' },
+             USERPROFILE: codexHome, MEMORIZE_HOOK_COMMAND_FORM: 'npx' },
     });
     spawnSync('node', [tsxCliPath, cliEntryPath, 'install', 'claude'], {
       cwd: sandbox,
       encoding: 'utf8',
       env: { ...process.env, MEMORIZE_ROOT: memorizeRoot, HOME: codexHome,
-             MEMORIZE_HOOK_COMMAND_FORM: 'bare' },
+             USERPROFILE: codexHome, MEMORIZE_HOOK_COMMAND_FORM: 'bare' },
     });
 
     const settings = JSON.parse(
