@@ -124,7 +124,7 @@ const handleSessionStart: HookHandler = async (ctx) => {
   // exited but the pointer was never reaped" without changing the
   // session's status.
   const agentPid = process.ppid
-    ? findAncestorPidByName({
+    ? await findAncestorPidByName({
         startPid: process.ppid,
         targetNames: ['claude', 'codex'],
       })

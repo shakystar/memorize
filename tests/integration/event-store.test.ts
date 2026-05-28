@@ -32,7 +32,7 @@ describe('event store integration', () => {
   it('appends events and rebuilds projections from them', async () => {
     const project = createProject({
       title: 'Memorize',
-      rootPath: '/tmp/memorize',
+      rootPath: join(tmpdir(), 'memorize-test-event-store'),
       summary: 'Shared context system',
     });
     const task = createTask({
