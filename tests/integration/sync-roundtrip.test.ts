@@ -102,11 +102,15 @@ describe('sync roundtrip via file transport', () => {
     expect(firstPull.inserted).toBe(firstPull.total);
     expect(firstPull.inserted).toBeGreaterThan(0);
 
-    const idsB = (await readEvents(projectB.id)).map((e) => e.id);
-    expect(idsB.some((id) => id.startsWith('evt_'))).toBe(true);
+    const domainEvents = (e: Awaited<ReturnType<typeof readEvents>>) =>
+      e.filter((ev) => ev.type !== 'sync.state.updated');
+    const countAfterFirst = domainEvents(await readEvents(projectB.id)).length;
+    expect(countAfterFirst).toBeGreaterThan(0);
 
     const secondPull = await pullProject(projectB.id, transport);
     expect(secondPull.inserted).toBe(0);
+    // Idempotency at the store level: re-pull did not grow the domain event log.
+    expect(domainEvents(await readEvents(projectB.id)).length).toBe(countAfterFirst);
   });
 
   it('exposes push/pull/bind through the cli with --remote-path', { timeout: 30_000 }, async () => {
