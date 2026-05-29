@@ -26,7 +26,7 @@ export async function ensureProjectDirectories(projectId: string): Promise<void>
   // Events and the entity projections (tasks, workstreams, rules, …) now live
   // in SQLite, so their old JSON dirs are no longer created. Only the dirs
   // still written to disk remain: `topics/` (topic `.md` files) and `sync/`
-  // (remote/inbound staging).
+  // (remote sync state).
   await Promise.all(
     [
       projectRoot,

@@ -65,7 +65,7 @@ export interface DoctorReport {
 
 // Post-SQLite: the event log AND the entity projections (tasks, workstreams,
 // rules, …) now live in memorize.db, so their old JSON dirs are no longer a
-// health signal. `sync` still holds remote/inbound staging JSON on disk.
+// health signal. `sync` still holds the remote sync-state JSON on disk.
 const REQUIRED_DIRS = ['sync'] as const;
 
 function aggregateStatus(checks: DoctorCheck[]): DoctorStatus {
