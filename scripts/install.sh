@@ -25,4 +25,9 @@ fi
 echo "Installing @shakystar/memorize globally..."
 npm install -g @shakystar/memorize
 
-memorize setup
+if command -v memorize >/dev/null 2>&1; then
+  memorize setup
+else
+  echo "memorize installed, but its command is not on PATH in this shell yet." >&2
+  echo "Open a new terminal and run:  memorize setup" >&2
+fi

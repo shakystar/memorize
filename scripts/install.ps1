@@ -24,4 +24,9 @@ if ($nodeMajor -lt 22) {
 Write-Host 'Installing @shakystar/memorize globally...'
 npm install -g @shakystar/memorize
 
-memorize setup
+if (Get-Command memorize -ErrorAction SilentlyContinue) {
+  memorize setup
+} else {
+  Write-Warning 'memorize installed, but its command is not on PATH in this shell yet.'
+  Write-Warning 'Open a new terminal and run:  memorize setup'
+}
