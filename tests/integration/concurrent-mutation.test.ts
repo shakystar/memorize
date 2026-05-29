@@ -188,12 +188,11 @@ describe('concurrent mutation safety', () => {
         ),
       ]);
 
-      // Read events and check no corruption
-      const { events, corruptLines } = await (
+      // Read events and check integrity
+      const { events } = await (
         await import('../../src/storage/event-store.js')
       ).readEventsWithIntegrity(project.id);
 
-      expect(corruptLines).toEqual([]);
       // 1 project.created + 5 initial task.created + 5 concurrent task.created
       // + 5 task.updated + N projection rebuilds (not events)
       const taskEvents = events.filter(

@@ -151,7 +151,6 @@ function rowToEvent(row: EventRow): DomainEvent {
 
 export interface EventIntegrity {
   events: DomainEvent[];
-  corruptLines: { file: string; lineNumber: number; raw: string }[];
 }
 
 export async function readEventsWithIntegrity(
@@ -159,12 +158,12 @@ export async function readEventsWithIntegrity(
 ): Promise<EventIntegrity> {
   // `seq` (autoincrement primary key) is the deterministic replay order,
   // replacing the old filename + line ordering. SQLite stores whole rows,
-  // so there is no partial-line corruption to report — corruptLines is
-  // always empty. The EventIntegrity shape is kept for callers (doctor).
+  // so there is no partial-line corruption to report. Whole-DB corruption is
+  // covered by `PRAGMA integrity_check` in repair-service's doctor.
   const rows = getDb(projectId)
     .prepare('SELECT * FROM events ORDER BY seq')
     .all() as EventRow[];
-  return { events: rows.map(rowToEvent), corruptLines: [] };
+  return { events: rows.map(rowToEvent) };
 }
 
 export async function readEvents(projectId: string): Promise<DomainEvent[]> {
