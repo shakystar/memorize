@@ -73,6 +73,42 @@ describe('sync roundtrip via file transport', () => {
     expect(inbound.some((event) => event.type === 'task.created')).toBe(true);
   });
 
+  it('re-pull after apply inserts nothing (idempotent watermark)', async () => {
+    const remotePath = join(sandbox, 'remote');
+    const homeA = join(sandbox, 'home-a');
+    const homeB = join(sandbox, 'home-b');
+
+    process.env.MEMORIZE_ROOT = homeA;
+    const projectA = await createProject({
+      title: 'Project A',
+      rootPath: join(sandbox, 'a'),
+    });
+    await createTask({
+      projectId: projectA.id,
+      title: 'Task from A',
+      actor: 'user',
+    });
+    const transport = createFileSyncTransport(remotePath);
+    await pushProject(projectA.id, transport);
+
+    process.env.MEMORIZE_ROOT = homeB;
+    const projectB = await createProject({
+      title: 'Project B',
+      rootPath: join(sandbox, 'b'),
+    });
+    await updateSyncState(projectB.id, { remoteProjectId: projectA.id });
+
+    const firstPull = await pullProject(projectB.id, transport);
+    expect(firstPull.inserted).toBe(firstPull.total);
+    expect(firstPull.inserted).toBeGreaterThan(0);
+
+    const idsB = (await readEvents(projectB.id)).map((e) => e.id);
+    expect(idsB.some((id) => id.startsWith('evt_'))).toBe(true);
+
+    const secondPull = await pullProject(projectB.id, transport);
+    expect(secondPull.inserted).toBe(0);
+  });
+
   it('exposes push/pull/bind through the cli with --remote-path', { timeout: 30_000 }, async () => {
     const sandboxA = join(sandbox, 'a-cli');
     const sandboxB = join(sandbox, 'b-cli');
