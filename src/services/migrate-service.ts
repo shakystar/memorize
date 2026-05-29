@@ -223,3 +223,37 @@ export async function migrateFromCwd(cwd: string): Promise<MigrateResult> {
   const projectId = await requireBoundProjectId(cwd);
   return migrateProjectFromNdjson(projectId);
 }
+
+export interface CleanupBackupResult {
+  status: 'removed' | 'not-migrated' | 'no-backup';
+}
+
+/**
+ * Explicit, opt-in removal of the `events.bak/` directory that
+ * `migrateProjectFromNdjson` leaves behind as a recovery net. Migration itself
+ * never deletes it — the backup must outlive the migration. This helper only
+ * removes it once the `migrated_from_ndjson` marker is confirmed present, so it
+ * can never delete the sole copy of an un-migrated NDJSON log.
+ */
+export async function cleanupEventsBackup(
+  projectId: string,
+): Promise<CleanupBackupResult> {
+  if (!isMigrated(projectId)) {
+    return { status: 'not-migrated' };
+  }
+  const backupDir = path.join(getProjectRoot(projectId), 'events.bak');
+  try {
+    await fs.rm(backupDir, { recursive: true });
+  } catch (error) {
+    if (isEnoent(error)) return { status: 'no-backup' };
+    throw error;
+  }
+  return { status: 'removed' };
+}
+
+export async function cleanupEventsBackupFromCwd(
+  cwd: string,
+): Promise<CleanupBackupResult> {
+  const projectId = await requireBoundProjectId(cwd);
+  return cleanupEventsBackup(projectId);
+}

@@ -1,10 +1,30 @@
-import { migrateFromCwd } from '../../services/migrate-service.js';
+import {
+  cleanupEventsBackupFromCwd,
+  migrateFromCwd,
+} from '../../services/migrate-service.js';
 import type { CliContext } from '../context.js';
 
 export async function runMigrateCommand(
-  _args: string[],
+  args: string[],
   ctx: CliContext,
 ): Promise<void> {
+  if (args[0] === 'cleanup') {
+    const cleanup = await cleanupEventsBackupFromCwd(ctx.cwd);
+    switch (cleanup.status) {
+      case 'removed':
+        console.log('Removed events.bak/ backup directory.');
+        return;
+      case 'no-backup':
+        console.log('No events.bak/ backup directory to remove.');
+        return;
+      case 'not-migrated':
+        console.log(
+          'Project not yet migrated from NDJSON; keeping events.bak/ (if any) as a safety net.',
+        );
+        return;
+    }
+  }
+
   const result = await migrateFromCwd(ctx.cwd);
   switch (result.status) {
     case 'already-migrated':
