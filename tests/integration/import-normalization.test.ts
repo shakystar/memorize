@@ -4,11 +4,11 @@ import { join } from 'node:path';
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
+import { closeAll } from '../../src/storage/db.js';
 import { setupProject } from '../../src/services/setup-service.js';
 import { getBoundProjectId } from '../../src/services/project-service.js';
 import { loadStartContext } from '../../src/services/context-service.js';
-import { getMemoryIndexFile } from '../../src/storage/path-resolver.js';
-import { readJson } from '../../src/storage/fs-utils.js';
+import { getMemoryIndex } from '../../src/services/projection-store.js';
 
 let sandbox: string;
 let memorizeRoot: string;
@@ -36,6 +36,7 @@ beforeEach(async () => {
 });
 
 afterEach(async () => {
+  closeAll();
   await rm(sandbox, { recursive: true, force: true });
   delete process.env.MEMORIZE_ROOT;
 });
@@ -46,9 +47,7 @@ describe('import normalization', () => {
     const projectId = await getBoundProjectId(sandbox);
     if (!projectId) throw new Error('Expected project id after setup.');
 
-    const memoryIndex = await readJson<{
-      mustReadTopics: Array<{ path: string }>;
-    }>(getMemoryIndexFile(projectId));
+    const memoryIndex = getMemoryIndex(projectId);
     const startup = await loadStartContext({ projectId });
 
     expect(memoryIndex?.mustReadTopics.length).toBeGreaterThan(0);

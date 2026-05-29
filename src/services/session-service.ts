@@ -1,5 +1,3 @@
-import path from 'node:path';
-
 import {
   ACTOR_SYSTEM,
   CURRENT_SCHEMA_VERSION,
@@ -22,10 +20,12 @@ import {
   writeCwdPointer,
 } from '../storage/cwd-session-store.js';
 import { appendEvent } from '../storage/event-store.js';
-import { readJson, readJsonDir } from '../storage/fs-utils.js';
-import { getSessionsDir } from '../storage/path-resolver.js';
 import { resolveSessionContext } from './session-context.js';
-import { rebuildProjectProjection } from './projection-store.js';
+import {
+  getSession,
+  listSessions,
+  rebuildProjectProjection,
+} from './projection-store.js';
 
 // Re-exports so existing callers that imported these from session-service
 // continue to work. New code should prefer importing from
@@ -117,8 +117,9 @@ export async function reapStaleSessions(
       let lastActivityMs = startedAtMs;
       if (pointer.projectId) {
         try {
-          const sessionFromProjection = await readJson<Session>(
-            path.join(getSessionsDir(pointer.projectId), `${pointer.sessionId}.json`),
+          const sessionFromProjection = getSession(
+            pointer.projectId,
+            pointer.sessionId,
           );
           if (sessionFromProjection?.lastSeenAt) {
             lastActivityMs = Date.parse(sessionFromProjection.lastSeenAt);
@@ -469,7 +470,7 @@ export async function getCurrentSessionActor(
 }
 
 export async function readActiveSessions(projectId: string): Promise<Session[]> {
-  const sessions = await readJsonDir<Session>(getSessionsDir(projectId));
+  const sessions = listSessions(projectId);
   // The picker view: status is `active` OR `paused` AND we've seen a
   // heartbeat within the staleness threshold. `paused` counts as a
   // live claim because the session is intentionally resumable —

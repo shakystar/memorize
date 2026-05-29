@@ -1,12 +1,14 @@
-import { mkdtemp, mkdir, readdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
+import { closeAll } from '../../src/storage/db.js';
 import { setupProject } from '../../src/services/setup-service.js';
 import { getBoundProjectId } from '../../src/services/project-service.js';
 import { loadStartContext } from '../../src/services/context-service.js';
+import { listOpenConflicts } from '../../src/services/projection-store.js';
 
 let sandbox: string;
 let memorizeRoot: string;
@@ -34,6 +36,7 @@ beforeEach(async () => {
 });
 
 afterEach(async () => {
+  closeAll();
   await rm(sandbox, { recursive: true, force: true });
   delete process.env.MEMORIZE_ROOT;
 });
@@ -47,16 +50,8 @@ describe('semantic conflict detection', () => {
     const startup = await loadStartContext({ projectId });
     expect(startup.openConflicts.length).toBeGreaterThan(0);
 
-    const projectsDir = join(memorizeRoot, 'projects');
-    const projectFolders = await readdir(projectsDir);
-    const conflictsDir = join(projectsDir, projectFolders[0]!, 'conflicts');
-    const conflictFiles = await readdir(conflictsDir);
-    expect(conflictFiles.length).toBeGreaterThan(0);
-
-    const conflictJson = await readFile(
-      join(conflictsDir, conflictFiles[0]!),
-      'utf8',
-    );
-    expect(conflictJson).toContain('commit_style');
+    const conflicts = listOpenConflicts(projectId);
+    expect(conflicts.length).toBeGreaterThan(0);
+    expect(JSON.stringify(conflicts[0])).toContain('commit_style');
   });
 });

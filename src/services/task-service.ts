@@ -1,15 +1,13 @@
-import path from 'node:path';
-
 import { ACTOR_SYSTEM } from '../domain/common.js';
 import { appendEvent } from '../storage/event-store.js';
-import { readJson, readJsonDir } from '../storage/fs-utils.js';
 import {
-  getCheckpointFile,
-  getHandoffFile,
-  getProjectRoot,
-  getTaskFile,
-} from '../storage/path-resolver.js';
-import { rebuildProjectProjection } from './projection-store.js';
+  getCheckpoint,
+  getHandoff,
+  getTask,
+  listTasks as listTasksFromStore,
+  rebuildProjectProjection,
+  type ListTasksFilters,
+} from './projection-store.js';
 import type {
   CreateCheckpointInput,
   CreateHandoffInput,
@@ -182,39 +180,28 @@ export async function readTask(
   projectId: string,
   taskId: string,
 ): Promise<Task | undefined> {
-  return readJson<Task>(getTaskFile(projectId, taskId));
+  return getTask(projectId, taskId);
 }
 
-export interface ListTasksFilters {
-  status?: Task['status'];
-  workstreamId?: string;
-}
+export type { ListTasksFilters } from './projection-store.js';
 
 export async function listTasks(
   projectId: string,
   filters: ListTasksFilters = {},
 ): Promise<Task[]> {
-  const tasksDir = path.join(getProjectRoot(projectId), 'tasks');
-  const tasks = await readJsonDir<Task>(tasksDir);
-  return tasks
-    .filter(
-      (task) =>
-        (!filters.status || task.status === filters.status) &&
-        (!filters.workstreamId || task.workstreamId === filters.workstreamId),
-    )
-    .sort((left, right) => (left.createdAt < right.createdAt ? -1 : 1));
+  return listTasksFromStore(projectId, filters);
 }
 
 export async function readHandoff(
   projectId: string,
   handoffId: string,
 ): Promise<Handoff | undefined> {
-  return readJson<Handoff>(getHandoffFile(projectId, handoffId));
+  return getHandoff(projectId, handoffId);
 }
 
 export async function readCheckpoint(
   projectId: string,
   checkpointId: string,
 ): Promise<Checkpoint | undefined> {
-  return readJson<Checkpoint>(getCheckpointFile(projectId, checkpointId));
+  return getCheckpoint(projectId, checkpointId);
 }

@@ -7,6 +7,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { renderClaudeStartupContext } from '../../src/adapters/claude/renderer.js';
 import { renderCodexStartupContext } from '../../src/adapters/codex/renderer.js';
 import { loadStartContext } from '../../src/services/context-service.js';
+import { closeAll } from '../../src/storage/db.js';
 import { createProject } from '../../src/services/project-service.js';
 import {
   createCheckpoint,
@@ -50,6 +51,7 @@ beforeEach(async () => {
 });
 
 afterEach(async () => {
+  closeAll();
   delete process.env.MEMORIZE_ROOT;
   await rm(sandbox, { recursive: true, force: true });
 });

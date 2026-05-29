@@ -1,9 +1,12 @@
-import { mkdtemp, rm, readFile } from 'node:fs/promises';
+import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+
+import { getCheckpoint } from '../../src/services/projection-store.js';
+import { closeAll } from '../../src/storage/db.js';
 
 const repoRoot = process.cwd();
 const tsxCliPath = join(repoRoot, 'node_modules', 'tsx', 'dist', 'cli.mjs');
@@ -46,23 +49,27 @@ async function readCheckpointSession(
   projectId: string,
   checkpointId: string,
 ): Promise<string | undefined> {
-  const filePath = join(
-    memorizeRoot,
-    'projects',
-    projectId,
-    'checkpoints',
-    `${checkpointId}.json`,
-  );
-  const raw = await readFile(filePath, 'utf8');
-  return (JSON.parse(raw) as { sessionId?: string }).sessionId;
+  // The checkpoint was written to the SQLite projection tables by the CLI
+  // subprocess; close any cached test-process connection first so we re-open
+  // and observe the subprocess's committed WAL writes.
+  closeAll();
+  const checkpoint = getCheckpoint(projectId, checkpointId) as
+    | { sessionId?: string }
+    | undefined;
+  return checkpoint?.sessionId;
 }
 
 beforeEach(async () => {
   sandbox = await mkdtemp(join(tmpdir(), 'memorize-session-'));
   memorizeRoot = join(sandbox, '.memorize-home');
+  // The test process reads the projection tables directly (getCheckpoint),
+  // so it needs the same MEMORIZE_ROOT the CLI subprocess writes under.
+  process.env.MEMORIZE_ROOT = memorizeRoot;
 });
 
 afterEach(async () => {
+  closeAll();
+  delete process.env.MEMORIZE_ROOT;
   await rm(sandbox, { recursive: true, force: true });
 });
 

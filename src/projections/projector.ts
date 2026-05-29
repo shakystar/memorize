@@ -65,6 +65,7 @@ export function reduceProjectState(events: DomainEvent[]): ProjectState {
           state.tasks[event.scopeId] = applyTaskUpdate(
             existingTask,
             event.payload as Partial<Task>,
+            event.createdAt,
           );
         }
         break;
@@ -180,11 +181,17 @@ export function reduceProjectState(events: DomainEvent[]): ProjectState {
   return state;
 }
 
-function applyTaskUpdate(task: Task, patch: Partial<Task>): Task {
+function applyTaskUpdate(
+  task: Task,
+  patch: Partial<Task>,
+  eventCreatedAt: string,
+): Task {
   return {
     ...task,
     ...patch,
-    updatedAt: patch.updatedAt ?? nowIso(),
+    // Fall back to the triggering event's createdAt (NOT wall-clock
+    // nowIso()) so replaying the same event log is deterministic.
+    updatedAt: patch.updatedAt ?? eventCreatedAt,
   };
 }
 

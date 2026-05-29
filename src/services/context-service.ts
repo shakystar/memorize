@@ -1,20 +1,15 @@
-import path from 'node:path';
-
 import type {
-  Conflict,
   OtherActiveTask,
   Rule,
   StartupContextPayload,
-  Workstream,
 } from '../domain/entities.js';
-import { readJson, readJsonDir } from '../storage/fs-utils.js';
-import {
-  getMemoryIndexFile,
-  getProjectRoot,
-  getRuleFile,
-  getWorkstreamFile,
-} from '../storage/path-resolver.js';
 import { freshnessLabel } from './freshness.js';
+import {
+  getMemoryIndex,
+  getRule,
+  getWorkstream,
+  listOpenConflicts,
+} from './projection-store.js';
 import {
   readDefaultWorkstreamForProject,
   readProject,
@@ -22,20 +17,10 @@ import {
 import { readActiveSessions } from './session-service.js';
 import { readCheckpoint, readHandoff, readTask } from './task-service.js';
 
-async function readOpenConflicts(projectId: string): Promise<Conflict[]> {
-  const conflictsDir = path.join(getProjectRoot(projectId), 'conflicts');
-  const conflicts = await readJsonDir<Conflict>(conflictsDir);
-  return conflicts.filter((conflict) => conflict.status !== 'resolved');
-}
-
-async function readProjectRules(
-  projectId: string,
-  ruleIds: string[],
-): Promise<Rule[]> {
-  const rules = await Promise.all(
-    ruleIds.map((ruleId) => readJson<Rule>(getRuleFile(projectId, ruleId))),
-  );
-  return rules.filter((rule): rule is Rule => Boolean(rule));
+function readProjectRules(projectId: string, ruleIds: string[]): Rule[] {
+  return ruleIds
+    .map((ruleId) => getRule(projectId, ruleId))
+    .filter((rule): rule is Rule => Boolean(rule));
 }
 
 async function buildOtherActiveTasks(params: {
@@ -83,15 +68,10 @@ export async function loadStartContext(params: {
     throw new Error(`Project ${params.projectId} not found`);
   }
 
-  const memoryIndex = await readJson<{
-    shortSummary: string;
-    mustReadTopics: Array<{ id: string; title: string; path: string }>;
-  }>(getMemoryIndexFile(params.projectId));
+  const memoryIndex = getMemoryIndex(params.projectId);
 
   const workstream = params.workstreamId
-    ? await readJson<Workstream>(
-        getWorkstreamFile(params.projectId, params.workstreamId),
-      )
+    ? getWorkstream(params.projectId, params.workstreamId)
     : await readDefaultWorkstreamForProject(project);
 
   let task = params.taskId
@@ -145,7 +125,7 @@ export async function loadStartContext(params: {
     task?.latestCheckpointId
       ? await readCheckpoint(params.projectId, task.latestCheckpointId)
       : undefined;
-  const rules = await readProjectRules(params.projectId, project.ruleIds);
+  const rules = readProjectRules(params.projectId, project.ruleIds);
 
   const otherActiveTasks = await buildOtherActiveTasks({
     projectId: params.projectId,
@@ -163,7 +143,7 @@ export async function loadStartContext(params: {
     ...(task ? { task } : {}),
     ...(latestHandoff ? { latestHandoff } : {}),
     ...(latestCheckpoint ? { latestCheckpoint } : {}),
-    openConflicts: await readOpenConflicts(params.projectId),
+    openConflicts: listOpenConflicts(params.projectId),
     mustReadTopics: memoryIndex?.mustReadTopics ?? [],
     ...(otherActiveTasks.length > 0 ? { otherActiveTasks } : {}),
   };

@@ -9,6 +9,7 @@ import { createProject } from '../../src/services/project-service.js';
 import { createTask, readHandoff, readTask } from '../../src/services/task-service.js';
 import { loadStartContext } from '../../src/services/context-service.js';
 import { SESSION_ENV_VAR, startSession } from '../../src/services/session-service.js';
+import { closeAll } from '../../src/storage/db.js';
 import { readJson } from '../../src/storage/fs-utils.js';
 import { getSyncFile } from '../../src/storage/path-resolver.js';
 import type { ProjectSyncState } from '../../src/domain/entities.js';
@@ -40,6 +41,7 @@ beforeEach(async () => {
 });
 
 afterEach(async () => {
+  closeAll();
   await rm(sandbox, { recursive: true, force: true });
 });
 

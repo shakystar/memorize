@@ -1,8 +1,11 @@
 import { appendEvent, ensureProjectDirectories } from '../storage/event-store.js';
 import { bindProject, resolveProjectIdForPath } from '../storage/bindings-store.js';
-import { getProjectFile, getWorkstreamFile } from '../storage/path-resolver.js';
 import { readJson, writeJson } from '../storage/fs-utils.js';
-import { rebuildProjectProjection } from './projection-store.js';
+import {
+  getProjectProjection,
+  getWorkstream,
+  rebuildProjectProjection,
+} from './projection-store.js';
 import { ACTOR_SYSTEM } from '../domain/common.js';
 import type { CreateProjectInput } from '../domain/commands.js';
 import { createProject as createProjectEntity, createWorkstream } from '../domain/entities.js';
@@ -75,7 +78,7 @@ export async function requireBoundProjectId(rootPath: string): Promise<string> {
 }
 
 export async function readProject(projectId: string): Promise<Project | undefined> {
-  return readJson<Project>(getProjectFile(projectId));
+  return getProjectProjection(projectId);
 }
 
 export async function readDefaultWorkstreamForProject(
@@ -85,7 +88,7 @@ export async function readDefaultWorkstreamForProject(
   if (!workstreamId) {
     return undefined;
   }
-  return readJson<Workstream>(getWorkstreamFile(project.id, workstreamId));
+  return getWorkstream(project.id, workstreamId);
 }
 
 export async function readDefaultWorkstream(
