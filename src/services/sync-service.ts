@@ -1,7 +1,4 @@
-import fs from 'node:fs/promises';
-
 import { ACTOR_SYSTEM, nowIso } from '../domain/common.js';
-import type { DomainEvent } from '../domain/events.js';
 import type { ProjectSyncState } from '../domain/entities.js';
 import type {
   SyncPullResponse,
@@ -16,8 +13,8 @@ import {
   insertExternalEvents,
   readEventsSince,
 } from '../storage/event-store.js';
-import { appendLine, isEnoent, readJson, readNdjson, withFileLock, writeJson } from '../storage/fs-utils.js';
-import { getSyncFile, getSyncInboundFile } from '../storage/path-resolver.js';
+import { readJson, writeJson } from '../storage/fs-utils.js';
+import { getSyncFile } from '../storage/path-resolver.js';
 import { rebuildProjectProjection } from './projection-store.js';
 
 async function readStateOrThrow(projectId: string): Promise<ProjectSyncState> {
@@ -79,45 +76,6 @@ export async function markPushed(
 ): Promise<ProjectSyncState> {
   return updateSyncState(projectId, {
     lastPushedEventId: lastAcceptedEventId,
-    lastSyncAt: nowIso(),
-  });
-}
-
-export async function enqueueInbound(
-  projectId: string,
-  events: DomainEvent[],
-): Promise<void> {
-  const filePath = getSyncInboundFile(projectId);
-  await withFileLock(filePath, async () => {
-    for (const event of events) {
-      await appendLine(filePath, JSON.stringify(event));
-    }
-  });
-}
-
-export async function drainInbound(
-  projectId: string,
-): Promise<DomainEvent[]> {
-  return readNdjson<DomainEvent>(getSyncInboundFile(projectId), {
-    // Skip corrupt lines — may result from interrupted writes
-    onCorrupt: () => {},
-  });
-}
-
-export async function markPulled(
-  projectId: string,
-  lastRemoteEventId: string,
-): Promise<ProjectSyncState> {
-  const filePath = getSyncInboundFile(projectId);
-  try {
-    await fs.writeFile(filePath, '', 'utf8');
-  } catch (error) {
-    if (!isEnoent(error)) {
-      throw error;
-    }
-  }
-  return updateSyncState(projectId, {
-    lastPulledEventId: lastRemoteEventId,
     lastSyncAt: nowIso(),
   });
 }
