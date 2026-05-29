@@ -32,7 +32,7 @@ interface WorkerResult {
 function runWorker(count: number): Promise<WorkerResult> {
   return new Promise((resolve) => {
     const child = spawn(
-      'node',
+      process.execPath,
       [tsxCliPath, workerPath, PROJECT_ID, String(count)],
       {
         cwd: sandbox,
