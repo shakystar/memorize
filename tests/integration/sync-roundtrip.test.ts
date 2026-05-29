@@ -10,11 +10,11 @@ import { closeAll } from '../../src/storage/db.js';
 import { createProject } from '../../src/services/project-service.js';
 import { createTask } from '../../src/services/task-service.js';
 import {
-  drainInbound,
   pullProject,
   pushProject,
   updateSyncState,
 } from '../../src/services/sync-service.js';
+import { readEvents } from '../../src/storage/event-store.js';
 
 const repoRoot = process.cwd();
 const tsxCliPath = join(repoRoot, 'node_modules', 'tsx', 'dist', 'cli.mjs');
@@ -64,11 +64,12 @@ describe('sync roundtrip via file transport', () => {
     });
     await updateSyncState(projectB.id, { remoteProjectId: projectA.id });
 
-    const pullResponse = await pullProject(projectB.id, transport);
-    expect(pullResponse.events.length).toBeGreaterThan(0);
-    expect(pullResponse.lastRemoteEventId).toBe(pushResponse.lastAcceptedEventId);
+    const pullResult = await pullProject(projectB.id, transport);
+    expect(pullResult.total).toBeGreaterThan(0);
+    expect(pullResult.inserted).toBe(pullResult.total);
+    expect(pullResult.lastRemoteEventId).toBe(pushResponse.lastAcceptedEventId);
 
-    const inbound = await drainInbound(projectB.id);
+    const inbound = await readEvents(projectB.id);
     expect(inbound.some((event) => event.type === 'task.created')).toBe(true);
   });
 

@@ -96,9 +96,10 @@ export async function runProjectCommand(
         );
       }
       if (flags.boolean.pull) {
-        const response = await pullProject(projectId, transport);
+        const result = await pullProject(projectId, transport);
+        const dupes = result.total - result.inserted;
         console.log(
-          `Pulled ${response.events.length} events. lastRemoteEventId=${response.lastRemoteEventId ?? 'none'}`,
+          `Pulled ${result.total} events (${result.inserted} new, ${dupes} duplicates skipped). lastRemoteEventId=${result.lastRemoteEventId ?? 'none'}`,
         );
       }
       return;

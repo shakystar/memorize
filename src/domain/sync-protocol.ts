@@ -27,7 +27,14 @@ export interface SyncPullResponse {
 
 export interface SyncQueueSnapshot {
   outboundPendingCount: number;
-  inboundPendingCount: number;
   lastPushedEventId?: string;
   lastPulledEventId?: string;
+}
+
+export interface SyncPullResult {
+  /** Number of events received from the remote in this pull. */
+  total: number;
+  /** Number newly inserted into the local event log (dupes excluded). */
+  inserted: number;
+  lastRemoteEventId?: string;
 }
