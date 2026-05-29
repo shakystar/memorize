@@ -7,8 +7,8 @@
 # OMC runtime/state
 .omc/
 
-# Internal design and planning docs (kept local only)
-/docs/
+# Local-only agent memory / planning notes (not shipped)
+/.notes/
 
 # Claude Code local workflow settings
 /.claude/

@@ -4,8 +4,8 @@ Reference for AI coding assistants (Claude Code, Codex, and similar
 agents) consuming `@shakystar/memorize`. Humans do not need to read
 this file end-to-end — the README is the human entry point.
 
-This file assumes you already read the **For AI assistants** section of
-the README and ran the setup steps. It exists so you can look up the
+This file assumes you already ran the setup steps in
+[docs/AI_SETUP.md](./docs/AI_SETUP.md). It exists so you can look up the
 full behaviour, flags, idempotency guarantees, and failure modes of
 every command without guessing.
 
