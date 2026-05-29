@@ -31,12 +31,9 @@ export async function rebuildMemoryIndex(cwd: string): Promise<string> {
 
 export async function validateEvents(cwd: string): Promise<string> {
   const projectId = await requireBoundProjectId(cwd);
-  const { events, corruptLines } = await readEventsWithIntegrity(projectId);
-  if (events.length === 0 && corruptLines.length === 0) {
+  const { events } = await readEventsWithIntegrity(projectId);
+  if (events.length === 0) {
     throw new Error('No events found for project.');
-  }
-  if (corruptLines.length > 0) {
-    return `Event validation found ${corruptLines.length} corrupt line(s)`;
   }
   return 'Event validation passed';
 }

@@ -9,7 +9,10 @@ import type { DomainEvent } from '../../src/domain/events.js';
 import { reduceProjectState } from '../../src/projections/projector.js';
 import { closeAll, getDb } from '../../src/storage/db.js';
 import { readEvents } from '../../src/storage/event-store.js';
-import { migrateProjectFromNdjson } from '../../src/services/migrate-service.js';
+import {
+  cleanupEventsBackup,
+  migrateProjectFromNdjson,
+} from '../../src/services/migrate-service.js';
 import { exportEventsToNdjson } from '../../src/services/export-service.js';
 
 const projectId = 'proj_mig_test01';
@@ -164,6 +167,41 @@ describe('migrate (NDJSON → SQLite)', () => {
 
     const events = await readEvents(projectId);
     expect(events.map((e) => e.id)).toEqual(['evt_a', 'evt_b', 'evt_c']);
+  });
+});
+
+describe('cleanupEventsBackup', () => {
+  it('removes events.bak only after migration, and is a no-op otherwise', async () => {
+    await seedLegacyNdjson(sampleEvents);
+    await migrateProjectFromNdjson(projectId);
+
+    const projectRoot = join(sandbox, 'projects', projectId);
+    // Backup exists post-migration.
+    expect((await readdir(join(projectRoot, 'events.bak'))).length).toBe(2);
+
+    const removed = await cleanupEventsBackup(projectId);
+    expect(removed.status).toBe('removed');
+    await expect(readdir(join(projectRoot, 'events.bak'))).rejects.toThrow();
+
+    // A second run is a no-op (backup already gone).
+    const again = await cleanupEventsBackup(projectId);
+    expect(again.status).toBe('no-backup');
+  });
+
+  it('refuses to delete the backup when the project is not yet migrated', async () => {
+    // Stand up the events.bak dir WITHOUT a migrated marker (simulates a
+    // half-state). cleanup must leave it untouched as the recovery net.
+    const projectRoot = join(sandbox, 'projects', projectId);
+    await mkdir(join(projectRoot, 'events.bak'), { recursive: true });
+    await writeFile(
+      join(projectRoot, 'events.bak', '2026-01-01.ndjson'),
+      '{}\n',
+      'utf8',
+    );
+
+    const result = await cleanupEventsBackup(projectId);
+    expect(result.status).toBe('not-migrated');
+    expect((await readdir(join(projectRoot, 'events.bak'))).length).toBe(1);
   });
 });
 

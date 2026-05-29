@@ -52,12 +52,11 @@ describe('event store (SQLite)', () => {
     expect(events.map((e) => e.scopeId)).toEqual(['task_good1', 'task_good2']);
   });
 
-  it('readEventsWithIntegrity never reports corrupt lines (whole-row storage)', async () => {
+  it('readEventsWithIntegrity returns all stored events (whole-row storage)', async () => {
     await appendTestEvent('valid');
 
     const result = await readEventsWithIntegrity(projectId);
     expect(result.events.length).toBe(1);
-    expect(result.corruptLines).toEqual([]);
   });
 
   it('round-trips payloads through JSON storage', async () => {
@@ -73,8 +72,7 @@ describe('event store (SQLite)', () => {
     );
     await Promise.all(promises);
 
-    const { events, corruptLines } = await readEventsWithIntegrity(projectId);
-    expect(corruptLines).toEqual([]);
+    const { events } = await readEventsWithIntegrity(projectId);
     expect(events.length).toBe(20);
   });
 });

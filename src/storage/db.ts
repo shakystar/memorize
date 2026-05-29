@@ -119,25 +119,93 @@ const MIGRATIONS: ReadonlyArray<(db: Database.Database) => void> = [
       );
     `);
   },
+  // v5 — correct events.schema_version column type from INTEGER to TEXT. The
+  // stored value is the semver STRING `CURRENT_SCHEMA_VERSION` (e.g. '0.1.0');
+  // INTEGER affinity stored it as text losslessly today, but a future numeric
+  // comparison/sort would mis-order it. SQLite can't ALTER a column type, so
+  // rebuild the table: copy every row in seq order into an identically-shaped
+  // table with `schema_version TEXT`, swap, then recreate the two indexes.
+  (db) => {
+    db.exec(`
+      CREATE TABLE events_new (
+        seq            INTEGER PRIMARY KEY,
+        id             TEXT NOT NULL UNIQUE,
+        schema_version TEXT NOT NULL,
+        created_at     TEXT NOT NULL,
+        updated_at     TEXT NOT NULL,
+        type           TEXT NOT NULL,
+        project_id     TEXT NOT NULL,
+        scope_type     TEXT NOT NULL,
+        scope_id       TEXT NOT NULL,
+        actor          TEXT NOT NULL,
+        payload        TEXT NOT NULL
+      );
+      INSERT INTO events_new
+        (seq, id, schema_version, created_at, updated_at, type,
+         project_id, scope_type, scope_id, actor, payload)
+      SELECT
+        seq, id, schema_version, created_at, updated_at, type,
+        project_id, scope_type, scope_id, actor, payload
+      FROM events;
+      DROP TABLE events;
+      ALTER TABLE events_new RENAME TO events;
+      CREATE INDEX IF NOT EXISTS idx_events_type  ON events(type);
+      CREATE INDEX IF NOT EXISTS idx_events_scope ON events(scope_type, scope_id);
+    `);
+  },
 ];
 
 function runMigrations(db: Database.Database): void {
-  const current = db.pragma('user_version', { simple: true }) as number;
-  for (let version = current; version < MIGRATIONS.length; version++) {
-    const migrate = MIGRATIONS[version]!;
-    db.transaction(() => {
+  // Acquire a write lock up front (BEGIN IMMEDIATE) and re-read user_version
+  // INSIDE it. When two fresh processes open the same new DB at once, the
+  // first runs the migrations and bumps user_version; the second blocks on
+  // busy_timeout, then — now inside the lock — re-reads the bumped version and
+  // runs nothing. Without the immediate lock both processes read version 0 up
+  // front and the second re-runs the v4 `CREATE VIRTUAL TABLE search_fts`
+  // (which lacks IF NOT EXISTS), throwing "table search_fts already exists".
+  const runAll = db.transaction(() => {
+    const current = db.pragma('user_version', { simple: true }) as number;
+    for (let version = current; version < MIGRATIONS.length; version++) {
+      const migrate = MIGRATIONS[version]!;
       migrate(db);
       // user_version is the count of applied migrations.
       db.pragma(`user_version = ${version + 1}`);
-    })();
+    }
+  });
+  runAll.immediate();
+}
+
+/**
+ * Switch to WAL, retrying on SQLITE_BUSY. `PRAGMA journal_mode = WAL` takes a
+ * brief exclusive lock and — unlike ordinary statements — does NOT honor
+ * `busy_timeout`: it returns "database is locked" immediately if another
+ * connection holds any lock. On a fresh DB opened by several processes at once
+ * that is a real (if rare) collision, so we retry with a short backoff. The
+ * busy window is the WAL switch + first migration of one process, well under
+ * the total budget here.
+ */
+function enableWalWithRetry(db: Database.Database): void {
+  const deadline = Date.now() + 5000;
+  for (;;) {
+    try {
+      db.pragma('journal_mode = WAL');
+      return;
+    } catch (error) {
+      const busy =
+        error instanceof Error && /database is locked|SQLITE_BUSY/.test(error.message);
+      if (!busy || Date.now() >= deadline) throw error;
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 20);
+    }
   }
 }
 
 function open(dbFile: string): Database.Database {
   fs.mkdirSync(path.dirname(dbFile), { recursive: true });
   const db = new Database(dbFile);
-  db.pragma('journal_mode = WAL');
+  // Set busy_timeout first so ordinary statements + the IMMEDIATE migration
+  // lock wait rather than error; the WAL switch needs its own retry (above).
   db.pragma('busy_timeout = 5000');
+  enableWalWithRetry(db);
   runMigrations(db);
   return db;
 }
