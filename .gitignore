@@ -10,6 +10,9 @@
 # Internal design and planning docs (kept local only)
 /docs/
 
+# Git worktrees (subagent workspaces)
+/.worktrees/
+
 # Claude Code local workflow settings
 /.claude/
 /CLAUDE.md
