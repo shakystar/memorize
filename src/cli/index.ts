@@ -4,11 +4,14 @@ import { bumpHeartbeat } from '../services/session-service.js';
 import { runConflictCommand } from './commands/conflict.js';
 import { runDoctorCommand } from './commands/doctor.js';
 import { runEventsCommand } from './commands/events.js';
+import { runExportCommand } from './commands/export.js';
 import { runHookCommand } from './commands/hook.js';
 import { runInstallCommand } from './commands/install.js';
 import { runMemoryIndexCommand } from './commands/memory-index.js';
+import { runMigrateCommand } from './commands/migrate.js';
 import { runProjectCommand } from './commands/project.js';
 import { runProjectionCommand } from './commands/projection.js';
+import { runSearchCommand } from './commands/search.js';
 import { runSessionCommand } from './commands/session.js';
 import { runTaskCommand } from './commands/task.js';
 import type { CliContext, CommandHandler } from './context.js';
@@ -21,6 +24,9 @@ const handlers: Record<string, CommandHandler> = {
   projection: runProjectionCommand,
   'memory-index': runMemoryIndexCommand,
   events: runEventsCommand,
+  migrate: runMigrateCommand,
+  export: runExportCommand,
+  search: runSearchCommand,
   doctor: runDoctorCommand,
   install: runInstallCommand,
   hook: runHookCommand,

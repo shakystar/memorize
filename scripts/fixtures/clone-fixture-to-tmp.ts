@@ -2,6 +2,8 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 
+import { closeAll } from '../../src/storage/db.js';
+
 export interface ClonedFixture {
   fixtureRoot: string;
   projectPath: string;
@@ -50,6 +52,9 @@ export async function cloneFixtureToTmp(
     memorizeRoot,
     expectationsPath,
     cleanup: async () => {
+      // Release cached SQLite handles (WAL keeps the db file open) so the
+      // temp root can be removed on Windows without EBUSY.
+      closeAll();
       await fs.rm(tempRoot, { recursive: true, force: true });
     },
   };

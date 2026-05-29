@@ -1,9 +1,57 @@
-import { mkdtemp, mkdir, readFile, readdir, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, mkdir, readdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+
+import { getSession } from '../../src/services/projection-store.js';
+import { closeAll, getDb } from '../../src/storage/db.js';
+import { readEvents } from '../../src/storage/event-store.js';
+
+async function eventTypesForFirstProject(memorizeRoot: string): Promise<string[]> {
+  const previous = process.env.MEMORIZE_ROOT;
+  process.env.MEMORIZE_ROOT = memorizeRoot;
+  try {
+    const projectDirs = await readdir(join(memorizeRoot, 'projects'));
+    const events = await readEvents(projectDirs[0]!);
+    return events.map((event) => event.type);
+  } finally {
+    closeAll();
+    if (previous === undefined) {
+      delete process.env.MEMORIZE_ROOT;
+    } else {
+      process.env.MEMORIZE_ROOT = previous;
+    }
+  }
+}
+
+/** First project's id (single-project sandboxes). */
+async function firstProjectId(memorizeRoot: string): Promise<string> {
+  const projectDirs = await readdir(join(memorizeRoot, 'projects'));
+  return projectDirs[0]!;
+}
+
+/**
+ * Read the session projection written by a CLI/hook subprocess. closeAll()
+ * first so the test process re-opens the db and sees committed WAL writes.
+ */
+function readSessionProjection(projectId: string, sessionId: string) {
+  process.env.MEMORIZE_ROOT = memorizeRoot;
+  closeAll();
+  return getSession(projectId, sessionId);
+}
+
+/** Count checkpoint rows in the first project's projection tables. */
+function checkpointCount(projectId: string): number {
+  process.env.MEMORIZE_ROOT = memorizeRoot;
+  closeAll();
+  return (
+    getDb(projectId).prepare('SELECT COUNT(*) AS n FROM checkpoints').get() as {
+      n: number;
+    }
+  ).n;
+}
 
 let sandbox: string;
 let memorizeRoot: string;
@@ -52,6 +100,8 @@ beforeEach(async () => {
 });
 
 afterEach(async () => {
+  closeAll();
+  delete process.env.MEMORIZE_ROOT;
   await rm(sandbox, { recursive: true, force: true });
 });
 
@@ -78,11 +128,8 @@ describe('claude hook lifecycle', () => {
     expect(result.stdout).toContain('"systemMessage"');
     expect(result.stdout).toContain('memorize: checkpoint');
 
-    const projectsRoot = join(memorizeRoot, 'projects');
-    const projectDirs = await readdir(projectsRoot);
-    const checkpointsDir = join(projectsRoot, projectDirs[0]!, 'checkpoints');
-    const checkpointFiles = await readdir(checkpointsDir);
-    expect(checkpointFiles.length).toBeGreaterThan(0);
+    const projectId = await firstProjectId(memorizeRoot);
+    expect(checkpointCount(projectId)).toBeGreaterThan(0);
   });
 
   it('Stop hook is a no-op (β redesign — handoffs are agent-initiated, not per-turn)', async () => {
@@ -164,32 +211,15 @@ describe('claude hook lifecycle', () => {
     expect(sessionsAfter).toEqual([`${memorizeSessionId}.json`]);
 
     // session.paused event landed in the project log; no session.completed.
-    const projectsRoot = join(memorizeRoot, 'projects');
-    const projectDirs = await readdir(projectsRoot);
-    const events = await readdir(join(projectsRoot, projectDirs[0]!, 'events'));
-    let sawPaused = false;
-    let sawCompleted = false;
-    for (const ev of events) {
-      const body = await readFile(
-        join(projectsRoot, projectDirs[0]!, 'events', ev),
-        'utf8',
-      );
-      if (body.includes('"session.paused"')) sawPaused = true;
-      if (body.includes('"session.completed"')) sawCompleted = true;
-    }
-    expect(sawPaused).toBe(true);
-    expect(sawCompleted).toBe(false);
+    const types = await eventTypesForFirstProject(memorizeRoot);
+    expect(types).toContain('session.paused');
+    expect(types).not.toContain('session.completed');
 
     // Projection reflects the paused status — picker can use this
     // signal even though the cwd pointer alone doesn't carry status.
-    const sessionFile = join(
-      projectsRoot,
-      projectDirs[0]!,
-      'sessions',
-      `${memorizeSessionId}.json`,
-    );
-    const sessionRecord = JSON.parse(await readFile(sessionFile, 'utf8'));
-    expect(sessionRecord.status).toBe('paused');
+    const projectId = await firstProjectId(memorizeRoot);
+    const sessionRecord = readSessionProjection(projectId, memorizeSessionId);
+    expect(sessionRecord?.status).toBe('paused');
   });
 
   it('SessionStart with a known agent UUID reuses the existing pointer (resume seamless)', async () => {
@@ -227,19 +257,9 @@ describe('claude hook lifecycle', () => {
 
     // Exactly one session.started event in the log; at least one
     // session.resumed event followed it.
-    const projectsRoot = join(memorizeRoot, 'projects');
-    const projectDirs = await readdir(projectsRoot);
-    const events = await readdir(join(projectsRoot, projectDirs[0]!, 'events'));
-    let started = 0;
-    let resumed = 0;
-    for (const ev of events) {
-      const body = await readFile(
-        join(projectsRoot, projectDirs[0]!, 'events', ev),
-        'utf8',
-      );
-      if (body.includes('"session.started"')) started += 1;
-      if (body.includes('"session.resumed"')) resumed += 1;
-    }
+    const types = await eventTypesForFirstProject(memorizeRoot);
+    const started = types.filter((type) => type === 'session.started').length;
+    const resumed = types.filter((type) => type === 'session.resumed').length;
     expect(started).toBe(1);
     expect(resumed).toBeGreaterThanOrEqual(1);
   });
@@ -288,17 +308,8 @@ describe('claude hook lifecycle', () => {
     const sessionsAfter = await readdir(join(sandbox, '.memorize', 'sessions'));
     expect(sessionsAfter).toEqual([`${memorizeSessionId}.json`]);
 
-    const projectDirs = await readdir(join(memorizeRoot, 'projects'));
-    const events = await readdir(join(memorizeRoot, 'projects', projectDirs[0]!, 'events'));
-    let sawPaused = false;
-    for (const ev of events) {
-      const body = await readFile(
-        join(memorizeRoot, 'projects', projectDirs[0]!, 'events', ev),
-        'utf8',
-      );
-      if (body.includes('"session.paused"')) sawPaused = true;
-    }
-    expect(sawPaused).toBe(true);
+    const types = await eventTypesForFirstProject(memorizeRoot);
+    expect(types).toContain('session.paused');
   });
 
   it('SessionEnd → SessionStart resume cycle keeps the same memorize session and flips status paused→active', async () => {
@@ -340,15 +351,10 @@ describe('claude hook lifecycle', () => {
     );
     expect(end.status).toBe(0);
 
-    const projectDirs = await readdir(join(memorizeRoot, 'projects'));
-    const sessionFile = join(
-      memorizeRoot,
-      'projects',
-      projectDirs[0]!,
-      'sessions',
-      `${memorizeSessionId}.json`,
+    const projectId = await firstProjectId(memorizeRoot);
+    expect(readSessionProjection(projectId, memorizeSessionId)?.status).toBe(
+      'paused',
     );
-    expect(JSON.parse(await readFile(sessionFile, 'utf8')).status).toBe('paused');
 
     // Resume.
     const start2 = runHook('SessionStart', {
@@ -364,6 +370,8 @@ describe('claude hook lifecycle', () => {
     expect(sessionsAfter).toEqual([`${memorizeSessionId}.json`]);
 
     // Status flipped back to active.
-    expect(JSON.parse(await readFile(sessionFile, 'utf8')).status).toBe('active');
+    expect(readSessionProjection(projectId, memorizeSessionId)?.status).toBe(
+      'active',
+    );
   });
 });

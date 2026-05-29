@@ -22,6 +22,7 @@ import {
   pushProject,
   updateSyncState,
 } from '../../src/services/sync-service.js';
+import { closeAll } from '../../src/storage/db.js';
 import { readEvents } from '../../src/storage/event-store.js';
 import { getBoundProjectId } from '../../src/services/project-service.js';
 
@@ -55,6 +56,7 @@ beforeEach(async () => {
 });
 
 afterEach(async () => {
+  closeAll();
   delete process.env.MEMORIZE_ROOT;
   await rm(sandbox, { recursive: true, force: true });
 });

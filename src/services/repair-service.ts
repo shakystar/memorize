@@ -2,13 +2,11 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 
+import { getDb } from '../storage/db.js';
 import { readEventsWithIntegrity } from '../storage/event-store.js';
-import { isEnoent, readJson } from '../storage/fs-utils.js';
-import {
-  getMemoryIndexFile,
-  getProjectRoot,
-} from '../storage/path-resolver.js';
-import { rebuildProjectProjection } from './projection-store.js';
+import { isEnoent } from '../storage/fs-utils.js';
+import { getProjectRoot } from '../storage/path-resolver.js';
+import { getMemoryIndex, rebuildProjectProjection } from './projection-store.js';
 import { getBoundProjectId, readProject, requireBoundProjectId } from './project-service.js';
 
 export async function inspectProject(cwd: string): Promise<string> {
@@ -26,7 +24,7 @@ export async function rebuildProjection(cwd: string): Promise<string> {
 export async function rebuildMemoryIndex(cwd: string): Promise<string> {
   const projectId = await requireBoundProjectId(cwd);
   await rebuildProjectProjection(projectId);
-  const memoryIndex = await readJson(getMemoryIndexFile(projectId));
+  const memoryIndex = getMemoryIndex(projectId);
   return memoryIndex ? 'Memory index rebuild complete' : 'Memory index missing';
 }
 
@@ -67,7 +65,10 @@ export interface DoctorReport {
   version: string;
 }
 
-const REQUIRED_DIRS = ['events', 'tasks', 'workstreams', 'rules', 'sync'] as const;
+// Post-SQLite: the event log AND the entity projections (tasks, workstreams,
+// rules, …) now live in memorize.db, so their old JSON dirs are no longer a
+// health signal. `sync` still holds remote/inbound staging JSON on disk.
+const REQUIRED_DIRS = ['sync'] as const;
 
 function aggregateStatus(checks: DoctorCheck[]): DoctorStatus {
   if (checks.some((check) => check.status === 'error')) return 'error';
@@ -274,6 +275,73 @@ async function checkGitRedactionRisk(
   };
 }
 
+function checkDbIntegrity(projectId: string): DoctorCheck {
+  let rows: Array<{ integrity_check: string }>;
+  try {
+    rows = getDb(projectId)
+      .prepare('PRAGMA integrity_check')
+      .all() as Array<{ integrity_check: string }>;
+  } catch (error) {
+    return {
+      id: 'db.integrity',
+      label: 'SQLite database integrity',
+      status: 'error',
+      message: error instanceof Error ? error.message : 'integrity_check failed',
+      fix: 'memorize export --out events.ndjson  # rescue events, then rebuild',
+    };
+  }
+  const ok = rows.length === 1 && rows[0]?.integrity_check === 'ok';
+  if (ok) {
+    return {
+      id: 'db.integrity',
+      label: 'SQLite database integrity',
+      status: 'ok',
+      message: 'PRAGMA integrity_check passed',
+    };
+  }
+  return {
+    id: 'db.integrity',
+    label: 'SQLite database integrity',
+    status: 'error',
+    message: `PRAGMA integrity_check reported: ${rows
+      .map((r) => r.integrity_check)
+      .join('; ')}`,
+    fix: 'memorize export --out events.ndjson  # rescue events, then rebuild',
+  };
+}
+
+/**
+ * The projection tables are derived state — they must hold a `project` row
+ * whenever a `project.created` event exists in the log. A missing/empty
+ * projection (e.g. after a manual db edit or an interrupted rebuild) is
+ * recoverable by replaying events into the tables.
+ */
+function checkProjectionBuilt(projectId: string): DoctorCheck {
+  const db = getDb(projectId);
+  const eventCount = (
+    db.prepare('SELECT COUNT(*) AS n FROM events').get() as { n: number }
+  ).n;
+  const projectRow = db
+    .prepare('SELECT 1 FROM projects WHERE id = ?')
+    .get(projectId);
+  if (eventCount > 0 && !projectRow) {
+    return {
+      id: 'projection.built',
+      label: 'Projection tables built from events',
+      status: 'warn',
+      message:
+        'Event log is non-empty but the projection tables have no project row.',
+      fix: 'memorize projection rebuild',
+    };
+  }
+  return {
+    id: 'projection.built',
+    label: 'Projection tables built from events',
+    status: 'ok',
+    message: 'Projection tables are consistent with the event log',
+  };
+}
+
 export async function doctor(cwd: string): Promise<DoctorReport> {
   const checks: DoctorCheck[] = [];
   let projectId: string | undefined;
@@ -324,7 +392,7 @@ export async function doctor(cwd: string): Promise<DoctorReport> {
           label: `Storage directory: ${dirName}`,
           status: 'error',
           message: `Missing .memorize/${projectId}/${dirName}`,
-          fix: 'memorize projection rebuild',
+          fix: 'memorize project setup',
         });
       }
     }
@@ -348,6 +416,11 @@ export async function doctor(cwd: string): Promise<DoctorReport> {
         fix: 'memorize events validate',
       });
     }
+
+    const dbIntegrity = checkDbIntegrity(projectId);
+    checks.push(dbIntegrity);
+
+    checks.push(checkProjectionBuilt(projectId));
   }
 
   const claudeCheck = await checkClaudeInstall(cwd);

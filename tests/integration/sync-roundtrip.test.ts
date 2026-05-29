@@ -6,6 +6,7 @@ import { spawnSync } from 'node:child_process';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { createFileSyncTransport } from '../../src/adapters/sync-transport-file.js';
+import { closeAll } from '../../src/storage/db.js';
 import { createProject } from '../../src/services/project-service.js';
 import { createTask } from '../../src/services/task-service.js';
 import {
@@ -26,6 +27,7 @@ beforeEach(async () => {
 });
 
 afterEach(async () => {
+  closeAll();
   delete process.env.MEMORIZE_ROOT;
   await rm(sandbox, { recursive: true, force: true });
 });
