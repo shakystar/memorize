@@ -1,15 +1,15 @@
 import { spawnSync } from 'node:child_process';
 import { readFile } from 'node:fs/promises';
 
+import { sync as crossSpawnSync } from 'cross-spawn';
 import { describe, expect, it } from 'vitest';
 
 describe('release packaging', () => {
   it(
     'builds a real executable CLI entrypoint at dist/cli.js',
     async () => {
-      const build = spawnSync('pnpm', ['build'], {
+      const build = crossSpawnSync('pnpm', ['build'], {
         encoding: 'utf8',
-        shell: true,
       });
       expect(build.status).toBe(0);
 
@@ -20,9 +20,8 @@ describe('release packaging', () => {
   );
 
   it('keeps tests and validation assets out of the publish tarball', () => {
-    const result = spawnSync('npm', ['pack', '--dry-run', '--json'], {
+    const result = crossSpawnSync('npm', ['pack', '--dry-run', '--json'], {
       encoding: 'utf8',
-      shell: true,
     });
     expect(result.status).toBe(0);
 
