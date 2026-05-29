@@ -22,6 +22,9 @@ function runSetup() {
       MEMORIZE_ROOT: memorizeRoot,
       HOME: fakeHome,
       USERPROFILE: fakeHome,
+      // Disable PATH-based agent detection so presence is driven solely by
+      // the sandboxed HOME config dirs each test creates. ('' is non-nullish,
+      // so it wins over the real PATH in agent-detect's ?? fallback.)
       MEMORIZE_DETECT_PATH: '',
       MEMORIZE_HOOK_COMMAND_FORM: 'npx',
     },
@@ -80,5 +83,21 @@ describe('memorize setup', () => {
 
     expect(await pathExists(join(fakeHome, '.codex', 'hooks.json'))).toBe(false);
     expect(result.stdout).toContain('No supported AI agent detected');
+  });
+
+  it('wires codex AND instructs for claude when both are present', async () => {
+    await mkdir(join(fakeHome, '.codex'), { recursive: true });
+    await mkdir(join(fakeHome, '.claude'), { recursive: true });
+
+    const result = runSetup();
+    expect(result.status).toBe(0);
+
+    const hooks = JSON.parse(
+      await readFile(join(fakeHome, '.codex', 'hooks.json'), 'utf8'),
+    ) as { hooks: Record<string, unknown> };
+    expect(hooks.hooks.SessionStart).toBeTruthy();
+
+    expect(result.stdout).toContain('Codex');
+    expect(result.stdout).toContain('memorize install claude');
   });
 });
