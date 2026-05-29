@@ -8,6 +8,7 @@ import {
   warnInjectionMarkers,
 } from '../shared/content-safety.js';
 import { findAncestorPidByName } from '../shared/process-tree.js';
+import { hasUnmigratedNdjson } from './migrate-service.js';
 import { SESSION_ENV_VAR } from '../storage/cwd-session-store.js';
 import { withFileLock } from '../storage/file-lock.js';
 import { getProjectRoot } from '../storage/path-resolver.js';
@@ -118,6 +119,17 @@ function prepareHookText(
 }
 
 const handleSessionStart: HookHandler = async (ctx) => {
+  // Opening the DB runs only DDL migrations — a project upgraded from the
+  // NDJSON era reads as an empty store until `memorize migrate` imports its
+  // legacy event log. Warn loudly (does not block the session) so the user
+  // does not mistake un-migrated memory for lost memory.
+  if (await hasUnmigratedNdjson(ctx.projectId)) {
+    process.stderr.write(
+      'WARN: Legacy NDJSON event log detected but not yet migrated to SQLite. ' +
+        'Run `memorize migrate` to import it.\n',
+    );
+  }
+
   const identity = parseIdentityPayload(ctx.rawPayload);
   // Walk up from this hook subprocess to find the agent's pid. Stored
   // on the pointer so the picker can later detect "agent process

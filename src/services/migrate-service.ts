@@ -39,6 +39,26 @@ function isMigrated(projectId: string): boolean {
   return row?.value === '1';
 }
 
+/**
+ * Cheap detection of the "upgraded from the NDJSON era but never ran
+ * `memorize migrate`" state: the SQLite `migrated_from_ndjson` marker is
+ * absent AND a legacy `events/` dir holds at least one `*.ndjson` file. Does
+ * NOT parse the NDJSON (existence check only) so it is safe on a hot path.
+ * Surfaced as a loud warning by `doctor` and the SessionStart hook so the
+ * user knows to run `memorize migrate` instead of seeing an empty store.
+ */
+export async function hasUnmigratedNdjson(projectId: string): Promise<boolean> {
+  if (isMigrated(projectId)) return false;
+  const eventsDir = path.join(getProjectRoot(projectId), 'events');
+  try {
+    const files = await fs.readdir(eventsDir);
+    return files.some((file) => file.endsWith('.ndjson'));
+  } catch (error) {
+    if (isEnoent(error)) return false;
+    throw error;
+  }
+}
+
 function markMigrated(projectId: string): void {
   getDb(projectId)
     .prepare(

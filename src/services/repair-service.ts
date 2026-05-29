@@ -6,6 +6,7 @@ import { getDb } from '../storage/db.js';
 import { readEventsWithIntegrity } from '../storage/event-store.js';
 import { isEnoent } from '../storage/fs-utils.js';
 import { getProjectRoot } from '../storage/path-resolver.js';
+import { hasUnmigratedNdjson } from './migrate-service.js';
 import { getMemoryIndex, rebuildProjectProjection } from './projection-store.js';
 import { getBoundProjectId, readProject, requireBoundProjectId } from './project-service.js';
 
@@ -342,6 +343,57 @@ function checkProjectionBuilt(projectId: string): DoctorCheck {
   };
 }
 
+/**
+ * `seq` is an autoincrement primary key, so a healthy append-only log has
+ * `MAX(seq) === COUNT(*)` (rows 1..N with no holes). A mismatch means rows
+ * were deleted from the middle of the log — the append-only contract is
+ * broken and replay would skip events. An empty log (MAX(seq) NULL,
+ * COUNT 0) is healthy. Replaces the old NDJSON corrupt-line scan, which
+ * over SQLite could never fail (whole rows, no partial lines).
+ */
+function checkEventSeqGaps(projectId: string): DoctorCheck {
+  const row = getDb(projectId)
+    .prepare('SELECT MAX(seq) AS max, COUNT(*) AS count FROM events')
+    .get() as { max: number | null; count: number };
+  const max = row.max ?? 0;
+  if (max === row.count) {
+    return {
+      id: 'events.integrity',
+      label: 'Event log integrity',
+      status: 'ok',
+      message: 'Event sequence is contiguous (no gaps)',
+    };
+  }
+  return {
+    id: 'events.integrity',
+    label: 'Event log integrity',
+    status: 'warn',
+    message: `Event sequence has a gap: MAX(seq)=${max} but COUNT=${row.count} (rows deleted/missing)`,
+    fix: 'memorize events validate',
+  };
+}
+
+/**
+ * Opening the DB only runs DDL migrations — it never imports a legacy NDJSON
+ * event log into the SQLite `events` table (only the explicit `memorize
+ * migrate` command does that). A project upgraded from the NDJSON era thus
+ * reads as an EMPTY store until the user migrates, which looks like lost
+ * memory. Surface it loudly here so the fix is obvious.
+ */
+async function checkNdjsonMigrated(
+  projectId: string,
+): Promise<DoctorCheck | undefined> {
+  if (!(await hasUnmigratedNdjson(projectId))) return undefined;
+  return {
+    id: 'migrate.ndjson',
+    label: 'Legacy NDJSON event log migrated to SQLite',
+    status: 'warn',
+    message:
+      'Legacy NDJSON event log detected but not yet migrated to SQLite. Run `memorize migrate` to import it.',
+    fix: 'memorize migrate',
+  };
+}
+
 export async function doctor(cwd: string): Promise<DoctorReport> {
   const checks: DoctorCheck[] = [];
   let projectId: string | undefined;
@@ -399,28 +451,15 @@ export async function doctor(cwd: string): Promise<DoctorReport> {
   }
 
   if (projectId) {
-    const { corruptLines } = await readEventsWithIntegrity(projectId);
-    if (corruptLines.length === 0) {
-      checks.push({
-        id: 'events.integrity',
-        label: 'Event log integrity',
-        status: 'ok',
-        message: 'All event lines parse successfully',
-      });
-    } else {
-      checks.push({
-        id: 'events.integrity',
-        label: 'Event log integrity',
-        status: 'warn',
-        message: `${corruptLines.length} corrupt line(s) found: ${corruptLines.map((c) => `${c.file}:${c.lineNumber}`).join(', ')}`,
-        fix: 'memorize events validate',
-      });
-    }
+    checks.push(checkEventSeqGaps(projectId));
 
     const dbIntegrity = checkDbIntegrity(projectId);
     checks.push(dbIntegrity);
 
     checks.push(checkProjectionBuilt(projectId));
+
+    const ndjsonCheck = await checkNdjsonMigrated(projectId);
+    if (ndjsonCheck) checks.push(ndjsonCheck);
   }
 
   const claudeCheck = await checkClaudeInstall(cwd);
