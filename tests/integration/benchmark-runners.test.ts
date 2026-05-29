@@ -1,14 +1,17 @@
 import { spawnSync } from 'node:child_process';
+import { join } from 'node:path';
 
 import { describe, expect, it } from 'vitest';
 
+const repoRoot = process.cwd();
+const tsxCliPath = join(repoRoot, 'node_modules', 'tsx', 'dist', 'cli.mjs');
+
 function runScript(script: string, arg?: string) {
   return spawnSync(
-    'pnpm',
-    ['exec', 'tsx', script, ...(arg ? [arg] : [])],
+    process.execPath,
+    [tsxCliPath, script, ...(arg ? [arg] : [])],
     {
       encoding: 'utf8',
-      shell: true,
     },
   );
 }
