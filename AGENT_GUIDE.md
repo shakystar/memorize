@@ -5,7 +5,7 @@ agents) consuming `@shakystar/memorize`. Humans do not need to read
 this file end-to-end — the README is the human entry point.
 
 This file assumes you already ran the setup steps in
-[docs/AI_SETUP.md](./docs/AI_SETUP.md). It exists so you can look up the
+[guides/AI_SETUP.md](./guides/AI_SETUP.md). It exists so you can look up the
 full behaviour, flags, idempotency guarantees, and failure modes of
 every command without guessing.
 

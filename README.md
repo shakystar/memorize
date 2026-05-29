@@ -48,7 +48,7 @@ be installed by your AI assistant, per project.
 Send your Claude Code or Codex session a single prompt:
 
 > Set up memorize in this project. Follow the instructions at
-> https://github.com/shakystar/memorize/blob/main/docs/AI_SETUP.md
+> https://github.com/shakystar/memorize/blob/main/guides/AI_SETUP.md
 
 The assistant adds the package, binds the directory, installs the correct
 agent hook, and verifies the install. Once it reports success, use
@@ -139,7 +139,7 @@ needs detail.
 ## For AI assistants
 
 If you are an AI coding assistant and the user asked you to set memorize
-up, follow [docs/AI_SETUP.md](./docs/AI_SETUP.md) — the idempotent
+up, follow [guides/AI_SETUP.md](./guides/AI_SETUP.md) — the idempotent
 setup steps and the ground rule (memorize is the single source of truth;
 do not duplicate its state in your own memory). For the full command
 behaviour, flags, and on-disk layout, see
