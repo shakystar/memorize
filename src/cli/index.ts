@@ -10,6 +10,7 @@ import { runMemoryIndexCommand } from './commands/memory-index.js';
 import { runProjectCommand } from './commands/project.js';
 import { runProjectionCommand } from './commands/projection.js';
 import { runSessionCommand } from './commands/session.js';
+import { runSetupCommand } from './commands/setup.js';
 import { runTaskCommand } from './commands/task.js';
 import type { CliContext, CommandHandler } from './context.js';
 import { renderScaffoldUsage } from './usage.js';
@@ -27,13 +28,14 @@ const handlers: Record<string, CommandHandler> = {
   task: runTaskCommand,
   conflict: runConflictCommand,
   session: runSessionCommand,
+  setup: runSetupCommand,
 };
 
 // Commands that manage session lifecycle themselves — skip post-command
 // heartbeat for these so we never double-fire the event. `session reap`
 // is included because firing a heartbeat on the just-reaped session
 // would resurrect it as 'active' the moment after we abandoned it.
-const SESSION_MANAGING_COMMANDS = new Set(['hook', 'install', 'session']);
+const SESSION_MANAGING_COMMANDS = new Set(['hook', 'install', 'session', 'setup']);
 
 async function main(): Promise<void> {
   const [, , command, ...args] = process.argv;
