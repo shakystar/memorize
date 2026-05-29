@@ -1,23 +1,16 @@
 import { describe, expect, it } from 'vitest';
 
 import {
-  getCheckpointFile,
-  getConflictFile,
-  getEventsFile,
-  getHandoffFile,
-  getProjectFile,
+  getProjectDbFile,
   getProjectRoot,
-  getRuleFile,
   getSyncFile,
   getSyncInboundFile,
-  getTaskFile,
   getTopicFile,
-  getWorkstreamFile,
 } from '../../src/storage/path-resolver.js';
 import { createId, isValidId } from '../../src/domain/common.js';
 
 const VALID_PROJECT_ID = 'proj_l2x_abcdef12';
-const VALID_TASK_ID = 'task_l2x_abcdef34';
+const VALID_TOPIC_ID = 'rule_l2x_abcdef34';
 
 const MALICIOUS_IDS = [
   '../etc/passwd',
@@ -58,46 +51,34 @@ describe('path-resolver ID validation', () => {
     }
   });
 
-  it('rejects traversal characters in taskId', () => {
+  it('rejects traversal characters in topicId', () => {
     for (const bad of ['../', '..', '/root', 'a/b', '']) {
       expect(() =>
-        getTaskFile(VALID_PROJECT_ID, bad),
+        getTopicFile(VALID_PROJECT_ID, bad),
       ).toThrow();
     }
   });
 
   it('rejects traversal in every leaf path function', () => {
     const bad = '../escape';
-    expect(() => getProjectFile(bad)).toThrow();
-    expect(() => getTaskFile(VALID_PROJECT_ID, bad)).toThrow();
-    expect(() => getHandoffFile(VALID_PROJECT_ID, bad)).toThrow();
-    expect(() => getCheckpointFile(VALID_PROJECT_ID, bad)).toThrow();
-    expect(() => getWorkstreamFile(VALID_PROJECT_ID, bad)).toThrow();
-    expect(() => getRuleFile(VALID_PROJECT_ID, bad)).toThrow();
+    expect(() => getProjectDbFile(bad)).toThrow();
+    expect(() => getSyncFile(bad)).toThrow();
+    expect(() => getSyncInboundFile(bad)).toThrow();
     expect(() => getTopicFile(VALID_PROJECT_ID, bad)).toThrow();
-    expect(() => getConflictFile(VALID_PROJECT_ID, bad)).toThrow();
+    expect(() => getTopicFile(bad, VALID_TOPIC_ID)).toThrow();
   });
 
   it('accepts valid IDs on leaf path functions', () => {
-    expect(() => getTaskFile(VALID_PROJECT_ID, VALID_TASK_ID)).not.toThrow();
-    expect(() => getProjectFile(VALID_PROJECT_ID)).not.toThrow();
+    expect(() => getTopicFile(VALID_PROJECT_ID, VALID_TOPIC_ID)).not.toThrow();
+    expect(() => getProjectDbFile(VALID_PROJECT_ID)).not.toThrow();
     expect(() => getSyncFile(VALID_PROJECT_ID)).not.toThrow();
     expect(() => getSyncInboundFile(VALID_PROJECT_ID)).not.toThrow();
   });
 
-  it('rejects malformed events date keys', () => {
-    expect(() => getEventsFile(VALID_PROJECT_ID, '../etc')).toThrow();
-    expect(() =>
-      getEventsFile(VALID_PROJECT_ID, '2026/04/14'),
-    ).toThrow();
-    expect(() => getEventsFile(VALID_PROJECT_ID, '')).toThrow();
-    expect(() => getEventsFile(VALID_PROJECT_ID, '2026-04-14')).not.toThrow();
-  });
-
   it('returned paths stay within the project root', () => {
     const projectRoot = getProjectRoot(VALID_PROJECT_ID);
-    const taskPath = getTaskFile(VALID_PROJECT_ID, VALID_TASK_ID);
-    expect(taskPath.startsWith(projectRoot)).toBe(true);
+    const topicPath = getTopicFile(VALID_PROJECT_ID, VALID_TOPIC_ID);
+    expect(topicPath.startsWith(projectRoot)).toBe(true);
   });
 
   // documenting that the pattern does allow consecutive underscores in segment boundaries

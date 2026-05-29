@@ -23,21 +23,15 @@ export interface AppendEventInput<TPayload extends DomainEventPayload> {
 
 export async function ensureProjectDirectories(projectId: string): Promise<void> {
   const projectRoot = getProjectRoot(projectId);
-  // The events/ dir is no longer written by appendEvent (events live in
-  // SQLite now), but the other per-project dirs still hold JSON projections
-  // and sync staging files.
+  // Events and the entity projections (tasks, workstreams, rules, …) now live
+  // in SQLite, so their old JSON dirs are no longer created. Only the dirs
+  // still written to disk remain: `topics/` (topic `.md` files) and `sync/`
+  // (remote/inbound staging).
   await Promise.all(
     [
       projectRoot,
-      path.join(projectRoot, 'tasks'),
-      path.join(projectRoot, 'workstreams'),
-      path.join(projectRoot, 'handoffs'),
-      path.join(projectRoot, 'checkpoints'),
-      path.join(projectRoot, 'conflicts'),
-      path.join(projectRoot, 'rules'),
       path.join(projectRoot, 'topics'),
       path.join(projectRoot, 'sync'),
-      path.join(projectRoot, 'sessions'),
     ].map((dirPath) => ensureDir(dirPath)),
   );
 }
