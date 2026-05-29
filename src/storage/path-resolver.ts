@@ -44,6 +44,11 @@ export function getProjectFile(projectId: string): string {
   return ensureWithinRoot(path.join(projectRoot, 'project.json'), projectRoot);
 }
 
+export function getProjectDbFile(projectId: string): string {
+  const projectRoot = getProjectRoot(projectId);
+  return ensureWithinRoot(path.join(projectRoot, 'memorize.db'), projectRoot);
+}
+
 export function getProjectBindingsFile(): string {
   return path.join(getMemorizeRoot(), 'profile', 'bindings.json');
 }
