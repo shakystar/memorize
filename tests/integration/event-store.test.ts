@@ -1,20 +1,18 @@
-import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { createProject, createTask } from '../../src/domain/index.js';
-import type { Project, Task } from '../../src/domain/entities.js';
+import { closeAll } from '../../src/storage/db.js';
 import { appendEvent, readEvents } from '../../src/storage/event-store.js';
-import { readJson } from '../../src/storage/fs-utils.js';
 import {
-  getEventsFile,
-  getMemoryIndexFile,
-  getProjectFile,
-  getTaskFile,
-} from '../../src/storage/path-resolver.js';
-import { rebuildProjectProjection } from '../../src/services/projection-store.js';
+  getMemoryIndex,
+  getProjectProjection,
+  getTask,
+  rebuildProjectProjection,
+} from '../../src/services/projection-store.js';
 
 let sandbox: string;
 
@@ -24,6 +22,7 @@ beforeEach(async () => {
 });
 
 afterEach(async () => {
+  closeAll();
   await rm(sandbox, { recursive: true, force: true });
   delete process.env.MEMORIZE_ROOT;
 });
@@ -64,20 +63,17 @@ describe('event store integration', () => {
 
     await rebuildProjectProjection(project.id);
 
-    const storedProject = await readJson<Project>(getProjectFile(project.id));
-    const storedTask = await readJson<Task>(getTaskFile(project.id, task.id));
-    const memoryIndex = await readJson<{ topTasks: Array<{ id: string }> }>(
-      getMemoryIndexFile(project.id),
-    );
-    const eventsFile = await readFile(
-      getEventsFile(project.id, new Date().toISOString().slice(0, 10)),
-      'utf8',
-    );
+    const storedProject = getProjectProjection(project.id);
+    const storedTask = getTask(project.id, task.id);
+    const memoryIndex = getMemoryIndex(project.id);
 
     expect(storedProject?.id).toBe(project.id);
     expect(storedTask?.id).toBe(task.id);
     expect(memoryIndex?.topTasks[0]?.id).toBe(task.id);
-    expect(eventsFile).toContain('"type":"project.created"');
-    expect(eventsFile).toContain('"type":"task.created"');
+    // Events now live in SQLite (seq order), not dated NDJSON files.
+    expect(events.map((event) => event.type)).toEqual([
+      'project.created',
+      'task.created',
+    ]);
   });
 });

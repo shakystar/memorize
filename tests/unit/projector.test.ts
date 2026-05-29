@@ -216,6 +216,33 @@ describe('projector', () => {
     expect(state.sessions['sess_missing']).toBeUndefined();
   });
 
+  it('is deterministic — reducing the same log twice yields deep-equal state', () => {
+    // task.updated without an explicit updatedAt must fall back to the
+    // triggering event's createdAt (NOT wall-clock nowIso()), so a replay
+    // of the identical log produces byte-identical state. This is the
+    // event-sourcing invariant the applyTaskUpdate fix protects.
+    const log: DomainEvent[] = [
+      projectCreated(),
+      taskEvent('task_1', 'todo', '2026-04-11T00:00:00.000Z'),
+      makeEvent({
+        id: 'evt_task_1_upd',
+        type: 'task.updated',
+        scopeType: 'task',
+        scopeId: 'task_1',
+        createdAt: '2026-04-12T09:30:00.000Z',
+        updatedAt: '2026-04-12T09:30:00.000Z',
+        // No updatedAt in the payload → must inherit event.createdAt.
+        payload: { status: 'in_progress' },
+      }),
+    ];
+
+    const first = reduceProjectState(log);
+    const second = reduceProjectState(log);
+    expect(second).toEqual(first);
+    // And the fallback used the event's createdAt, not the current time.
+    expect(first.tasks['task_1']?.updatedAt).toBe('2026-04-12T09:30:00.000Z');
+  });
+
   it('caps topTasks and recentDecisions at their configured maximums', () => {
     const taskEvents = Array.from({ length: MAX_TOP_TASKS + 5 }, (_, i) =>
       taskEvent(

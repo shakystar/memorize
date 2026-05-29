@@ -17,6 +17,7 @@ import {
   updateSyncState,
 } from '../../src/services/sync-service.js';
 import type { DomainEvent } from '../../src/domain/events.js';
+import { closeAll } from '../../src/storage/db.js';
 
 let sandbox: string;
 
@@ -26,6 +27,7 @@ beforeEach(async () => {
 });
 
 afterEach(async () => {
+  closeAll();
   delete process.env.MEMORIZE_ROOT;
   await rm(sandbox, { recursive: true, force: true });
 });

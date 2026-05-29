@@ -1,9 +1,30 @@
-import { mkdtemp, mkdir, readFile, readdir, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, mkdir, readdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+
+import { listTasks } from '../../src/services/projection-store.js';
+import { closeAll } from '../../src/storage/db.js';
+import { readEvents } from '../../src/storage/event-store.js';
+
+async function eventTypesForFirstProject(memorizeRoot: string): Promise<string[]> {
+  const previous = process.env.MEMORIZE_ROOT;
+  process.env.MEMORIZE_ROOT = memorizeRoot;
+  try {
+    const projectDirs = await readdir(join(memorizeRoot, 'projects'));
+    const events = await readEvents(projectDirs[0]!);
+    return events.map((event) => event.type);
+  } finally {
+    closeAll();
+    if (previous === undefined) {
+      delete process.env.MEMORIZE_ROOT;
+    } else {
+      process.env.MEMORIZE_ROOT = previous;
+    }
+  }
+}
 
 let sandbox: string;
 let memorizeRoot: string;
@@ -48,6 +69,8 @@ beforeEach(async () => {
 });
 
 afterEach(async () => {
+  closeAll();
+  delete process.env.MEMORIZE_ROOT;
   await rm(sandbox, { recursive: true, force: true });
 });
 
@@ -66,13 +89,11 @@ describe('task-aware hook semantics', () => {
     expect(result.status).toBe(0);
 
     const projectDirs = await readdir(join(memorizeRoot, 'projects'));
-    const taskFiles = await readdir(join(memorizeRoot, 'projects', projectDirs[0]!, 'tasks'));
-    const taskContent = await readFile(
-      join(memorizeRoot, 'projects', projectDirs[0]!, 'tasks', taskFiles[0]!),
-      'utf8',
-    );
-
-    expect(taskContent).toContain('latestCheckpointId');
+    process.env.MEMORIZE_ROOT = memorizeRoot;
+    closeAll();
+    const tasks = listTasks(projectDirs[0]!);
+    expect(tasks.length).toBeGreaterThan(0);
+    expect(tasks.some((task) => task.latestCheckpointId)).toBe(true);
   });
 
   it('SessionEnd hook pauses the calling session and PRESERVES the cwd pointer (Model C)', async () => {
@@ -113,19 +134,8 @@ describe('task-aware hook semantics', () => {
     const sessionsAfter = await readdir(join(sandbox, '.memorize', 'sessions'));
     expect(sessionsAfter).toEqual([`${memorizeSessionId}.json`]);
 
-    const projectDirs = await readdir(join(memorizeRoot, 'projects'));
-    const events = await readdir(join(memorizeRoot, 'projects', projectDirs[0]!, 'events'));
-    let sawPaused = false;
-    let sawCompleted = false;
-    for (const ev of events) {
-      const body = await readFile(
-        join(memorizeRoot, 'projects', projectDirs[0]!, 'events', ev),
-        'utf8',
-      );
-      if (body.includes('"session.paused"')) sawPaused = true;
-      if (body.includes('"session.completed"')) sawCompleted = true;
-    }
-    expect(sawPaused).toBe(true);
-    expect(sawCompleted).toBe(false);
+    const types = await eventTypesForFirstProject(memorizeRoot);
+    expect(types).toContain('session.paused');
+    expect(types).not.toContain('session.completed');
   });
 });

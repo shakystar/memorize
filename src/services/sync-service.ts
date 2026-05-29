@@ -10,7 +10,7 @@ import type {
   SyncQueueSnapshot,
 } from '../domain/sync-protocol.js';
 import type { SyncTransport } from '../domain/sync-transport.js';
-import { appendEvent, readEvents } from '../storage/event-store.js';
+import { appendEvent, readEventsSince } from '../storage/event-store.js';
 import { appendLine, isEnoent, readJson, readNdjson, withFileLock, writeJson } from '../storage/fs-utils.js';
 import {
   getSyncFile,
@@ -51,28 +51,15 @@ export async function updateSyncState(
   return next;
 }
 
-function sliceEventsSince(
-  events: DomainEvent[],
-  sinceEventId: string | undefined,
-): DomainEvent[] {
-  if (!sinceEventId) {
-    return events;
-  }
-  const index = events.findIndex((event) => event.id === sinceEventId);
-  if (index < 0) {
-    return events;
-  }
-  return events.slice(index + 1);
-}
-
 export async function buildPushPayload(
   projectId: string,
 ): Promise<SyncPushRequest> {
   const state = await readStateOrThrow(projectId);
-  const events = await readEvents(projectId);
-  const pending = sliceEventsSince(events, state.lastPushedEventId).filter(
-    (event) => event.type !== 'sync.state.updated',
-  );
+  // Seq-watermark slice: events with seq greater than the lastPushed row,
+  // in seq order. Still excludes local sync bookkeeping events.
+  const pending = (
+    await readEventsSince(projectId, state.lastPushedEventId)
+  ).filter((event) => event.type !== 'sync.state.updated');
   return {
     projectId,
     ...(state.remoteProjectId ? { remoteProjectId: state.remoteProjectId } : {}),

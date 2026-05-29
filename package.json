@@ -40,6 +40,11 @@
   "engines": {
     "node": ">=22"
   },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "better-sqlite3"
+    ]
+  },
   "scripts": {
     "dev": "tsx src/cli/index.ts",
     "build": "node -e \"require('node:fs').rmSync('dist',{recursive:true,force:true})\" && tsc -p tsconfig.build.json && node scripts/validate/write-cli-shebang.cjs",
@@ -63,12 +68,14 @@
     "pack:check": "tsx scripts/validate/package-dry-run.ts"
   },
   "dependencies": {
+    "better-sqlite3": "^12.4.1",
     "cross-spawn": "^7.0.6",
     "ps-list": "^9.0.0",
     "which": "^7.0.0",
     "write-file-atomic": "^8.0.0"
   },
   "devDependencies": {
+    "@types/better-sqlite3": "^7.6.13",
     "@types/cross-spawn": "^6.0.6",
     "@types/node": "^25.6.0",
     "@types/which": "^3.0.4",

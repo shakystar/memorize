@@ -4,6 +4,7 @@ import { join } from 'node:path';
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
+import { closeAll } from '../../src/storage/db.js';
 import { createProject } from '../../src/services/project-service.js';
 import { createTask, updateTask } from '../../src/services/task-service.js';
 import { loadStartContext } from '../../src/services/context-service.js';
@@ -18,6 +19,7 @@ beforeEach(async () => {
 });
 
 afterEach(async () => {
+  closeAll();
   await rm(sandbox, { recursive: true, force: true });
   delete process.env.MEMORIZE_ROOT;
 });

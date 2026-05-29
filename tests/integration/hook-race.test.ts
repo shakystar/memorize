@@ -7,6 +7,8 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { runHook } from '../harness/hook-runner.js';
 import { claudeSessionStartPayload } from '../harness/fixtures.js';
+import { listSessions } from '../../src/services/projection-store.js';
+import { closeAll } from '../../src/storage/db.js';
 
 let sandbox: string;
 let memorizeRoot: string;
@@ -43,6 +45,8 @@ beforeEach(async () => {
 });
 
 afterEach(async () => {
+  closeAll();
+  delete process.env.MEMORIZE_ROOT;
   await rm(sandbox, { recursive: true, force: true });
 });
 
@@ -114,16 +118,10 @@ describe('SessionStart task-claim race', () => {
     const projectsRoot = join(memorizeRoot, 'projects');
     const projectDirs = await readdir(projectsRoot);
     expect(projectDirs.length).toBe(1);
-    const sessionsDir = join(projectsRoot, projectDirs[0]!, 'sessions');
-    const sessionFiles = await readdir(sessionsDir);
-    expect(sessionFiles.length).toBe(2);
-    const sessionRecords = await Promise.all(
-      sessionFiles.map((name) =>
-        readFile(join(sessionsDir, name), 'utf8').then(
-          (body) => JSON.parse(body) as { id: string; taskId?: string },
-        ),
-      ),
-    );
+    process.env.MEMORIZE_ROOT = memorizeRoot;
+    closeAll();
+    const sessionRecords = listSessions(projectDirs[0]!);
+    expect(sessionRecords.length).toBe(2);
     const projectionTaskIds = sessionRecords.map((s) => s.taskId);
     expect(projectionTaskIds.every((id) => typeof id === 'string')).toBe(true);
     expect(new Set(projectionTaskIds).size).toBe(2);

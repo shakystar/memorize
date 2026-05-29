@@ -1,9 +1,10 @@
-import { mkdtemp, rm, readFile, writeFile, mkdir } from 'node:fs/promises';
+import { mkdtemp, rm, mkdir } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
+import { closeAll } from '../../src/storage/db.js';
 import { appendEvent, readEvents, readEventsWithIntegrity } from '../../src/storage/event-store.js';
 import { withFileLock } from '../../src/storage/fs-utils.js';
 
@@ -17,6 +18,10 @@ beforeEach(async () => {
 });
 
 afterEach(async () => {
+  // Release cached SQLite handles before deleting the sandbox, otherwise the
+  // open db file blocks rm on Windows and a stale connection leaks into the
+  // next test (the per-projectId cache is keyed by id, not by root).
+  closeAll();
   if (originalRoot === undefined) {
     delete process.env['MEMORIZE_ROOT'];
   } else {
@@ -25,7 +30,7 @@ afterEach(async () => {
   await rm(sandbox, { recursive: true, force: true });
 });
 
-describe('event store integrity', () => {
+describe('event store (SQLite)', () => {
   const projectId = 'test_project';
 
   async function appendTestEvent(label: string) {
@@ -39,42 +44,30 @@ describe('event store integrity', () => {
     });
   }
 
-  it('readEvents skips corrupt lines instead of throwing', async () => {
+  it('persists appended events and replays them in seq order', async () => {
     await appendTestEvent('good1');
     await appendTestEvent('good2');
 
-    // Inject a corrupt line into the event file
-    const { readdir } = await import('node:fs/promises');
-    const eventsDir = join(sandbox, 'projects', projectId, 'events');
-    const files = (await readdir(eventsDir)).filter((f) => f.endsWith('.ndjson'));
-    expect(files.length).toBeGreaterThan(0);
-
-    const eventFile = join(eventsDir, files[0]!);
-    const content = await readFile(eventFile, 'utf8');
-    await writeFile(eventFile, content + '{"truncated json\n', 'utf8');
-
     const events = await readEvents(projectId);
-    expect(events.length).toBe(2);
+    expect(events.map((e) => e.scopeId)).toEqual(['task_good1', 'task_good2']);
   });
 
-  it('readEventsWithIntegrity reports corrupt lines', async () => {
+  it('readEventsWithIntegrity never reports corrupt lines (whole-row storage)', async () => {
     await appendTestEvent('valid');
-
-    const { readdir } = await import('node:fs/promises');
-    const eventsDir = join(sandbox, 'projects', projectId, 'events');
-    const files = (await readdir(eventsDir)).filter((f) => f.endsWith('.ndjson'));
-    const eventFile = join(eventsDir, files[0]!);
-    const content = await readFile(eventFile, 'utf8');
-    await writeFile(eventFile, content + 'not-json\n', 'utf8');
 
     const result = await readEventsWithIntegrity(projectId);
     expect(result.events.length).toBe(1);
-    expect(result.corruptLines.length).toBe(1);
-    expect(result.corruptLines[0]!.file).toBe(files[0]);
-    expect(result.corruptLines[0]!.lineNumber).toBe(2);
+    expect(result.corruptLines).toEqual([]);
   });
 
-  it('concurrent appends produce valid ndjson', async () => {
+  it('round-trips payloads through JSON storage', async () => {
+    const appended = await appendTestEvent('payload');
+    const [event] = await readEvents(projectId);
+    expect(event?.payload).toEqual(appended.payload);
+    expect(event?.id).toBe(appended.id);
+  });
+
+  it('concurrent appends all land exactly once', async () => {
     const promises = Array.from({ length: 20 }, (_, i) =>
       appendTestEvent(`concurrent_${i}`),
     );

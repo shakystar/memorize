@@ -1,5 +1,6 @@
-import fs from 'node:fs/promises';
 import path from 'node:path';
+
+import type Database from 'better-sqlite3';
 
 import { createId, CURRENT_SCHEMA_VERSION, nowIso } from '../domain/common.js';
 import type {
@@ -7,8 +8,9 @@ import type {
   DomainEventPayload,
   DomainEventType,
 } from '../domain/events.js';
-import { appendLine, ensureDir, isEnoent, readNdjson, withFileLock } from './fs-utils.js';
-import { getEventsFile, getProjectRoot } from './path-resolver.js';
+import { getDb } from './db.js';
+import { ensureDir } from './fs-utils.js';
+import { getProjectRoot } from './path-resolver.js';
 
 export interface AppendEventInput<TPayload extends DomainEventPayload> {
   type: DomainEventType;
@@ -19,16 +21,14 @@ export interface AppendEventInput<TPayload extends DomainEventPayload> {
   payload: TPayload;
 }
 
-function dateKey(date = new Date()): string {
-  return date.toISOString().slice(0, 10);
-}
-
 export async function ensureProjectDirectories(projectId: string): Promise<void> {
   const projectRoot = getProjectRoot(projectId);
+  // The events/ dir is no longer written by appendEvent (events live in
+  // SQLite now), but the other per-project dirs still hold JSON projections
+  // and sync staging files.
   await Promise.all(
     [
       projectRoot,
-      path.join(projectRoot, 'events'),
       path.join(projectRoot, 'tasks'),
       path.join(projectRoot, 'workstreams'),
       path.join(projectRoot, 'handoffs'),
@@ -40,6 +40,29 @@ export async function ensureProjectDirectories(projectId: string): Promise<void>
       path.join(projectRoot, 'sessions'),
     ].map((dirPath) => ensureDir(dirPath)),
   );
+}
+
+/** Map a DomainEvent onto the `events` table columns. payload is JSON text. */
+function insertEvent(db: Database.Database, event: DomainEvent): void {
+  db.prepare(
+    `INSERT INTO events
+       (id, schema_version, created_at, updated_at, type,
+        project_id, scope_type, scope_id, actor, payload)
+     VALUES
+       (@id, @schemaVersion, @createdAt, @updatedAt, @type,
+        @projectId, @scopeType, @scopeId, @actor, @payload)`,
+  ).run({
+    id: event.id,
+    schemaVersion: event.schemaVersion,
+    createdAt: event.createdAt,
+    updatedAt: event.updatedAt,
+    type: event.type,
+    projectId: event.projectId,
+    scopeType: event.scopeType,
+    scopeId: event.scopeId,
+    actor: event.actor,
+    payload: JSON.stringify(event.payload),
+  });
 }
 
 export async function appendEvent<TPayload extends DomainEventPayload>(
@@ -59,12 +82,77 @@ export async function appendEvent<TPayload extends DomainEventPayload>(
     payload: input.payload,
   };
 
-  await ensureProjectDirectories(input.projectId);
-  const eventsFile = getEventsFile(input.projectId, dateKey());
-  await withFileLock(eventsFile, () =>
-    appendLine(eventsFile, JSON.stringify(event)),
-  );
+  // better-sqlite3 is synchronous; the async signature is preserved so
+  // existing `await appendEvent(...)` call sites stay unchanged.
+  insertEvent(getDb(input.projectId), event);
   return event;
+}
+
+/**
+ * Append several events as ONE atomic unit. All inserts run inside a single
+ * `db.transaction(...)` so a throw partway through (e.g. a non-serializable
+ * payload) rolls the whole batch back — the append-only log never ends up
+ * with a partial logical operation. Insert order = the order of `inputs`,
+ * which becomes the `seq` (replay) order.
+ *
+ * Use this when a single logical operation emits multiple back-to-back
+ * events; single-event flows keep using `appendEvent`.
+ */
+export async function appendEvents<TPayload extends DomainEventPayload>(
+  projectId: string,
+  inputs: AppendEventInput<TPayload>[],
+): Promise<DomainEvent<TPayload>[]> {
+  const events: DomainEvent<TPayload>[] = inputs.map((input) => {
+    const timestamp = nowIso();
+    return {
+      id: createId('evt'),
+      schemaVersion: CURRENT_SCHEMA_VERSION,
+      createdAt: timestamp,
+      updatedAt: timestamp,
+      type: input.type,
+      projectId: input.projectId,
+      scopeType: input.scopeType,
+      scopeId: input.scopeId,
+      actor: input.actor,
+      payload: input.payload,
+    };
+  });
+
+  const db = getDb(projectId);
+  db.transaction(() => {
+    for (const event of events) {
+      insertEvent(db, event);
+    }
+  })();
+  return events;
+}
+
+interface EventRow {
+  id: string;
+  schema_version: string;
+  created_at: string;
+  updated_at: string;
+  type: DomainEventType;
+  project_id: string;
+  scope_type: DomainEvent['scopeType'];
+  scope_id: string;
+  actor: string;
+  payload: string;
+}
+
+function rowToEvent(row: EventRow): DomainEvent {
+  return {
+    id: row.id,
+    schemaVersion: row.schema_version,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+    type: row.type,
+    projectId: row.project_id,
+    scopeType: row.scope_type,
+    scopeId: row.scope_id,
+    actor: row.actor,
+    payload: JSON.parse(row.payload) as unknown,
+  };
 }
 
 export interface EventIntegrity {
@@ -75,39 +163,48 @@ export interface EventIntegrity {
 export async function readEventsWithIntegrity(
   projectId: string,
 ): Promise<EventIntegrity> {
-  const eventsDir = path.join(getProjectRoot(projectId), 'events');
-  const result: EventIntegrity = { events: [], corruptLines: [] };
-
-  let files: string[];
-  try {
-    files = (await fs.readdir(eventsDir))
-      .filter((file) => file.endsWith('.ndjson'))
-      .sort();
-  } catch (error) {
-    if (isEnoent(error)) return result;
-    throw error;
-  }
-
-  for (const file of files) {
-    const events = await readNdjson<DomainEvent>(
-      path.join(eventsDir, file),
-      {
-        onCorrupt: (line, _error, lineNumber) => {
-          result.corruptLines.push({
-            file,
-            lineNumber,
-            raw: line.slice(0, 200),
-          });
-        },
-      },
-    );
-    result.events.push(...events);
-  }
-
-  return result;
+  // `seq` (autoincrement primary key) is the deterministic replay order,
+  // replacing the old filename + line ordering. SQLite stores whole rows,
+  // so there is no partial-line corruption to report — corruptLines is
+  // always empty. The EventIntegrity shape is kept for callers (doctor).
+  const rows = getDb(projectId)
+    .prepare('SELECT * FROM events ORDER BY seq')
+    .all() as EventRow[];
+  return { events: rows.map(rowToEvent), corruptLines: [] };
 }
 
 export async function readEvents(projectId: string): Promise<DomainEvent[]> {
   const { events } = await readEventsWithIntegrity(projectId);
   return events;
+}
+
+/**
+ * Events strictly after the row whose `id` is `sinceEventId`, in `seq` order.
+ * When `sinceEventId` is undefined (or not found in the log) every event is
+ * returned — matching the old array-scan semantics of sliceEventsSince.
+ */
+export async function readEventsSince(
+  projectId: string,
+  sinceEventId: string | undefined,
+): Promise<DomainEvent[]> {
+  const db = getDb(projectId);
+  if (!sinceEventId) {
+    return (db.prepare('SELECT * FROM events ORDER BY seq').all() as EventRow[]).map(
+      rowToEvent,
+    );
+  }
+  const watermark = db
+    .prepare('SELECT seq FROM events WHERE id = ?')
+    .get(sinceEventId) as { seq: number } | undefined;
+  if (!watermark) {
+    // Unknown watermark — fall back to "everything", as the old findIndex
+    // did when the id was not present in the log.
+    return (db.prepare('SELECT * FROM events ORDER BY seq').all() as EventRow[]).map(
+      rowToEvent,
+    );
+  }
+  const rows = db
+    .prepare('SELECT * FROM events WHERE seq > ? ORDER BY seq')
+    .all(watermark.seq) as EventRow[];
+  return rows.map(rowToEvent);
 }

@@ -1,5 +1,3 @@
-import path from 'node:path';
-
 import {
   ACTOR_SYSTEM,
   CURRENT_SCHEMA_VERSION,
@@ -22,10 +20,12 @@ import {
   writeCwdPointer,
 } from '../storage/cwd-session-store.js';
 import { appendEvent } from '../storage/event-store.js';
-import { readJson, readJsonDir } from '../storage/fs-utils.js';
-import { getSessionsDir } from '../storage/path-resolver.js';
 import { resolveSessionContext } from './session-context.js';
-import { rebuildProjectProjection } from './projection-store.js';
+import {
+  getSession,
+  listSessions,
+  rebuildProjectProjection,
+} from './projection-store.js';
 
 // Re-exports so existing callers that imported these from session-service
 // continue to work. New code should prefer importing from
@@ -117,8 +117,9 @@ export async function reapStaleSessions(
       let lastActivityMs = startedAtMs;
       if (pointer.projectId) {
         try {
-          const sessionFromProjection = await readJson<Session>(
-            path.join(getSessionsDir(pointer.projectId), `${pointer.sessionId}.json`),
+          const sessionFromProjection = getSession(
+            pointer.projectId,
+            pointer.sessionId,
           );
           if (sessionFromProjection?.lastSeenAt) {
             lastActivityMs = Date.parse(sessionFromProjection.lastSeenAt);
@@ -153,7 +154,9 @@ export async function reapStaleSessions(
         actor: pointer.startedBy ?? ACTOR_SYSTEM,
         payload: abandonedPayload,
       });
-      await rebuildProjectProjection(pointer.projectId);
+      // session.abandoned only mutates session state — no searchable entity
+      // changes, so the FTS reindex is safely skipped.
+      await rebuildProjectProjection(pointer.projectId, { reindexSearch: false });
     }
 
     await deleteCwdPointer(cwd, pointer.sessionId);
@@ -204,7 +207,9 @@ export async function startSession(
       actor,
       payload: session,
     });
-    await rebuildProjectProjection(options.projectId);
+    // session.started only mutates session state — no searchable entity
+    // changes, so the FTS reindex is safely skipped.
+    await rebuildProjectProjection(options.projectId, { reindexSearch: false });
     sessionId = session.id;
   } else {
     sessionId = createId('session');
@@ -292,7 +297,9 @@ export async function resumeSession(
       actor: pointer.startedBy ?? ACTOR_SYSTEM,
       payload: heartbeat,
     });
-    await rebuildProjectProjection(pointer.projectId);
+    // session.resumed only mutates session state — no searchable entity
+    // changes, so the FTS reindex is safely skipped.
+    await rebuildProjectProjection(pointer.projectId, { reindexSearch: false });
   }
   return true;
 }
@@ -337,7 +344,9 @@ export async function pauseSession(
     actor: pointer.startedBy ?? ACTOR_SYSTEM,
     payload: heartbeat,
   });
-  await rebuildProjectProjection(pointer.projectId);
+  // session.paused only mutates session state — no searchable entity
+  // changes, so the FTS reindex is safely skipped.
+  await rebuildProjectProjection(pointer.projectId, { reindexSearch: false });
   // Pointer intentionally preserved — that is the whole point of
   // pause vs end. resumeSession() will find it on reattach.
 }
@@ -383,7 +392,10 @@ export async function endSession(
       actor: pointer.startedBy ?? ACTOR_SYSTEM,
       payload: completedPayload,
     });
-    await rebuildProjectProjection(pointer.projectId);
+    // session.completed only mutates session state (this flow appends no
+    // handoff/checkpoint) — no searchable entity changes, so the FTS reindex
+    // is safely skipped.
+    await rebuildProjectProjection(pointer.projectId, { reindexSearch: false });
   }
 
   await deleteCwdPointer(cwd, pointer.sessionId);
@@ -420,7 +432,10 @@ export async function bumpHeartbeat(cwd: string): Promise<void> {
       actor: pointer.startedBy ?? ACTOR_SYSTEM,
       payload,
     });
-    await rebuildProjectProjection(pointer.projectId);
+    // session.heartbeat only mutates session lastSeenAt — no searchable
+    // entity changes, so the FTS reindex is safely skipped. This is the
+    // hottest path (fires from CLI middleware on every command).
+    await rebuildProjectProjection(pointer.projectId, { reindexSearch: false });
   } catch {
     // never let telemetry break a command
   }
@@ -469,7 +484,7 @@ export async function getCurrentSessionActor(
 }
 
 export async function readActiveSessions(projectId: string): Promise<Session[]> {
-  const sessions = await readJsonDir<Session>(getSessionsDir(projectId));
+  const sessions = listSessions(projectId);
   // The picker view: status is `active` OR `paused` AND we've seen a
   // heartbeat within the staleness threshold. `paused` counts as a
   // live claim because the session is intentionally resumable —

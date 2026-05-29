@@ -1,15 +1,13 @@
-import path from 'node:path';
-
 import { ACTOR_SYSTEM } from '../domain/common.js';
-import { appendEvent } from '../storage/event-store.js';
-import { readJson, readJsonDir } from '../storage/fs-utils.js';
+import { appendEvent, appendEvents } from '../storage/event-store.js';
 import {
-  getCheckpointFile,
-  getHandoffFile,
-  getProjectRoot,
-  getTaskFile,
-} from '../storage/path-resolver.js';
-import { rebuildProjectProjection } from './projection-store.js';
+  getCheckpoint,
+  getHandoff,
+  getTask,
+  listTasks as listTasksFromStore,
+  rebuildProjectProjection,
+  type ListTasksFilters,
+} from './projection-store.js';
 import type {
   CreateCheckpointInput,
   CreateHandoffInput,
@@ -115,25 +113,28 @@ export async function createHandoff(input: CreateHandoffInput): Promise<Handoff>
   warnInjectionMarkers(markers);
 
   const handoff = createHandoffEntity(input);
-  await appendEvent({
-    type: 'handoff.created',
-    projectId: input.projectId,
-    scopeType: 'task',
-    scopeId: input.taskId,
-    actor: input.fromActor,
-    payload: handoff,
-  });
-  await appendEvent({
-    type: 'task.updated',
-    projectId: input.projectId,
-    scopeType: 'task',
-    scopeId: input.taskId,
-    actor: input.fromActor,
-    payload: {
-      latestHandoffId: handoff.id,
-      status: 'handoff_ready',
-    } satisfies Partial<Task>,
-  });
+  const events: Parameters<typeof appendEvents>[1] = [
+    {
+      type: 'handoff.created',
+      projectId: input.projectId,
+      scopeType: 'task',
+      scopeId: input.taskId,
+      actor: input.fromActor,
+      payload: handoff,
+    },
+    {
+      type: 'task.updated',
+      projectId: input.projectId,
+      scopeType: 'task',
+      scopeId: input.taskId,
+      actor: input.fromActor,
+      payload: {
+        latestHandoffId: handoff.id,
+        status: 'handoff_ready',
+      } satisfies Partial<Task>,
+    },
+  ];
+  await appendEvents(input.projectId, events);
   await rebuildProjectProjection(input.projectId);
   return handoff;
 }
@@ -154,16 +155,18 @@ export async function createCheckpoint(
   warnInjectionMarkers(markers);
 
   const checkpoint = createCheckpointEntity(input);
-  await appendEvent({
-    type: 'checkpoint.created',
-    projectId: input.projectId,
-    scopeType: input.taskId ? 'task' : 'session',
-    scopeId: input.taskId ?? input.sessionId,
-    actor: ACTOR_SYSTEM,
-    payload: checkpoint,
-  });
+  const events: Parameters<typeof appendEvents>[1] = [
+    {
+      type: 'checkpoint.created',
+      projectId: input.projectId,
+      scopeType: input.taskId ? 'task' : 'session',
+      scopeId: input.taskId ?? input.sessionId,
+      actor: ACTOR_SYSTEM,
+      payload: checkpoint,
+    },
+  ];
   if (input.taskId) {
-    await appendEvent({
+    events.push({
       type: 'task.updated',
       projectId: input.projectId,
       scopeType: 'task',
@@ -174,6 +177,7 @@ export async function createCheckpoint(
       } satisfies Partial<Task>,
     });
   }
+  await appendEvents(input.projectId, events);
   await rebuildProjectProjection(input.projectId);
   return checkpoint;
 }
@@ -182,39 +186,28 @@ export async function readTask(
   projectId: string,
   taskId: string,
 ): Promise<Task | undefined> {
-  return readJson<Task>(getTaskFile(projectId, taskId));
+  return getTask(projectId, taskId);
 }
 
-export interface ListTasksFilters {
-  status?: Task['status'];
-  workstreamId?: string;
-}
+export type { ListTasksFilters } from './projection-store.js';
 
 export async function listTasks(
   projectId: string,
   filters: ListTasksFilters = {},
 ): Promise<Task[]> {
-  const tasksDir = path.join(getProjectRoot(projectId), 'tasks');
-  const tasks = await readJsonDir<Task>(tasksDir);
-  return tasks
-    .filter(
-      (task) =>
-        (!filters.status || task.status === filters.status) &&
-        (!filters.workstreamId || task.workstreamId === filters.workstreamId),
-    )
-    .sort((left, right) => (left.createdAt < right.createdAt ? -1 : 1));
+  return listTasksFromStore(projectId, filters);
 }
 
 export async function readHandoff(
   projectId: string,
   handoffId: string,
 ): Promise<Handoff | undefined> {
-  return readJson<Handoff>(getHandoffFile(projectId, handoffId));
+  return getHandoff(projectId, handoffId);
 }
 
 export async function readCheckpoint(
   projectId: string,
   checkpointId: string,
 ): Promise<Checkpoint | undefined> {
-  return readJson<Checkpoint>(getCheckpointFile(projectId, checkpointId));
+  return getCheckpoint(projectId, checkpointId);
 }
