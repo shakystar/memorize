@@ -278,6 +278,23 @@ task status to `handoff_ready`.
 | `--warning <text>` | multi | Item added to `warnings` |
 | `--question <text>` | multi | Item added to `unresolvedQuestions` |
 
+### `memorize setup`
+
+Global onboarding for a human-run install (the `curl|sh` / `irm|iex`
+one-liner calls it). Detects installed agents and wires the global parts:
+
+- Detection: an agent counts as present if its config dir (`~/.claude`,
+  `~/.codex`) exists or its launcher is on PATH.
+- Codex: if present, writes the global hook to `~/.codex/hooks.json`
+  (same as `install codex`). Idempotent.
+- Claude: detection only — Claude hooks are per-project, so `setup`
+  prints the `memorize install claude` instruction rather than wiring.
+- No agent detected: prints guidance and exits 0.
+
+`setup` never touches the current working directory and never binds a
+project; that is `project setup`'s job. Test-only env override:
+`MEMORIZE_DETECT_PATH` replaces the PATH scanned for agent launchers.
+
 ### `memorize install claude`
 
 Idempotent. Writes hook entries into `.claude/settings.local.json`
