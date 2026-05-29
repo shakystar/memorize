@@ -58,13 +58,35 @@ const ENTITY_TABLES = [
 ] as const;
 
 /**
+ * Options for {@link rebuildProjectProjection}.
+ */
+export interface RebuildProjectProjectionOptions {
+  /**
+   * Whether to reindex the `search_fts` table as part of the rebuild.
+   * Defaults to `true` (every existing call site is unchanged). Pass
+   * `false` ONLY when the triggering event(s) cannot create or modify any
+   * searchable entity (task / handoff / decision / checkpoint /
+   * imported-topic rule) — e.g. pure session-state events like heartbeats.
+   * Skipping the reindex leaves the existing `search_fts` rows untouched
+   * (still valid, since no searchable entity changed) while the projection
+   * TABLES are still fully rebuilt. Over-reindexing is correct (just
+   * slower); skipping when a searchable entity changed is a BUG.
+   */
+  reindexSearch?: boolean;
+}
+
+/**
  * Recompute the full projection from the event log and replace every
  * projection table in a SINGLE transaction (replace-all semantics).
  * reduceProjectState is the single reduction authority; this function is only
  * the persistence sink. Topic `.md` files are written outside the transaction
  * (they are filesystem content, not table rows).
  */
-export async function rebuildProjectProjection(projectId: string): Promise<void> {
+export async function rebuildProjectProjection(
+  projectId: string,
+  opts: RebuildProjectProjectionOptions = {},
+): Promise<void> {
+  const reindexSearch = opts.reindexSearch ?? true;
   const state = reduceProjectState(await readEvents(projectId));
   if (!state.project) {
     throw new Error(`Project ${projectId} has no project.created event`);
@@ -91,21 +113,27 @@ export async function rebuildProjectProjection(projectId: string): Promise<void>
   const importedRules = Object.values(state.rules).filter(
     (rule) => rule.source === 'imported',
   );
-  const topicSearchRows = (
-    await Promise.all(
-      importedRules.map(async (rule) => {
-        const content = await readJson<{ title?: string; body?: string }>(
-          getTopicFile(projectId, rule.id),
-        );
-        const text = searchText([
-          rule.title,
-          content?.title,
-          content?.body ?? rule.body,
-        ]);
-        return text ? { entityId: rule.id, text } : undefined;
-      }),
-    )
-  ).filter((row): row is { entityId: string; text: string } => row !== undefined);
+  // When reindexSearch is false the FTS rows are left untouched, so the
+  // (async, disk-reading) topic content load is skipped entirely.
+  const topicSearchRows = reindexSearch
+    ? (
+        await Promise.all(
+          importedRules.map(async (rule) => {
+            const content = await readJson<{ title?: string; body?: string }>(
+              getTopicFile(projectId, rule.id),
+            );
+            const text = searchText([
+              rule.title,
+              content?.title,
+              content?.body ?? rule.body,
+            ]);
+            return text ? { entityId: rule.id, text } : undefined;
+          }),
+        )
+      ).filter(
+        (row): row is { entityId: string; text: string } => row !== undefined,
+      )
+    : [];
 
   const db = getDb(projectId);
   const writeAll = db.transaction(() => {
@@ -113,13 +141,18 @@ export async function rebuildProjectProjection(projectId: string): Promise<void>
       db.prepare(`DELETE FROM ${table}`).run();
     }
     // search_fts is a replace-all sink too — wipe then repopulate within the
-    // same tx (per-project db, so the unqualified DELETE is correct).
-    db.prepare('DELETE FROM search_fts').run();
+    // same tx (per-project db, so the unqualified DELETE is correct). When
+    // reindexSearch is false we skip the wipe AND every indexEntity call, so
+    // the existing FTS rows survive (still valid — no searchable entity
+    // changed) while the projection tables above are still fully rebuilt.
+    if (reindexSearch) {
+      db.prepare('DELETE FROM search_fts').run();
+    }
     const insertSearch = db.prepare(
       'INSERT INTO search_fts (entity_id, kind, text) VALUES (@entityId, @kind, @text)',
     );
     const indexEntity = (entityId: string, kind: SearchKind, text: string) => {
-      if (text) insertSearch.run({ entityId, kind, text });
+      if (reindexSearch && text) insertSearch.run({ entityId, kind, text });
     };
 
     db.prepare('INSERT INTO projects (id, data) VALUES (?, ?)').run(

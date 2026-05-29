@@ -154,7 +154,9 @@ export async function reapStaleSessions(
         actor: pointer.startedBy ?? ACTOR_SYSTEM,
         payload: abandonedPayload,
       });
-      await rebuildProjectProjection(pointer.projectId);
+      // session.abandoned only mutates session state — no searchable entity
+      // changes, so the FTS reindex is safely skipped.
+      await rebuildProjectProjection(pointer.projectId, { reindexSearch: false });
     }
 
     await deleteCwdPointer(cwd, pointer.sessionId);
@@ -205,7 +207,9 @@ export async function startSession(
       actor,
       payload: session,
     });
-    await rebuildProjectProjection(options.projectId);
+    // session.started only mutates session state — no searchable entity
+    // changes, so the FTS reindex is safely skipped.
+    await rebuildProjectProjection(options.projectId, { reindexSearch: false });
     sessionId = session.id;
   } else {
     sessionId = createId('session');
@@ -293,7 +297,9 @@ export async function resumeSession(
       actor: pointer.startedBy ?? ACTOR_SYSTEM,
       payload: heartbeat,
     });
-    await rebuildProjectProjection(pointer.projectId);
+    // session.resumed only mutates session state — no searchable entity
+    // changes, so the FTS reindex is safely skipped.
+    await rebuildProjectProjection(pointer.projectId, { reindexSearch: false });
   }
   return true;
 }
@@ -338,7 +344,9 @@ export async function pauseSession(
     actor: pointer.startedBy ?? ACTOR_SYSTEM,
     payload: heartbeat,
   });
-  await rebuildProjectProjection(pointer.projectId);
+  // session.paused only mutates session state — no searchable entity
+  // changes, so the FTS reindex is safely skipped.
+  await rebuildProjectProjection(pointer.projectId, { reindexSearch: false });
   // Pointer intentionally preserved — that is the whole point of
   // pause vs end. resumeSession() will find it on reattach.
 }
@@ -384,7 +392,10 @@ export async function endSession(
       actor: pointer.startedBy ?? ACTOR_SYSTEM,
       payload: completedPayload,
     });
-    await rebuildProjectProjection(pointer.projectId);
+    // session.completed only mutates session state (this flow appends no
+    // handoff/checkpoint) — no searchable entity changes, so the FTS reindex
+    // is safely skipped.
+    await rebuildProjectProjection(pointer.projectId, { reindexSearch: false });
   }
 
   await deleteCwdPointer(cwd, pointer.sessionId);
@@ -421,7 +432,10 @@ export async function bumpHeartbeat(cwd: string): Promise<void> {
       actor: pointer.startedBy ?? ACTOR_SYSTEM,
       payload,
     });
-    await rebuildProjectProjection(pointer.projectId);
+    // session.heartbeat only mutates session lastSeenAt — no searchable
+    // entity changes, so the FTS reindex is safely skipped. This is the
+    // hottest path (fires from CLI middleware on every command).
+    await rebuildProjectProjection(pointer.projectId, { reindexSearch: false });
   } catch {
     // never let telemetry break a command
   }
