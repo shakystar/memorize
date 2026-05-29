@@ -1,5 +1,5 @@
 import { ACTOR_SYSTEM } from '../domain/common.js';
-import { appendEvent } from '../storage/event-store.js';
+import { appendEvent, appendEvents } from '../storage/event-store.js';
 import {
   getCheckpoint,
   getHandoff,
@@ -113,25 +113,28 @@ export async function createHandoff(input: CreateHandoffInput): Promise<Handoff>
   warnInjectionMarkers(markers);
 
   const handoff = createHandoffEntity(input);
-  await appendEvent({
-    type: 'handoff.created',
-    projectId: input.projectId,
-    scopeType: 'task',
-    scopeId: input.taskId,
-    actor: input.fromActor,
-    payload: handoff,
-  });
-  await appendEvent({
-    type: 'task.updated',
-    projectId: input.projectId,
-    scopeType: 'task',
-    scopeId: input.taskId,
-    actor: input.fromActor,
-    payload: {
-      latestHandoffId: handoff.id,
-      status: 'handoff_ready',
-    } satisfies Partial<Task>,
-  });
+  const events: Parameters<typeof appendEvents>[1] = [
+    {
+      type: 'handoff.created',
+      projectId: input.projectId,
+      scopeType: 'task',
+      scopeId: input.taskId,
+      actor: input.fromActor,
+      payload: handoff,
+    },
+    {
+      type: 'task.updated',
+      projectId: input.projectId,
+      scopeType: 'task',
+      scopeId: input.taskId,
+      actor: input.fromActor,
+      payload: {
+        latestHandoffId: handoff.id,
+        status: 'handoff_ready',
+      } satisfies Partial<Task>,
+    },
+  ];
+  await appendEvents(input.projectId, events);
   await rebuildProjectProjection(input.projectId);
   return handoff;
 }
@@ -152,16 +155,18 @@ export async function createCheckpoint(
   warnInjectionMarkers(markers);
 
   const checkpoint = createCheckpointEntity(input);
-  await appendEvent({
-    type: 'checkpoint.created',
-    projectId: input.projectId,
-    scopeType: input.taskId ? 'task' : 'session',
-    scopeId: input.taskId ?? input.sessionId,
-    actor: ACTOR_SYSTEM,
-    payload: checkpoint,
-  });
+  const events: Parameters<typeof appendEvents>[1] = [
+    {
+      type: 'checkpoint.created',
+      projectId: input.projectId,
+      scopeType: input.taskId ? 'task' : 'session',
+      scopeId: input.taskId ?? input.sessionId,
+      actor: ACTOR_SYSTEM,
+      payload: checkpoint,
+    },
+  ];
   if (input.taskId) {
-    await appendEvent({
+    events.push({
       type: 'task.updated',
       projectId: input.projectId,
       scopeType: 'task',
@@ -172,6 +177,7 @@ export async function createCheckpoint(
       } satisfies Partial<Task>,
     });
   }
+  await appendEvents(input.projectId, events);
   await rebuildProjectProjection(input.projectId);
   return checkpoint;
 }

@@ -88,6 +88,45 @@ export async function appendEvent<TPayload extends DomainEventPayload>(
   return event;
 }
 
+/**
+ * Append several events as ONE atomic unit. All inserts run inside a single
+ * `db.transaction(...)` so a throw partway through (e.g. a non-serializable
+ * payload) rolls the whole batch back — the append-only log never ends up
+ * with a partial logical operation. Insert order = the order of `inputs`,
+ * which becomes the `seq` (replay) order.
+ *
+ * Use this when a single logical operation emits multiple back-to-back
+ * events; single-event flows keep using `appendEvent`.
+ */
+export async function appendEvents<TPayload extends DomainEventPayload>(
+  projectId: string,
+  inputs: AppendEventInput<TPayload>[],
+): Promise<DomainEvent<TPayload>[]> {
+  const events: DomainEvent<TPayload>[] = inputs.map((input) => {
+    const timestamp = nowIso();
+    return {
+      id: createId('evt'),
+      schemaVersion: CURRENT_SCHEMA_VERSION,
+      createdAt: timestamp,
+      updatedAt: timestamp,
+      type: input.type,
+      projectId: input.projectId,
+      scopeType: input.scopeType,
+      scopeId: input.scopeId,
+      actor: input.actor,
+      payload: input.payload,
+    };
+  });
+
+  const db = getDb(projectId);
+  db.transaction(() => {
+    for (const event of events) {
+      insertEvent(db, event);
+    }
+  })();
+  return events;
+}
+
 interface EventRow {
   id: string;
   schema_version: string;

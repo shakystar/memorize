@@ -4,7 +4,9 @@ import path from 'node:path';
 import type { Project, Rule } from '../domain/entities.js';
 import { createConflict, createRule } from '../domain/entities.js';
 import { isEnoent } from '../storage/fs-utils.js';
-import { appendEvent } from '../storage/event-store.js';
+import { appendEvents } from '../storage/event-store.js';
+import type { AppendEventInput } from '../storage/event-store.js';
+import type { DomainEventPayload } from '../domain/events.js';
 import { rebuildProjectProjection } from './projection-store.js';
 import {
   createProject,
@@ -77,6 +79,7 @@ async function discoverContextFiles(
 async function importContextFiles(project: Project): Promise<number> {
   const files = await discoverContextFiles(project.rootPath);
   const importedRules: Rule[] = [];
+  const events: AppendEventInput<DomainEventPayload>[] = [];
 
   for (const file of files) {
     const rule: Rule = createRule({
@@ -88,7 +91,7 @@ async function importContextFiles(project: Project): Promise<number> {
       source: 'imported',
     });
 
-    await appendEvent({
+    events.push({
       type: 'rule.upserted',
       projectId: project.id,
       scopeType: 'project',
@@ -100,7 +103,7 @@ async function importContextFiles(project: Project): Promise<number> {
   }
 
   if (files.length > 0) {
-    await appendEvent({
+    events.push({
       type: 'project.updated',
       projectId: project.id,
       scopeType: 'project',
@@ -137,7 +140,7 @@ async function importContextFiles(project: Project): Promise<number> {
       conflictType: 'rule',
     });
 
-    await appendEvent({
+    events.push({
       type: 'conflict.detected',
       projectId: project.id,
       scopeType: 'project',
@@ -147,6 +150,9 @@ async function importContextFiles(project: Project): Promise<number> {
     });
   }
 
+  if (events.length > 0) {
+    await appendEvents(project.id, events);
+  }
   await rebuildProjectProjection(project.id);
   return files.length;
 }

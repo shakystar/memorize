@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { createProject } from '../../src/services/project-service.js';
 import { createTask, updateTask } from '../../src/services/task-service.js';
+import { closeAll } from '../../src/storage/db.js';
 import { readEvents } from '../../src/storage/event-store.js';
 import {
   SESSION_ENV_VAR,
@@ -24,6 +25,7 @@ beforeEach(async () => {
 });
 
 afterEach(async () => {
+  closeAll();
   delete process.env.MEMORIZE_ROOT;
   delete process.env[SESSION_ENV_VAR];
   await rm(sandbox, { recursive: true, force: true });
@@ -151,7 +153,7 @@ describe('concurrent mutation safety', () => {
       }
     });
 
-    it('NDJSON integrity holds after concurrent mixed operations', async () => {
+    it('event-log integrity holds after concurrent mixed operations', async () => {
       const project = await createProject({
         title: 'mixed-ops',
         rootPath: sandbox,
