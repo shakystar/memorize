@@ -37,12 +37,20 @@ export interface UntrustedMeta {
   actor?: string;
 }
 
+function escapeAttr(value: string): string {
+  return value
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
+
 export function wrapUntrusted(
   content: string,
   meta: UntrustedMeta,
 ): string {
-  const attrs = [`source="${meta.source}"`];
-  if (meta.actor) attrs.push(`actor="${meta.actor}"`);
+  const attrs = [`source="${escapeAttr(meta.source)}"`];
+  if (meta.actor) attrs.push(`actor="${escapeAttr(meta.actor)}"`);
   return `<user_data ${attrs.join(' ')}>\n${escapeSentinels(content)}\n</user_data>`;
 }
 
@@ -101,14 +109,21 @@ const INJECTION_PATTERNS: Array<{ name: string; regex: RegExp }> = [
   },
 ];
 
+const ZERO_WIDTH_PATTERN = /[​‌‍⁠﻿]/g;
+
 export function detectInjectionMarkers(
   text: string,
   field: string,
 ): InjectionMarker[] {
   if (typeof text !== 'string' || text.length === 0) return [];
-  return INJECTION_PATTERNS.filter(({ regex }) => regex.test(text)).map(
-    ({ name }) => ({ name, field }),
-  );
+  const variants = [
+    text,
+    text.replace(ZERO_WIDTH_PATTERN, ''),
+    text.replace(ZERO_WIDTH_PATTERN, ' '),
+  ];
+  return INJECTION_PATTERNS.filter(({ regex }) =>
+    variants.some((variant) => regex.test(variant)),
+  ).map(({ name }) => ({ name, field }));
 }
 
 export function warnInjectionMarkers(markers: InjectionMarker[]): void {

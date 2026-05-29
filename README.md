@@ -38,6 +38,28 @@ that is cleaned up on exit.
 bash examples/quickstart.sh
 ```
 
+## Install (one line)
+
+Put `memorize` on your PATH and wire up any installed agent in one command.
+
+```sh
+# macOS / Linux / WSL
+curl -fsSL https://raw.githubusercontent.com/shakystar/memorize/main/scripts/install.sh | sh
+```
+
+```powershell
+# Windows (PowerShell)
+irm https://raw.githubusercontent.com/shakystar/memorize/main/scripts/install.ps1 | iex
+```
+
+This installs the global binary, then runs `memorize setup`, which detects
+Claude Code and Codex. Codex integration is wired globally on the spot;
+Claude hooks are per-project, so `setup` tells you to run
+`memorize install claude` inside each project you want memorize in.
+
+Requires Node.js >= 22. The installer checks and tells you where to get it
+if it is missing.
+
 ## Set it up (5 seconds, your AI does it)
 
 Memorize is designed to be installed **by** your AI coding assistant, not
@@ -222,6 +244,7 @@ bundled inside the npm tarball, so it is available offline.
 ### Command index (1-line summaries)
 
 ```
+setup                detect installed agents + wire global integration
 project setup        bind cwd + import AGENTS/CLAUDE/.cursorrules
 project show         print bound project JSON
 project sync         push/pull events to a remote path
