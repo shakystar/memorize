@@ -121,6 +121,53 @@ export async function appendEvents<TPayload extends DomainEventPayload>(
   return events;
 }
 
+/**
+ * Insert externally-sourced events (e.g. pulled from a sync remote) into the
+ * `events` table, deduplicating on the `id UNIQUE` constraint via
+ * `INSERT OR IGNORE` — the same re-runnable shape migrate-service uses. Runs as
+ * ONE transaction, so the batch is all-or-nothing for the structurally-valid
+ * events handed in. Returns the number of NEWLY inserted rows (duplicates
+ * contribute 0, via better-sqlite3 `info.changes`).
+ *
+ * Ordering: external events are appended at the tail in arrival order, taking
+ * local `seq` values after existing rows. Causal/parent ordering across
+ * machines is deferred to #22.
+ */
+export async function insertExternalEvents(
+  projectId: string,
+  events: DomainEvent[],
+): Promise<number> {
+  const db = getDb(projectId);
+  const insert = db.prepare(
+    `INSERT OR IGNORE INTO events
+       (id, schema_version, created_at, updated_at, type,
+        project_id, scope_type, scope_id, actor, payload)
+     VALUES
+       (@id, @schemaVersion, @createdAt, @updatedAt, @type,
+        @projectId, @scopeType, @scopeId, @actor, @payload)`,
+  );
+  const insertAll = db.transaction((rows: DomainEvent[]): number => {
+    let inserted = 0;
+    for (const event of rows) {
+      const info = insert.run({
+        id: event.id,
+        schemaVersion: event.schemaVersion,
+        createdAt: event.createdAt,
+        updatedAt: event.updatedAt,
+        type: event.type,
+        projectId: event.projectId,
+        scopeType: event.scopeType,
+        scopeId: event.scopeId,
+        actor: event.actor,
+        payload: JSON.stringify(event.payload),
+      });
+      inserted += info.changes;
+    }
+    return inserted;
+  });
+  return insertAll(events);
+}
+
 interface EventRow {
   id: string;
   schema_version: string;
