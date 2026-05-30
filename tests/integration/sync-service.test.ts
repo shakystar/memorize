@@ -4,18 +4,16 @@ import { join } from 'node:path';
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import { createProject } from '../../src/services/project-service.js';
+import { createProject, readSyncState } from '../../src/services/project-service.js';
 import { createTask } from '../../src/services/task-service.js';
 import {
   applyPullResponse,
   buildPushPayload,
-  drainInbound,
-  enqueueInbound,
   getQueueSnapshot,
-  markPulled,
   markPushed,
   updateSyncState,
 } from '../../src/services/sync-service.js';
+import { readEvents } from '../../src/storage/event-store.js';
 import type { DomainEvent } from '../../src/domain/events.js';
 import { closeAll } from '../../src/storage/db.js';
 
@@ -84,84 +82,44 @@ describe('sync service', () => {
     expect(payload.remoteProjectId).toBe('remote-abc');
   });
 
-  it('enqueues inbound events and drains them after markPulled', async () => {
-    const project = await createProject({
-      title: 'Inbound target',
-      rootPath: sandbox,
-    });
-
-    const fakeEvents: DomainEvent[] = [
-      {
-        id: 'evt_remote_1',
-        schemaVersion: '1.0.0',
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
-        type: 'task.updated',
-        projectId: project.id,
-        scopeType: 'task',
-        scopeId: 'task_remote_1',
-        actor: 'remote-user',
-        payload: { status: 'in_progress' },
-      },
-      {
-        id: 'evt_remote_2',
-        schemaVersion: '1.0.0',
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
-        type: 'task.updated',
-        projectId: project.id,
-        scopeType: 'task',
-        scopeId: 'task_remote_1',
-        actor: 'remote-user',
-        payload: { status: 'done' },
-      },
-    ];
-
-    await enqueueInbound(project.id, fakeEvents);
-    const drained = await drainInbound(project.id);
-    expect(drained).toHaveLength(2);
-    expect(drained[0]?.id).toBe('evt_remote_1');
-
-    await markPulled(project.id, 'evt_remote_2');
-    const afterPull = await drainInbound(project.id);
-    expect(afterPull).toHaveLength(0);
-
-    const snapshot = await getQueueSnapshot(project.id);
-    expect(snapshot.lastPulledEventId).toBe('evt_remote_2');
-    expect(snapshot.inboundPendingCount).toBe(0);
-  });
-
-  it('applyPullResponse enqueues and advances lastPulledEventId', async () => {
+  it('applyPullResponse inserts pulled events into the store and is idempotent', async () => {
     const project = await createProject({
       title: 'Pull target',
       rootPath: sandbox,
     });
 
-    const state = await applyPullResponse(project.id, {
+    const response = {
       events: [
         {
           id: 'evt_remote_9',
           schemaVersion: '1.0.0',
           createdAt: new Date().toISOString(),
           updatedAt: new Date().toISOString(),
-          type: 'decision.proposed',
+          type: 'task.created',
           projectId: project.id,
-          scopeType: 'project',
-          scopeId: project.id,
+          scopeType: 'task',
+          scopeId: 'task_remote_9',
           actor: 'remote-user',
-          payload: { id: 'dec_1' } as never,
+          payload: { id: 'task_remote_9', title: 'Remote task' } as never,
         },
-      ],
+      ] as DomainEvent[],
       lastRemoteEventId: 'evt_remote_9',
-    });
+    };
 
-    expect(state.lastPulledEventId).toBe('evt_remote_9');
-    const inbound = await drainInbound(project.id);
-    expect(inbound).toHaveLength(1);
-    expect(inbound[0]?.id).toBe('evt_remote_9');
+    const inserted = await applyPullResponse(project.id, response);
+    expect(inserted).toBe(1);
+
+    const ids = (await readEvents(project.id)).map((e) => e.id);
+    expect(ids).toContain('evt_remote_9');
+
+    const state = await readSyncState(project.id);
+    expect(state?.lastPulledEventId).toBe('evt_remote_9');
+
+    const again = await applyPullResponse(project.id, response);
+    expect(again).toBe(0);
   });
 
-  it('getQueueSnapshot reports outbound and inbound pending counts', async () => {
+  it('getQueueSnapshot reports outbound pending count', async () => {
     const project = await createProject({
       title: 'Snapshot project',
       rootPath: sandbox,
@@ -169,6 +127,5 @@ describe('sync service', () => {
 
     const initialSnapshot = await getQueueSnapshot(project.id);
     expect(initialSnapshot.outboundPendingCount).toBeGreaterThan(0);
-    expect(initialSnapshot.inboundPendingCount).toBe(0);
   });
 });

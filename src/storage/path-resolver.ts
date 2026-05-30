@@ -59,10 +59,3 @@ export function getSyncFile(projectId: string): string {
   );
 }
 
-export function getSyncInboundFile(projectId: string): string {
-  const projectRoot = getProjectRoot(projectId);
-  return ensureWithinRoot(
-    path.join(projectRoot, 'sync', 'inbound.ndjson'),
-    projectRoot,
-  );
-}

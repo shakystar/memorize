@@ -4,7 +4,6 @@ import {
   getProjectDbFile,
   getProjectRoot,
   getSyncFile,
-  getSyncInboundFile,
   getTopicFile,
 } from '../../src/storage/path-resolver.js';
 import { createId, isValidId } from '../../src/domain/common.js';
@@ -63,7 +62,6 @@ describe('path-resolver ID validation', () => {
     const bad = '../escape';
     expect(() => getProjectDbFile(bad)).toThrow();
     expect(() => getSyncFile(bad)).toThrow();
-    expect(() => getSyncInboundFile(bad)).toThrow();
     expect(() => getTopicFile(VALID_PROJECT_ID, bad)).toThrow();
     expect(() => getTopicFile(bad, VALID_TOPIC_ID)).toThrow();
   });
@@ -72,7 +70,6 @@ describe('path-resolver ID validation', () => {
     expect(() => getTopicFile(VALID_PROJECT_ID, VALID_TOPIC_ID)).not.toThrow();
     expect(() => getProjectDbFile(VALID_PROJECT_ID)).not.toThrow();
     expect(() => getSyncFile(VALID_PROJECT_ID)).not.toThrow();
-    expect(() => getSyncInboundFile(VALID_PROJECT_ID)).not.toThrow();
   });
 
   it('returned paths stay within the project root', () => {

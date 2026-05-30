@@ -16,8 +16,6 @@ import {
   createTask,
 } from '../../src/services/task-service.js';
 import {
-  applyPullResponse,
-  drainInbound,
   pullProject,
   pushProject,
   updateSyncState,
@@ -131,10 +129,16 @@ describe('sync golden — 1.0 compatibility baseline', () => {
 
       await updateSyncState(projectIdB, { remoteProjectId: projectIdA });
 
-      const pullResponse = await pullProject(projectIdB, transport);
-      expect(pullResponse.events.length).toBeGreaterThan(0);
+      const pullResult = await pullProject(projectIdB, transport);
+      expect(pullResult.total).toBeGreaterThan(0);
+      expect(pullResult.inserted).toBeGreaterThan(0);
 
-      const inbound = await drainInbound(projectIdB);
+      // Apply-on-pull: every pulled event type now lives in B's event log.
+      // Filter to events that originated from A (the remote) to check
+      // what actually crossed the wire — B's own sync.state.updated events
+      // are excluded since they are local bookkeeping.
+      const allEvents = await readEvents(projectIdB);
+      const inbound = allEvents.filter((event) => event.projectId === projectIdA);
       const types = new Set(inbound.map((event) => event.type));
       // Every event type emitted on A must arrive intact on B.
       expect(types).toContain('project.created');
@@ -200,11 +204,8 @@ describe('sync golden — 1.0 compatibility baseline', () => {
       const setupB = await setupProject(projectDirB);
       const projectIdB = setupB.project.id;
       await updateSyncState(projectIdB, { remoteProjectId: projectIdA });
-      const pullResponse = await pullProject(projectIdB, transport);
-      // applyPullResponse moves events from inbound to local processing.
-      // For the golden test we just need to confirm the loop completes.
-      await applyPullResponse(projectIdB, pullResponse);
-      await drainInbound(projectIdB);
+      const pullResult = await pullProject(projectIdB, transport);
+      expect(pullResult.inserted).toBeGreaterThan(0);
 
       // B now creates its own event (the assignment-model use case in
       // Sprint 2 will rely on this exact pattern).
@@ -227,20 +228,20 @@ describe('sync golden — 1.0 compatibility baseline', () => {
       const boundA = await getBoundProjectId(projectDirA);
       expect(boundA).toBe(projectIdA);
 
-      const pullResponse = await pullProject(projectIdA, transport);
-      const inbound = await drainInbound(projectIdA);
+      const pullResult = await pullProject(projectIdA, transport);
+      const inbound = await readEvents(projectIdA);
 
       const titles = inbound
         .filter((event) => event.type === 'task.created')
         .map((event) => (event.payload as { title: string }).title);
-      // A should now see B's task in its inbound queue.
+      // A should now see B's task in its local event log.
       expect(titles).toContain('B added this task');
-      expect(pullResponse.events.length).toBeGreaterThan(0);
+      expect(pullResult.total).toBeGreaterThan(0);
     });
 
-    // Sanity: A's local event log on disk must NOT have been mutated
-    // by the pull — applyPullResponse stages events in inbound, the
-    // projector replay step is a separate concern.
+    // Apply-on-pull: A's local event log now contains BOTH its original task
+    // and B's pulled task. (Previously the inbound staging queue kept pulls out
+    // of the local log; that queue is removed.)
     const eventsOnA = await withMemorizeRoot(homeA, () =>
       readEvents(projectIdA),
     );
@@ -248,6 +249,7 @@ describe('sync golden — 1.0 compatibility baseline', () => {
       .filter((event) => event.type === 'task.created')
       .map((event) => (event.payload as { title: string }).title);
     expect(localTitles).toContain('A original task');
+    expect(localTitles).toContain('B added this task');
     // unused but kept to silence the linter
     void projectIdB;
   });

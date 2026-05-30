@@ -10,11 +10,11 @@ import { closeAll } from '../../src/storage/db.js';
 import { createProject } from '../../src/services/project-service.js';
 import { createTask } from '../../src/services/task-service.js';
 import {
-  drainInbound,
   pullProject,
   pushProject,
   updateSyncState,
 } from '../../src/services/sync-service.js';
+import { readEvents } from '../../src/storage/event-store.js';
 
 const repoRoot = process.cwd();
 const tsxCliPath = join(repoRoot, 'node_modules', 'tsx', 'dist', 'cli.mjs');
@@ -64,12 +64,53 @@ describe('sync roundtrip via file transport', () => {
     });
     await updateSyncState(projectB.id, { remoteProjectId: projectA.id });
 
-    const pullResponse = await pullProject(projectB.id, transport);
-    expect(pullResponse.events.length).toBeGreaterThan(0);
-    expect(pullResponse.lastRemoteEventId).toBe(pushResponse.lastAcceptedEventId);
+    const pullResult = await pullProject(projectB.id, transport);
+    expect(pullResult.total).toBeGreaterThan(0);
+    expect(pullResult.inserted).toBe(pullResult.total);
+    expect(pullResult.lastRemoteEventId).toBe(pushResponse.lastAcceptedEventId);
 
-    const inbound = await drainInbound(projectB.id);
+    const inbound = await readEvents(projectB.id);
     expect(inbound.some((event) => event.type === 'task.created')).toBe(true);
+  });
+
+  it('re-pull after apply inserts nothing (idempotent watermark)', async () => {
+    const remotePath = join(sandbox, 'remote');
+    const homeA = join(sandbox, 'home-a');
+    const homeB = join(sandbox, 'home-b');
+
+    process.env.MEMORIZE_ROOT = homeA;
+    const projectA = await createProject({
+      title: 'Project A',
+      rootPath: join(sandbox, 'a'),
+    });
+    await createTask({
+      projectId: projectA.id,
+      title: 'Task from A',
+      actor: 'user',
+    });
+    const transport = createFileSyncTransport(remotePath);
+    await pushProject(projectA.id, transport);
+
+    process.env.MEMORIZE_ROOT = homeB;
+    const projectB = await createProject({
+      title: 'Project B',
+      rootPath: join(sandbox, 'b'),
+    });
+    await updateSyncState(projectB.id, { remoteProjectId: projectA.id });
+
+    const firstPull = await pullProject(projectB.id, transport);
+    expect(firstPull.inserted).toBe(firstPull.total);
+    expect(firstPull.inserted).toBeGreaterThan(0);
+
+    const domainEvents = (e: Awaited<ReturnType<typeof readEvents>>) =>
+      e.filter((ev) => ev.type !== 'sync.state.updated');
+    const countAfterFirst = domainEvents(await readEvents(projectB.id)).length;
+    expect(countAfterFirst).toBeGreaterThan(0);
+
+    const secondPull = await pullProject(projectB.id, transport);
+    expect(secondPull.inserted).toBe(0);
+    // Idempotency at the store level: re-pull did not grow the domain event log.
+    expect(domainEvents(await readEvents(projectB.id)).length).toBe(countAfterFirst);
   });
 
   it('exposes push/pull/bind through the cli with --remote-path', { timeout: 30_000 }, async () => {

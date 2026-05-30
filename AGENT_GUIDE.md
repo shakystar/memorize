@@ -106,8 +106,7 @@ You interact with memorize through the CLI; never hand-edit
         ├── conflicts/<id>.json
         ├── topics/<topicId>.md
         └── sync/
-            ├── remote.json          # sync state
-            └── inbound.ndjson       # pending remote events
+            └── remote.json          # sync state
 ```
 
 Defaults: `MEMORIZE_ROOT` env overrides the location; if unset,

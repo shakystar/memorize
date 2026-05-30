@@ -1,21 +1,21 @@
-import fs from 'node:fs/promises';
-
 import { ACTOR_SYSTEM, nowIso } from '../domain/common.js';
-import type { DomainEvent } from '../domain/events.js';
 import type { ProjectSyncState } from '../domain/entities.js';
 import type {
   SyncPullResponse,
+  SyncPullResult,
   SyncPushRequest,
   SyncPushResponse,
   SyncQueueSnapshot,
 } from '../domain/sync-protocol.js';
 import type { SyncTransport } from '../domain/sync-transport.js';
-import { appendEvent, readEventsSince } from '../storage/event-store.js';
-import { appendLine, isEnoent, readJson, readNdjson, withFileLock, writeJson } from '../storage/fs-utils.js';
 import {
-  getSyncFile,
-  getSyncInboundFile,
-} from '../storage/path-resolver.js';
+  appendEvent,
+  insertExternalEvents,
+  readEventsSince,
+} from '../storage/event-store.js';
+import { readJson, writeJson } from '../storage/fs-utils.js';
+import { getSyncFile } from '../storage/path-resolver.js';
+import { rebuildProjectProjection } from './projection-store.js';
 
 async function readStateOrThrow(projectId: string): Promise<ProjectSyncState> {
   const state = await readJson<ProjectSyncState>(getSyncFile(projectId));
@@ -80,57 +80,26 @@ export async function markPushed(
   });
 }
 
-export async function enqueueInbound(
-  projectId: string,
-  events: DomainEvent[],
-): Promise<void> {
-  const filePath = getSyncInboundFile(projectId);
-  await withFileLock(filePath, async () => {
-    for (const event of events) {
-      await appendLine(filePath, JSON.stringify(event));
-    }
-  });
-}
-
-export async function drainInbound(
-  projectId: string,
-): Promise<DomainEvent[]> {
-  return readNdjson<DomainEvent>(getSyncInboundFile(projectId), {
-    // Skip corrupt lines — may result from interrupted writes
-    onCorrupt: () => {},
-  });
-}
-
-export async function markPulled(
-  projectId: string,
-  lastRemoteEventId: string,
-): Promise<ProjectSyncState> {
-  const filePath = getSyncInboundFile(projectId);
-  try {
-    await fs.writeFile(filePath, '', 'utf8');
-  } catch (error) {
-    if (!isEnoent(error)) {
-      throw error;
-    }
-  }
-  return updateSyncState(projectId, {
-    lastPulledEventId: lastRemoteEventId,
-    lastSyncAt: nowIso(),
-  });
-}
-
+/**
+ * Apply-on-pull. Insert pulled events into the SQLite log (INSERT OR IGNORE,
+ * idempotent), rebuild the projection, THEN advance the watermark last. A crash
+ * before the watermark advances leaves it stale, so the next pull re-requests
+ * the same range and converges (dupes ignored + idempotent rebuild). Returns
+ * the number of newly inserted events.
+ */
 export async function applyPullResponse(
   projectId: string,
   response: SyncPullResponse,
-): Promise<ProjectSyncState> {
-  await enqueueInbound(projectId, response.events);
+): Promise<number> {
+  const inserted = await insertExternalEvents(projectId, response.events);
+  await rebuildProjectProjection(projectId);
   if (response.lastRemoteEventId) {
-    return updateSyncState(projectId, {
+    await updateSyncState(projectId, {
       lastPulledEventId: response.lastRemoteEventId,
       lastSyncAt: nowIso(),
     });
   }
-  return readStateOrThrow(projectId);
+  return inserted;
 }
 
 export async function pushProject(
@@ -165,7 +134,7 @@ export async function pushProject(
 export async function pullProject(
   projectId: string,
   transport: SyncTransport,
-): Promise<SyncPullResponse> {
+): Promise<SyncPullResult> {
   const state = await readStateOrThrow(projectId);
   if (!state.remoteProjectId) {
     throw new Error(
@@ -182,24 +151,30 @@ export async function pullProject(
       : {}),
   });
 
+  let inserted = 0;
   if (response.events.length > 0) {
-    await applyPullResponse(projectId, response);
+    inserted = await applyPullResponse(projectId, response);
   }
   await updateSyncState(projectId, { syncStatus: 'idle' });
-  return response;
+
+  return {
+    total: response.events.length,
+    inserted,
+    ...(response.lastRemoteEventId
+      ? { lastRemoteEventId: response.lastRemoteEventId }
+      : {}),
+  };
 }
 
 export async function getQueueSnapshot(
   projectId: string,
 ): Promise<SyncQueueSnapshot> {
-  const [state, push, inbound] = await Promise.all([
+  const [state, push] = await Promise.all([
     readStateOrThrow(projectId),
     buildPushPayload(projectId),
-    drainInbound(projectId),
   ]);
   return {
     outboundPendingCount: push.events.length,
-    inboundPendingCount: inbound.length,
     ...(state.lastPushedEventId
       ? { lastPushedEventId: state.lastPushedEventId }
       : {}),
