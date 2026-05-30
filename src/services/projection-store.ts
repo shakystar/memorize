@@ -334,15 +334,15 @@ export function getProjectProjection(projectId: string): Project | undefined {
 }
 
 /**
- * State-as-of-revision: reduce the event log up to and including `eventId`.
+ * State-as-of-revision: reduce the event log up to and including `upToEventId`.
  * Read-only — no projection tables are written. Reuses the single reduction
  * authority `reduceProjectState`, exactly like `rebuildProjectProjection`.
  */
 export async function getProjectStateAtRevision(
   projectId: string,
-  eventId: string,
+  upToEventId: string,
 ): Promise<ProjectState> {
-  return reduceProjectState(await readEventsUpTo(projectId, eventId));
+  return reduceProjectState(await readEventsUpTo(projectId, upToEventId));
 }
 
 export function getMemoryIndex(

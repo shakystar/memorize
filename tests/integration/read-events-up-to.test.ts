@@ -41,6 +41,8 @@ describe('readEventsUpTo / getProjectStateAtRevision', () => {
     // inclusive: the boundary event is the LAST element
     expect(upTo[upTo.length - 1]!.id).toBe(boundary!.id);
     expect(upTo.length).toBeLessThan(all.length);
+    // Both reads are ORDER BY seq and tasks were created serially, so the
+    // bounded slice is exactly the prefix of the full log.
     expect(upTo.map((e) => e.id)).toEqual(
       all.slice(0, upTo.length).map((e) => e.id),
     );
