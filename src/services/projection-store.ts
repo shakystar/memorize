@@ -12,8 +12,9 @@ import type {
   Workstream,
 } from '../domain/entities.js';
 import { buildMemoryIndex, reduceProjectState } from '../projections/projector.js';
+import type { ProjectState } from '../projections/projector.js';
 import { getDb } from '../storage/db.js';
-import { readEvents } from '../storage/event-store.js';
+import { readEvents, readEventsUpTo } from '../storage/event-store.js';
 import { readJson, writeJson } from '../storage/fs-utils.js';
 import { getTopicFile } from '../storage/path-resolver.js';
 
@@ -330,6 +331,18 @@ export function getProjectProjection(projectId: string): Project | undefined {
     .prepare('SELECT data FROM projects WHERE id = ?')
     .get(projectId) as { data: string } | undefined;
   return parse<Project>(row);
+}
+
+/**
+ * State-as-of-revision: reduce the event log up to and including `upToEventId`.
+ * Read-only — no projection tables are written. Reuses the single reduction
+ * authority `reduceProjectState`, exactly like `rebuildProjectProjection`.
+ */
+export async function getProjectStateAtRevision(
+  projectId: string,
+  upToEventId: string,
+): Promise<ProjectState> {
+  return reduceProjectState(await readEventsUpTo(projectId, upToEventId));
 }
 
 export function getMemoryIndex(

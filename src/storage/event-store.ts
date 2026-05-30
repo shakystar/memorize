@@ -8,6 +8,7 @@ import type {
   DomainEventPayload,
   DomainEventType,
 } from '../domain/events.js';
+import { MemorizeError } from '../shared/errors.js';
 import { getDb } from './db.js';
 import { ensureDir } from './fs-utils.js';
 import { getProjectRoot } from './path-resolver.js';
@@ -245,6 +246,34 @@ export async function readEventsSince(
   }
   const rows = db
     .prepare('SELECT * FROM events WHERE seq > ? ORDER BY seq')
+    .all(watermark.seq) as EventRow[];
+  return rows.map(rowToEvent);
+}
+
+/**
+ * Events up to AND INCLUDING the revision identified by `upToEventId`, in `seq`
+ * order — state-as-of-revision (foundation for #19 revert / checkout). Mirrors
+ * `readEventsSince` but with an inclusive upper bound (`seq <= …`) and a strict
+ * throw on an unknown revision (a time-travel read must not silently return
+ * HEAD). The revision key is the stable `eventId`, not the machine-local `seq`
+ * (#22). Per-project db, so no `project_id` filter — a foreign eventId is simply
+ * absent and throws.
+ */
+export async function readEventsUpTo(
+  projectId: string,
+  upToEventId: string,
+): Promise<DomainEvent[]> {
+  const db = getDb(projectId);
+  const watermark = db
+    .prepare('SELECT seq FROM events WHERE id = ?')
+    .get(upToEventId) as { seq: number } | undefined;
+  if (!watermark) {
+    throw new MemorizeError(
+      `Revision ${upToEventId} not found in project ${projectId}.`,
+    );
+  }
+  const rows = db
+    .prepare('SELECT * FROM events WHERE seq <= ? ORDER BY seq')
     .all(watermark.seq) as EventRow[];
   return rows.map(rowToEvent);
 }
