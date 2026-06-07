@@ -70,8 +70,18 @@ describe('db', () => {
 
   it('stores events.schema_version as TEXT after migrations (fresh db)', () => {
     const db = getDb(VALID_PROJECT_ID);
-    expect(db.pragma('user_version', { simple: true })).toBe(5);
+    expect(db.pragma('user_version', { simple: true })).toBe(6);
     expect(columnType(db, 'events', 'schema_version')).toBe('TEXT');
+  });
+
+  it('creates the CLS projection tables (v6)', () => {
+    const db = getDb(VALID_PROJECT_ID);
+    const tables = db
+      .prepare(
+        "SELECT name FROM sqlite_master WHERE type = 'table' AND name IN ('observations', 'memories')",
+      )
+      .all() as Array<{ name: string }>;
+    expect(tables.map((t) => t.name).sort()).toEqual(['memories', 'observations']);
   });
 });
 
@@ -129,7 +139,7 @@ describe('db v5 schema_version rebuild', () => {
       const db = openDbAt(dbFile);
       try {
         // Reached the new user_version and the column is now TEXT.
-        expect(db.pragma('user_version', { simple: true })).toBe(5);
+        expect(db.pragma('user_version', { simple: true })).toBe(6);
         const cols = db
           .prepare('PRAGMA table_info(events)')
           .all() as Array<{ name: string; type: string }>;

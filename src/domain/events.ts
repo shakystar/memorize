@@ -2,8 +2,11 @@ import type { BaseEntity, EntityId } from './common.js';
 import type {
   Checkpoint,
   Conflict,
+  ConsolidatedMemory,
   Decision,
   Handoff,
+  MemorySupersededPayload,
+  Observation,
   Project,
   ProjectSyncState,
   Rule,
@@ -32,7 +35,14 @@ export type DomainEventType =
   | 'session.completed'
   | 'session.abandoned'
   | 'session.heartbeat'
-  | 'sync.state.updated';
+  | 'sync.state.updated'
+  // CLS two-layer memory (Phase 1). Short-term layer = observation.captured
+  // (cheap raw episode, no LLM); long-term layer = memory.consolidated
+  // (boundary-batch semantic extraction); memory.superseded closes a
+  // contradicted memory's validity window WITHOUT deleting anything.
+  | 'observation.captured'
+  | 'memory.consolidated'
+  | 'memory.superseded';
 
 export interface DomainEvent<TPayload = unknown> extends BaseEntity {
   type: DomainEventType;
@@ -57,4 +67,7 @@ export type DomainEventPayload =
   | Conflict
   | Session
   | SessionHeartbeatPayload
-  | ProjectSyncState;
+  | ProjectSyncState
+  | Observation
+  | ConsolidatedMemory
+  | MemorySupersededPayload;

@@ -5,6 +5,7 @@ import type {
   Conflict,
   Handoff,
   MemoryIndex,
+  Observation,
   Project,
   Rule,
   Session,
@@ -12,7 +13,7 @@ import type {
   Workstream,
 } from '../domain/entities.js';
 import { buildMemoryIndex, reduceProjectState } from '../projections/projector.js';
-import type { ProjectState } from '../projections/projector.js';
+import type { MemoryRecord, ProjectState } from '../projections/projector.js';
 import { getDb } from '../storage/db.js';
 import { readEvents, readEventsUpTo } from '../storage/event-store.js';
 import { readJson, writeJson } from '../storage/fs-utils.js';
@@ -31,7 +32,13 @@ export type PersistedMemoryIndex = MemoryIndex;
 // --- write side ------------------------------------------------------------
 
 /** Searchable entity kinds indexed into `search_fts`. */
-export type SearchKind = 'task' | 'handoff' | 'decision' | 'checkpoint' | 'topic';
+export type SearchKind =
+  | 'task'
+  | 'handoff'
+  | 'decision'
+  | 'checkpoint'
+  | 'topic'
+  | 'memory';
 
 /**
  * Flatten an entity's human-text fields into a single FTS document. Skips
@@ -56,6 +63,8 @@ const ENTITY_TABLES = [
   'rules',
   'conflicts',
   'sessions',
+  'observations',
+  'memories',
 ] as const;
 
 /**
@@ -138,6 +147,23 @@ export async function rebuildProjectProjection(
 
   const db = getDb(projectId);
   const writeAll = db.transaction(() => {
+    // Retrieval reinforcement (`last_accessed_at`) lives ONLY in the
+    // projection table — it is not an event, so a replace-all rebuild would
+    // wipe it on every write. Carry it over across routine rebuilds; a true
+    // from-scratch replay (fresh db, corruption recovery) resets it, which
+    // is the accepted best-effort grade of reinforcement (decision ⑤ —
+    // decay stays deterministic, reinforcement is a derived-layer
+    // convenience, not part of the source of truth).
+    const lastAccessedById = new Map<string, string>(
+      (
+        db
+          .prepare(
+            'SELECT id, last_accessed_at FROM memories WHERE last_accessed_at IS NOT NULL',
+          )
+          .all() as Array<{ id: string; last_accessed_at: string }>
+      ).map((row) => [row.id, row.last_accessed_at]),
+    );
+
     for (const table of [...SINGLETON_TABLES, ...ENTITY_TABLES]) {
       db.prepare(`DELETE FROM ${table}`).run();
     }
@@ -288,6 +314,44 @@ export async function rebuildProjectProjection(
         status: session.status ?? null,
         data: JSON.stringify(session),
       });
+    }
+
+    const insertObservation = db.prepare(
+      `INSERT INTO observations (id, session_id, signal, created_at, data)
+       VALUES (@id, @sessionId, @signal, @createdAt, @data)`,
+    );
+    for (const observation of Object.values(state.observations)) {
+      insertObservation.run({
+        id: observation.id,
+        sessionId: observation.sessionId ?? null,
+        signal: observation.signal,
+        createdAt: observation.createdAt,
+        data: JSON.stringify(observation),
+      });
+    }
+
+    const insertMemory = db.prepare(
+      `INSERT INTO memories
+         (id, kind, salience, created_at, invalid_at, superseded_by,
+          last_accessed_at, data)
+       VALUES
+         (@id, @kind, @salience, @createdAt, @invalidAt, @supersededBy,
+          @lastAccessedAt, @data)`,
+    );
+    for (const memory of Object.values(state.memories)) {
+      insertMemory.run({
+        id: memory.id,
+        kind: memory.kind,
+        salience: memory.salience,
+        createdAt: memory.createdAt,
+        invalidAt: memory.invalidAt ?? null,
+        supersededBy: memory.supersededBy ?? null,
+        lastAccessedAt: lastAccessedById.get(memory.id) ?? null,
+        data: JSON.stringify(memory),
+      });
+      // Superseded memories stay indexed — "what was true then" remains
+      // findable; retrieval-time ranking is what filters to valid-only.
+      indexEntity(memory.id, 'memory', searchText([memory.text]));
     }
 
     for (const topic of topicSearchRows) {
@@ -446,4 +510,79 @@ export function getSession(
     .prepare('SELECT data FROM sessions WHERE id = ?')
     .get(sessionId) as { data: string } | undefined;
   return parse<Session>(row);
+}
+
+// --- CLS two-layer memory (Phase 1) -----------------------------------------
+
+/** A valid (non-superseded) memory plus its best-effort reinforcement stamp. */
+export interface ValidMemoryRow {
+  memory: MemoryRecord;
+  /** Projection-only reinforcement signal — may reset on a full replay (⑤). */
+  lastAccessedAt?: string;
+}
+
+/** Memories whose validity window is still open, i.e. not superseded. */
+export function listValidMemories(projectId: string): ValidMemoryRow[] {
+  const rows = db(projectId)
+    .prepare(
+      'SELECT data, last_accessed_at FROM memories WHERE invalid_at IS NULL',
+    )
+    .all() as Array<{ data: string; last_accessed_at: string | null }>;
+  return rows.map((row) => ({
+    memory: JSON.parse(row.data) as MemoryRecord,
+    ...(row.last_accessed_at ? { lastAccessedAt: row.last_accessed_at } : {}),
+  }));
+}
+
+/**
+ * Most recent observations (short-term tail), newest first. Old rows are
+ * never deleted (append-only all the way down) — readers just take a recent
+ * window.
+ */
+export function listRecentObservations(
+  projectId: string,
+  opts: { sessionId?: string; limit: number; sinceIso?: string },
+): Observation[] {
+  const clauses: string[] = [];
+  const params: unknown[] = [];
+  if (opts.sessionId) {
+    clauses.push('session_id = ?');
+    params.push(opts.sessionId);
+  }
+  if (opts.sinceIso) {
+    clauses.push('created_at >= ?');
+    params.push(opts.sinceIso);
+  }
+  const where = clauses.length ? ` WHERE ${clauses.join(' AND ')}` : '';
+  const rows = db(projectId)
+    .prepare(
+      `SELECT data FROM observations${where} ORDER BY created_at DESC LIMIT ?`,
+    )
+    .all(...params, opts.limit) as Array<{ data: string }>;
+  return parseAll<Observation>(rows);
+}
+
+/**
+ * Retrieval reinforcement: stamp `last_accessed_at` on the memories that
+ * were just injected into a session. This is a projection-level UPDATE on a
+ * DERIVED table — the events log is untouched, so the append-only invariant
+ * holds. Deliberately best-effort (decision ⑤): survives routine rebuilds
+ * via the carry-over in rebuildProjectProjection, resets on a from-scratch
+ * replay.
+ */
+export function touchMemoryAccess(
+  projectId: string,
+  memoryIds: string[],
+  accessedAtIso: string,
+): void {
+  if (memoryIds.length === 0) return;
+  const database = db(projectId);
+  const update = database.prepare(
+    'UPDATE memories SET last_accessed_at = ? WHERE id = ?',
+  );
+  database.transaction(() => {
+    for (const memoryId of memoryIds) {
+      update.run(accessedAtIso, memoryId);
+    }
+  })();
 }

@@ -51,6 +51,18 @@ export {
 } from './entities/startup-context.js';
 export { type MemoryIndex } from './entities/memory-index.js';
 export {
+  MAX_SALIENCE,
+  MIN_SALIENCE,
+  type ConsolidatedMemory,
+  type ConsolidatedMemoryKind,
+  type MemorySupersededPayload,
+  type Observation,
+  type ObservationSignal,
+  clampSalience,
+  createConsolidatedMemory,
+  createObservation,
+} from './entities/memory.js';
+export {
   type ProjectSyncState,
   type SyncStatus,
 } from './entities/sync-state.js';

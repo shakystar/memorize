@@ -153,6 +153,38 @@ const MIGRATIONS: ReadonlyArray<(db: Database.Database) => void> = [
       CREATE INDEX IF NOT EXISTS idx_events_scope ON events(scope_type, scope_id);
     `);
   },
+  // v6 — CLS two-layer memory projection tables (Phase 1 spec §2). Both are
+  // replace-all sinks of rebuildProjectProjection, derived from
+  // `observation.captured` / `memory.consolidated` / `memory.superseded`
+  // events — always reconstructable by replay. The mutable columns on
+  // `memories` (`invalid_at`, `superseded_by`, `last_accessed_at`) live at
+  // the DERIVED projection level only; the events table stays append-only.
+  // `last_accessed_at` (retrieval reinforcement) is intentionally
+  // best-effort: carried over across routine rebuilds, reset by a true
+  // from-scratch replay (decision ⑤, 2026-06-08).
+  (db) => {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS observations (
+        id         TEXT PRIMARY KEY,
+        session_id TEXT,
+        signal     TEXT,
+        created_at TEXT,
+        data       TEXT NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_observations_created ON observations(created_at);
+      CREATE TABLE IF NOT EXISTS memories (
+        id               TEXT PRIMARY KEY,
+        kind             TEXT,
+        salience         INTEGER,
+        created_at       TEXT,
+        invalid_at       TEXT,
+        superseded_by    TEXT,
+        last_accessed_at TEXT,
+        data             TEXT NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_memories_kind ON memories(kind);
+    `);
+  },
 ];
 
 function runMigrations(db: Database.Database): void {

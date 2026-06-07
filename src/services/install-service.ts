@@ -5,6 +5,7 @@ import path from 'node:path';
 import which from 'which';
 
 import { isEnoent, writeJson } from '../storage/fs-utils.js';
+import { POST_TOOL_USE_MATCHER } from './capture-service.js';
 
 /**
  * Pick the fastest hook command form available on this machine. We do
@@ -61,7 +62,24 @@ function isMemorizeHookCommandFor(
 // Hook events the β contract registers for Claude. Stop is intentionally
 // absent — see hook-service.ts for the rationale (Stop fires per-turn,
 // not per-session, and lifecycle moved to SessionEnd + reapStaleSessions).
-const CLAUDE_HOOK_EVENTS = ['SessionStart', 'PreCompact', 'PostCompact', 'SessionEnd'] as const;
+// PostToolUse (CLS capture) carries a tool matcher so the hook subprocess
+// only spawns for tools the decision-signal filter could ever admit.
+const CLAUDE_HOOK_EVENTS = [
+  'SessionStart',
+  'PreCompact',
+  'PostCompact',
+  'SessionEnd',
+  'PostToolUse',
+] as const;
+
+// Per-event matcher for Claude hook registration. PostToolUse fires for
+// every tool; matching here (instead of in the handler) saves a subprocess
+// spawn per read-only tool call. The matcher is DERIVED from
+// capture-service's whitelist (single source — decision ③), so the hook
+// registration can never drift from the filter.
+const CLAUDE_HOOK_MATCHERS: Partial<Record<string, string>> = {
+  PostToolUse: POST_TOOL_USE_MATCHER,
+};
 
 // Memorize hook events that previous installs may have registered but
 // the current β contract no longer wants. We strip these from the
@@ -88,9 +106,13 @@ interface HookMatcherGroup {
 
 type HooksMap = Record<string, HookMatcherGroup[]>;
 
-function hookGroupHasCommand(group: HookMatcherGroup, command: string): boolean {
+function hookGroupHasCommand(
+  group: HookMatcherGroup,
+  command: string,
+  matcher: string,
+): boolean {
   return (
-    (group.matcher ?? '') === '' &&
+    (group.matcher ?? '') === matcher &&
     group.hooks.some((entry) => entry.command === command)
   );
 }
@@ -98,15 +120,16 @@ function hookGroupHasCommand(group: HookMatcherGroup, command: string): boolean 
 function ensureMemorizeCommand(
   list: HookMatcherGroup[] | undefined,
   command: string,
+  matcher: string = '',
 ): HookMatcherGroup[] {
   const current = list ?? [];
-  if (current.some((group) => hookGroupHasCommand(group, command))) {
+  if (current.some((group) => hookGroupHasCommand(group, command, matcher))) {
     return current;
   }
   return [
     ...current,
     {
-      matcher: '',
+      matcher,
       hooks: [{ type: 'command', command }],
     },
   ];
@@ -225,6 +248,7 @@ export async function installClaudeIntegration(cwd: string): Promise<string> {
     rebuilt[event] = ensureMemorizeCommand(
       purged[event],
       buildHookCommand(form, 'claude', event),
+      CLAUDE_HOOK_MATCHERS[event] ?? '',
     );
   }
 
@@ -242,11 +266,14 @@ const CODEX_END_MARKER = '<!-- memorize:bootstrap v=1 end -->';
 const LEGACY_CODEX_START_MARKER = '<!-- Memorize:START -->';
 const LEGACY_CODEX_END_MARKER = '<!-- Memorize:END -->';
 
-// Codex hook events the β contract registers. SessionStart only —
-// codex has no SessionEnd / Shutdown / Exit hook (verified against
-// developers.openai.com/codex/hooks 2026-05), so codex lifecycle is
-// owned entirely by reapStaleSessions.
-const CODEX_HOOK_EVENTS = ['SessionStart'] as const;
+// Codex hook events the β contract registers. Codex has no SessionEnd /
+// Shutdown / Exit hook (verified against developers.openai.com/codex/hooks
+// 2026-05), so codex session lifecycle is owned by reapStaleSessions, and
+// the CLS consolidation boundary is PostCompact + the next SessionStart's
+// catch-up. PostToolUse is registered even though codex currently fires it
+// for Bash-like tools only — partial capture beats none, and coverage
+// widens automatically if the upstream issue is fixed.
+const CODEX_HOOK_EVENTS = ['SessionStart', 'PostToolUse', 'PostCompact'] as const;
 
 // Codex Stop fires per-turn just like Claude's, so the rc.X
 // auto-handoff path was wrong here too. Strip the legacy registration
