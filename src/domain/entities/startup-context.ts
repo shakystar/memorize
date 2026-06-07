@@ -2,6 +2,7 @@ import type { ISODateString } from '../common.js';
 import type { Checkpoint } from './checkpoint.js';
 import type { Conflict } from './conflict.js';
 import type { Handoff } from './handoff.js';
+import type { ConsolidatedMemoryKind, ObservationSignal } from './memory.js';
 import type { Task, TaskStatus } from './task.js';
 
 export interface OtherActiveTaskAssignment {
@@ -37,4 +38,22 @@ export interface StartupContextPayload {
    *  different task and avoid duplicate work. Empty when no parallel
    *  sessions are active. */
   otherActiveTasks?: OtherActiveTask[];
+  /** CLS long-term layer: consolidated decisions/rationale/progress picked
+   *  by retrieval-time ranking (recency decay + salience + relevance).
+   *  Already budget-trimmed by the retrieval service. */
+  consolidatedMemories?: Array<{
+    id: string;
+    kind: ConsolidatedMemoryKind;
+    text: string;
+    salience: number;
+    createdAt: ISODateString;
+  }>;
+  /** CLS short-term layer: tail of the previous session's raw observations
+   *  (high-signal only — the capture filter already rejected chatter). */
+  recentObservations?: Array<{
+    signal: ObservationSignal;
+    toolName?: string;
+    summary?: string;
+    createdAt: ISODateString;
+  }>;
 }

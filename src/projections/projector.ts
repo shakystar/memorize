@@ -3,9 +3,12 @@ import type { DomainEvent } from '../domain/events.js';
 import type {
   Checkpoint,
   Conflict,
+  ConsolidatedMemory,
   Decision,
   Handoff,
   MemoryIndex,
+  MemorySupersededPayload,
+  Observation,
   Project,
   Rule,
   Session,
@@ -13,6 +16,18 @@ import type {
   Task,
   Workstream,
 } from '../domain/entities.js';
+
+/**
+ * A consolidated memory plus its replay-derived validity window. The
+ * invalidation fields come from `memory.superseded` events (bi-temporal,
+ * invalidate-not-delete) — fully deterministic under replay. Retrieval
+ * reinforcement (`last_accessed_at`) is deliberately NOT here: it is a
+ * projection-table-only, best-effort column (decision ⑤).
+ */
+export interface MemoryRecord extends ConsolidatedMemory {
+  invalidAt?: string;
+  supersededBy?: string;
+}
 
 export interface ProjectState {
   project: Project | undefined;
@@ -24,6 +39,8 @@ export interface ProjectState {
   rules: Record<string, Rule>;
   conflicts: Record<string, Conflict>;
   sessions: Record<string, Session>;
+  observations: Record<string, Observation>;
+  memories: Record<string, MemoryRecord>;
 }
 
 export function reduceProjectState(events: DomainEvent[]): ProjectState {
@@ -37,6 +54,8 @@ export function reduceProjectState(events: DomainEvent[]): ProjectState {
     rules: {},
     conflicts: {},
     sessions: {},
+    observations: {},
+    memories: {},
   };
 
   for (const event of events) {
@@ -154,6 +173,33 @@ export function reduceProjectState(events: DomainEvent[]): ProjectState {
             ...existing,
             lastSeenAt: payload.at,
             updatedAt: payload.at,
+          };
+        }
+        break;
+      case 'observation.captured':
+        {
+          const observation = event.payload as Observation;
+          state.observations[observation.id] = observation;
+        }
+        break;
+      case 'memory.consolidated':
+        {
+          const memory = event.payload as ConsolidatedMemory;
+          state.memories[memory.id] = memory;
+        }
+        break;
+      case 'memory.superseded':
+        {
+          // Invalidate-not-delete: close the old memory's validity window
+          // at the superseding event's timestamp. The original entry stays
+          // so point-in-time replays still see what was true then.
+          const payload = event.payload as MemorySupersededPayload;
+          const existing = state.memories[payload.supersedes];
+          if (!existing) break;
+          state.memories[payload.supersedes] = {
+            ...existing,
+            invalidAt: event.createdAt,
+            supersededBy: payload.supersededBy,
           };
         }
         break;

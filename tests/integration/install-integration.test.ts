@@ -307,15 +307,30 @@ describe('install integration', () => {
     expect(override).toBe(content);
   });
 
+  it('install codex warns that codex requires one-time hook trust approval', () => {
+    // Verified live (codex v0.137.0, 2026-06-08): codex SILENTLY skips
+    // externally-written hooks until the user approves them once. The
+    // install output must surface this or the integration is a silent
+    // no-op that looks installed.
+    const result = runCli(['install', 'codex']);
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain('ACTION REQUIRED');
+    expect(result.stdout).toContain('approve');
+  });
+
   it('doctor reports install.codex:ok after a clean install codex', () => {
     runCli(['install', 'codex']);
 
     const result = runCli(['doctor', '--json']);
     const report = JSON.parse(String(result.stdout)) as {
-      checks: Array<{ id: string; status: string }>;
+      checks: Array<{ id: string; status: string; message: string }>;
     };
     const codexCheck = report.checks.find((c) => c.id === 'install.codex');
     expect(codexCheck?.status).toBe('ok');
+    // The ok message carries the trust caveat — registration is the most
+    // doctor can verify (codex keeps hook trust state internal).
+    expect(codexCheck?.message).toContain('PostToolUse');
+    expect(codexCheck?.message).toContain('approve');
   });
 
   it('doctor reports install.codex:warn when hooks.json exists but memorize hooks are missing', async () => {
@@ -390,6 +405,58 @@ describe('install integration', () => {
       expect(memorizeCmd, `event ${event} has a memorize entry`).toBeDefined();
       expect(memorizeCmd!).toBe(`memorize hook claude ${event}`);
       expect(memorizeCmd!).not.toMatch(/^npx\s/);
+    }
+  });
+
+  it('registers the CLS capture + boundary hooks (spec §8 — automated in place of manual dogfood)', async () => {
+    // Claude: PostToolUse must be registered WITH the tool matcher derived
+    // from capture-service's whitelist (single source — a drift between
+    // matcher and filter is a silent capture outage).
+    const claude = runCli(['install', 'claude']);
+    expect(claude.status).toBe(0);
+
+    const settings = JSON.parse(
+      await readFile(join(sandbox, '.claude', 'settings.local.json'), 'utf8'),
+    ) as {
+      hooks: Record<
+        string,
+        Array<{ matcher?: string; hooks: Array<{ type: string; command: string }> }>
+      >;
+    };
+    const postToolUse = (settings.hooks.PostToolUse ?? []).find((group) =>
+      group.hooks.some((entry) => /memorize hook claude PostToolUse/.test(entry.command)),
+    );
+    expect(postToolUse).toBeDefined();
+    expect(postToolUse?.matcher).toBe('Write|Edit|MultiEdit|Bash');
+
+    // Re-install must not duplicate the matcher'd entry.
+    runCli(['install', 'claude']);
+    const settingsAfter = JSON.parse(
+      await readFile(join(sandbox, '.claude', 'settings.local.json'), 'utf8'),
+    ) as typeof settings;
+    const postToolUseEntries = (settingsAfter.hooks.PostToolUse ?? []).flatMap((g) =>
+      g.hooks.filter((h) => /memorize hook claude PostToolUse/.test(h.command)),
+    );
+    expect(postToolUseEntries).toHaveLength(1);
+
+    // Codex: capture (PostToolUse) + compaction boundary (PostCompact) are
+    // registered globally — codex has no SessionEnd, so PostCompact + the
+    // next SessionStart's catch-up are its only consolidation boundaries.
+    const codex = runCli(['install', 'codex']);
+    expect(codex.status).toBe(0);
+    const codexHooks = JSON.parse(
+      await readFile(join(codexHome, '.codex', 'hooks.json'), 'utf8'),
+    ) as {
+      hooks: Record<string, Array<{ hooks: Array<{ command: string }> }>>;
+    };
+    for (const event of ['SessionStart', 'PostToolUse', 'PostCompact']) {
+      const cmds = (codexHooks.hooks[event] ?? []).flatMap((g) =>
+        g.hooks.map((h) => h.command),
+      );
+      expect(
+        cmds.some((c) => new RegExp(`memorize hook codex ${event}`).test(c)),
+        `codex ${event} registered`,
+      ).toBe(true);
     }
   });
 

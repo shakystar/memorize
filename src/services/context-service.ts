@@ -5,6 +5,10 @@ import type {
 } from '../domain/entities.js';
 import { freshnessLabel } from './freshness.js';
 import {
+  reinforceInjectedMemories,
+  retrieveMemoryContext,
+} from './memory-retrieval-service.js';
+import {
   getMemoryIndex,
   getRule,
   getWorkstream,
@@ -134,7 +138,36 @@ export async function loadStartContext(params: {
     ...(params.selfSessionId ? { selfSessionId: params.selfSessionId } : {}),
   });
 
+  // CLS two-layer retrieval: rank consolidated memories + the previous
+  // session's observation tail in one pool, then stamp the injected
+  // memories as accessed (reinforcement — projection-only, best-effort ⑤).
+  const retrieved = retrieveMemoryContext(params.projectId, {
+    ...(task?.title ? { taskTitle: task.title } : {}),
+  });
+  reinforceInjectedMemories(params.projectId, retrieved.memories);
+
   return {
+    ...(retrieved.memories.length > 0
+      ? {
+          consolidatedMemories: retrieved.memories.map(({ memory }) => ({
+            id: memory.id,
+            kind: memory.kind,
+            text: memory.text,
+            salience: memory.salience,
+            createdAt: memory.createdAt,
+          })),
+        }
+      : {}),
+    ...(retrieved.observations.length > 0
+      ? {
+          recentObservations: retrieved.observations.map((observation) => ({
+            signal: observation.signal,
+            ...(observation.toolName ? { toolName: observation.toolName } : {}),
+            ...(observation.summary ? { summary: observation.summary } : {}),
+            createdAt: observation.createdAt,
+          })),
+        }
+      : {}),
     projectSummary: memoryIndex?.shortSummary ?? project.summary,
     projectRules: rules.map((rule) => `${rule.title}: ${rule.body}`),
     ...(workstream?.summary

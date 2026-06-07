@@ -13,6 +13,8 @@ import { SESSION_ENV_VAR } from '../storage/cwd-session-store.js';
 import { withFileLock } from '../storage/file-lock.js';
 import { getProjectRoot } from '../storage/path-resolver.js';
 import path from 'node:path';
+import { captureObservation } from './capture-service.js';
+import { consolidate } from './consolidate-service.js';
 import { composeStartupContext } from './startup-context-service.js';
 import {
   ensureBoundProjectId,
@@ -118,6 +120,38 @@ function prepareHookText(
   return truncated;
 }
 
+/**
+ * Boundary consolidation attempt — NEVER fails the hook. A failure (LLM
+ * timeout, lock contention, mid-write kill) leaves the watermark behind,
+ * and the next boundary — including the next SessionStart's catch-up —
+ * retries the same observation window (consolidate is watermark-idempotent).
+ */
+async function tryConsolidate(
+  ctx: HookContext,
+  sessionId: string | undefined,
+  opts: { llmTimeoutMs?: number } = {},
+): Promise<void> {
+  try {
+    await consolidate({
+      projectId: ctx.projectId,
+      actor: ctx.agent,
+      ...(sessionId ? { sessionId } : {}),
+      ...(opts.llmTimeoutMs ? { llmTimeoutMs: opts.llmTimeoutMs } : {}),
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    process.stderr.write(
+      `WARN: memory consolidation deferred (${message}); will catch up at the next boundary\n`,
+    );
+  }
+}
+
+/** Claude blocks session startup on the SessionStart hook's output, so the
+ *  catch-up consolidation must not hang on a slow LLM: bound it tightly. A
+ *  timeout here just defers the window to the next (non-blocking) boundary
+ *  — the watermark only advances on success. */
+const SESSION_START_LLM_TIMEOUT_MS = 5_000;
+
 const handleSessionStart: HookHandler = async (ctx) => {
   // Opening the DB runs only DDL migrations — a project upgraded from the
   // NDJSON era reads as an empty store until `memorize migrate` imports its
@@ -129,6 +163,15 @@ const handleSessionStart: HookHandler = async (ctx) => {
         'Run `memorize migrate` to import it.\n',
     );
   }
+
+  // CLS catch-up: a SessionEnd whose subprocess was reaped (or a codex
+  // session, which has no SessionEnd at all) may have left observations
+  // unconsolidated. Run the boundary FIRST so composeStartupContext below
+  // injects memories that include the previous session's window. LLM time
+  // is tightly bounded — this path blocks the agent's startup.
+  await tryConsolidate(ctx, undefined, {
+    llmTimeoutMs: SESSION_START_LLM_TIMEOUT_MS,
+  });
 
   const identity = parseIdentityPayload(ctx.rawPayload);
   // Walk up from this hook subprocess to find the agent's pid. Stored
@@ -266,6 +309,10 @@ const handlePostCompact: HookHandler = async (ctx) => {
     summary,
   });
 
+  // Compaction is a CLS boundary: consolidate the observation window that
+  // is about to fall out of the agent's context.
+  await tryConsolidate(ctx, sessionId);
+
   // PostCompact / PreCompact / Stop must NOT include `hookSpecificOutput`
   // — Claude Code's schema validator rejects it on these events. Top-level
   // fields like `systemMessage` are the only valid surface here.
@@ -323,6 +370,14 @@ const handleSessionEnd: HookHandler = async (ctx) => {
     ctx.cwd,
     resolvedSessionId ? { sessionId: resolvedSessionId } : {},
   );
+
+  // Session end is a CLS boundary too. Claude exits as soon as the hook
+  // fires, so this subprocess can be reaped mid-consolidation — that is
+  // fine by design: the watermark only advances on success, and the next
+  // SessionStart's catch-up redoes the window (install-service picked the
+  // fast bare command form for exactly this reason).
+  await tryConsolidate(ctx, resolvedSessionId);
+
   return JSON.stringify({
     systemMessage: 'memorize: session paused (resumable)',
   });
@@ -332,8 +387,27 @@ const handleSessionEnd: HookHandler = async (ctx) => {
 // has nothing to contribute (PreCompact, PreToolUse, etc.).
 const EMPTY_HOOK_RESULT = JSON.stringify({});
 
+// CLS short-term capture. Fires on every whitelisted tool use, so it must
+// be cheap (rule filter + one append, no LLM, no FTS reindex) and must
+// NEVER fail the agent's tool flow — any error degrades to a no-op warn.
+const handlePostToolUse: HookHandler = async (ctx) => {
+  try {
+    await captureObservation({
+      projectId: ctx.projectId,
+      agent: ctx.agent,
+      cwd: ctx.cwd,
+      rawPayload: ctx.rawPayload,
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    process.stderr.write(`WARN: observation capture skipped (${message})\n`);
+  }
+  return EMPTY_HOOK_RESULT;
+};
+
 const claudeHookHandlers: Record<string, HookHandler> = {
   SessionStart: handleSessionStart,
+  PostToolUse: handlePostToolUse,
   PostCompact: handlePostCompact,
   SessionEnd: handleSessionEnd,
   Stop: handleStop,
@@ -341,6 +415,13 @@ const claudeHookHandlers: Record<string, HookHandler> = {
 
 const codexHookHandlers: Record<string, HookHandler> = {
   SessionStart: handleSessionStart,
+  // Codex PostToolUse fires for Bash-like tools only (known issue — see
+  // direction doc §10-D), so codex capture coverage is the Bash branch of
+  // the decision-signal filter. Better partial than absent.
+  PostToolUse: handlePostToolUse,
+  // Codex has no SessionEnd hook, so PostCompact + the next SessionStart's
+  // consolidation catch-up are its only CLS boundaries.
+  PostCompact: handlePostCompact,
   // Codex has no SessionEnd hook (verified against
   // developers.openai.com/codex/hooks 2026-05). Codex sessions get
   // cleaned up entirely via reapStaleSessions — either on the next
