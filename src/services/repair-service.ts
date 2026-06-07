@@ -197,9 +197,10 @@ async function checkCodexInstall(
     };
   }
 
-  // Codex has no SessionEnd hook (verified May 2026), so SessionStart
-  // is the only memorize entry we expect to see post-β-redesign.
-  const events = ['SessionStart'];
+  // The CLS contract registers SessionStart (lifecycle + consolidation
+  // catch-up), PostToolUse (capture), and PostCompact (boundary). Codex
+  // has no SessionEnd hook (verified May 2026).
+  const events = ['SessionStart', 'PostToolUse', 'PostCompact'];
   const hooks = parsed.hooks ?? {};
   const missing = events.filter((event) => {
     const list = hooks[event] ?? [];
@@ -217,8 +218,7 @@ async function checkCodexInstall(
       id: 'install.codex',
       label: 'Codex integration',
       status: 'warn',
-      message:
-        'Missing memorize hooks in ~/.codex/hooks.json (SessionStart, Stop)',
+      message: `Missing memorize hooks in ~/.codex/hooks.json (${events.join(', ')})`,
       fix: 'memorize install codex',
     };
   }
@@ -231,11 +231,19 @@ async function checkCodexInstall(
       fix: 'memorize install codex',
     };
   }
+  // Registration is the most doctor can verify: codex keeps its hook
+  // trust state internal and SILENTLY skips externally-written hooks
+  // until the user approves them once in an interactive session
+  // (verified live against codex v0.137.0, 2026-06-08). Carry that
+  // caveat in the ok message so "doctor says ok but codex records
+  // nothing" has a visible explanation.
   return {
     id: 'install.codex',
     label: 'Codex integration',
     status: 'ok',
-    message: 'memorize SessionStart + Stop hooks registered in ~/.codex/hooks.json',
+    message:
+      'memorize hooks registered in ~/.codex/hooks.json (SessionStart, PostToolUse, PostCompact). ' +
+      'Note: codex runs externally-written hooks only after you approve them once in an interactive codex session.',
   };
 }
 

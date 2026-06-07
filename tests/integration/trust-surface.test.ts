@@ -7,6 +7,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 let sandbox: string;
 let memorizeRoot: string;
+let fakeHome: string;
 
 const repoRoot = process.cwd();
 const tsxCliPath = join(repoRoot, 'node_modules', 'tsx', 'dist', 'cli.mjs');
@@ -19,6 +20,12 @@ function runCli(args: string[]) {
     env: {
       ...process.env,
       MEMORIZE_ROOT: memorizeRoot,
+      // doctor's install.codex check reads ~/.codex/hooks.json via
+      // os.homedir(); without this isolation a real hooks.json on the
+      // host machine leaks into the report and flips its exit code.
+      // os.homedir() reads USERPROFILE on Windows, so override both.
+      HOME: fakeHome,
+      USERPROFILE: fakeHome,
     },
   });
 }
@@ -26,6 +33,7 @@ function runCli(args: string[]) {
 beforeEach(async () => {
   sandbox = await mkdtemp(join(tmpdir(), 'memorize-trust-surface-'));
   memorizeRoot = join(sandbox, '.memorize-home');
+  fakeHome = join(sandbox, 'fake-home');
 });
 
 afterEach(async () => {

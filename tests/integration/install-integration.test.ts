@@ -307,15 +307,30 @@ describe('install integration', () => {
     expect(override).toBe(content);
   });
 
+  it('install codex warns that codex requires one-time hook trust approval', () => {
+    // Verified live (codex v0.137.0, 2026-06-08): codex SILENTLY skips
+    // externally-written hooks until the user approves them once. The
+    // install output must surface this or the integration is a silent
+    // no-op that looks installed.
+    const result = runCli(['install', 'codex']);
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain('ACTION REQUIRED');
+    expect(result.stdout).toContain('approve');
+  });
+
   it('doctor reports install.codex:ok after a clean install codex', () => {
     runCli(['install', 'codex']);
 
     const result = runCli(['doctor', '--json']);
     const report = JSON.parse(String(result.stdout)) as {
-      checks: Array<{ id: string; status: string }>;
+      checks: Array<{ id: string; status: string; message: string }>;
     };
     const codexCheck = report.checks.find((c) => c.id === 'install.codex');
     expect(codexCheck?.status).toBe('ok');
+    // The ok message carries the trust caveat — registration is the most
+    // doctor can verify (codex keeps hook trust state internal).
+    expect(codexCheck?.message).toContain('PostToolUse');
+    expect(codexCheck?.message).toContain('approve');
   });
 
   it('doctor reports install.codex:warn when hooks.json exists but memorize hooks are missing', async () => {
