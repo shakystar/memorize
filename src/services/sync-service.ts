@@ -4,7 +4,7 @@ import {
   assertValidId,
   nowIso,
 } from '../domain/common.js';
-import type { ProjectSyncState } from '../domain/entities.js';
+import type { ProjectSyncState, SyncTransportConfig } from '../domain/entities.js';
 import type {
   SyncPullResponse,
   SyncPullResult,
@@ -114,20 +114,28 @@ export async function pushProject(
   transport: SyncTransport,
 ): Promise<SyncPushResponse> {
   let state = await readStateOrThrow(projectId);
+  // First push self-binds the remote (true-replica origin). One-time write.
   if (!state.remoteProjectId) {
     state = await updateSyncState(projectId, {
       remoteProjectId: projectId,
       syncEnabled: true,
-      syncStatus: 'syncing',
     });
-  } else if (state.syncStatus !== 'syncing') {
-    state = await updateSyncState(projectId, { syncStatus: 'syncing' });
   }
 
+  // Build the slice BEFORE flipping status, so a no-op push (the common case
+  // at an auto-sync boundary with nothing new) writes ZERO sync.state.updated
+  // events when already idle — avoids per-boundary log churn now that this
+  // runs automatically.
   const payload = await buildPushPayload(projectId);
   if (payload.events.length === 0) {
-    await updateSyncState(projectId, { syncStatus: 'idle' });
+    if (state.syncStatus !== 'idle') {
+      await updateSyncState(projectId, { syncStatus: 'idle' });
+    }
     return { accepted: [], rejected: [] };
+  }
+
+  if (state.syncStatus !== 'syncing') {
+    await updateSyncState(projectId, { syncStatus: 'syncing' });
   }
 
   const response = await transport.push(payload);
@@ -196,6 +204,7 @@ export async function cloneProject(
   cwd: string,
   remoteProjectId: string,
   transport: SyncTransport,
+  transportConfig?: SyncTransportConfig,
 ): Promise<CloneResult> {
   assertValidId(remoteProjectId, 'remoteProjectId');
 
@@ -228,6 +237,8 @@ export async function cloneProject(
       projectId: remoteProjectId,
       remoteProjectId,
       syncEnabled: true,
+      // Persist WHERE to sync so later boundaries auto-push/pull with no flag.
+      ...(transportConfig ? { syncTransport: transportConfig } : {}),
       syncStatus: 'idle',
     };
     await writeJson(getSyncFile(remoteProjectId), initial);
