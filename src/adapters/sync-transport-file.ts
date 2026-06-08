@@ -9,7 +9,7 @@ import type {
   SyncPushResponse,
 } from '../domain/sync-protocol.js';
 import type { SyncTransport } from '../domain/sync-transport.js';
-import { ensureParentDir, readNdjson } from '../storage/fs-utils.js';
+import { ensureParentDir, readNdjson, withFileLock } from '../storage/fs-utils.js';
 
 function remoteEventsFile(remoteRoot: string, remoteProjectId: string): string {
   return path.join(remoteRoot, remoteProjectId, 'events.ndjson');
@@ -22,11 +22,19 @@ export function createFileSyncTransport(remoteRoot: string): SyncTransport {
       const filePath = remoteEventsFile(remoteRoot, remoteProjectId);
       await ensureParentDir(filePath);
 
-      const acceptedIds: string[] = [];
-      for (const event of request.events) {
-        await fs.appendFile(filePath, `${JSON.stringify(event)}\n`, 'utf8');
-        acceptedIds.push(event.id);
-      }
+      // Auto-sync raises the odds of concurrent pushes to the shared relay
+      // file. Serialize the append batch under a cross-process file lock so
+      // lines can't interleave. (Residual caveat: mkdir locks over cloud-sync
+      // folders are eventually-consistent, not truly atomic — a real HTTP
+      // relay in P3-b-2 removes this.)
+      const acceptedIds = await withFileLock(filePath, async () => {
+        const ids: string[] = [];
+        for (const event of request.events) {
+          await fs.appendFile(filePath, `${JSON.stringify(event)}\n`, 'utf8');
+          ids.push(event.id);
+        }
+        return ids;
+      });
 
       const lastAcceptedEventId = acceptedIds[acceptedIds.length - 1];
       return {

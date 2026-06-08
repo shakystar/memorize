@@ -71,4 +71,5 @@ export {
 export {
   type ProjectSyncState,
   type SyncStatus,
+  type SyncTransportConfig,
 } from './entities/sync-state.js';

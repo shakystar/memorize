@@ -69,7 +69,11 @@ export async function runProjectCommand(
       throw new Error('--remote-path is required for clone.');
     }
     const transport = createFileSyncTransport(remotePath);
-    const result = await cloneProject(cwd, remoteProjectId, transport);
+    // Persist the location so later boundaries auto-sync with no flag (P3-b).
+    const result = await cloneProject(cwd, remoteProjectId, transport, {
+      type: 'file',
+      location: remotePath,
+    });
     console.log(
       result.pulled > 0
         ? `Cloned project ${result.projectId} (${result.pulled} events pulled).`
@@ -115,6 +119,12 @@ export async function runProjectCommand(
         );
       }
       const transport = createFileSyncTransport(remotePath);
+      // Persist the transport location so background auto-sync (P3-b) can run
+      // at boundaries without a flag — this manual push/pull is how the origin
+      // machine opts in.
+      await updateSyncState(projectId, {
+        syncTransport: { type: 'file', location: remotePath },
+      });
       if (flags.boolean.push) {
         const response = await pushProject(projectId, transport);
         console.log(

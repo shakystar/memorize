@@ -13,6 +13,7 @@ import { SESSION_ENV_VAR } from '../storage/cwd-session-store.js';
 import { withFileLock } from '../storage/file-lock.js';
 import { getProjectRoot } from '../storage/path-resolver.js';
 import path from 'node:path';
+import { autoPull, autoPush } from './auto-sync-service.js';
 import { captureObservation } from './capture-service.js';
 import { consolidate } from './consolidate-service.js';
 import { composeLiveUpdate } from './realtime-share-service.js';
@@ -174,6 +175,11 @@ const handleSessionStart: HookHandler = async (ctx) => {
     llmTimeoutMs: SESSION_START_LLM_TIMEOUT_MS,
   });
 
+  // P3-b: pull sibling-machine events BEFORE composing startup context so the
+  // injected memories/tasks reflect the latest remote state. No-op + silent
+  // unless this project has a persisted syncTransport; never throws.
+  await autoPull(ctx.projectId);
+
   const identity = parseIdentityPayload(ctx.rawPayload);
   // Walk up from this hook subprocess to find the agent's pid. Stored
   // on the pointer so the picker can later detect "agent process
@@ -314,6 +320,10 @@ const handlePostCompact: HookHandler = async (ctx) => {
   // is about to fall out of the agent's context.
   await tryConsolidate(ctx, sessionId);
 
+  // P3-b: propagate this boundary's new events to siblings (background, no-op
+  // unless syncTransport is configured; never throws).
+  await autoPush(ctx.projectId);
+
   // PostCompact / PreCompact / Stop must NOT include `hookSpecificOutput`
   // — Claude Code's schema validator rejects it on these events. Top-level
   // fields like `systemMessage` are the only valid surface here.
@@ -378,6 +388,12 @@ const handleSessionEnd: HookHandler = async (ctx) => {
   // SessionStart's catch-up redoes the window (install-service picked the
   // fast bare command form for exactly this reason).
   await tryConsolidate(ctx, resolvedSessionId);
+
+  // P3-b: final push of the session's events before it exits. The subprocess
+  // may be reaped mid-push — fine, push is watermark-idempotent and the next
+  // boundary / sibling SessionStart pull converges. (Codex has no SessionEnd;
+  // its PostCompact + next SessionStart pull cover the same ground.)
+  await autoPush(ctx.projectId);
 
   return JSON.stringify({
     systemMessage: 'memorize: session paused (resumable)',
