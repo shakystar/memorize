@@ -349,6 +349,45 @@ function checkProjectionBuilt(projectId: string): DoctorCheck {
 }
 
 /**
+ * True-replica invariant (#30): one store holds exactly ONE project identity.
+ * More than one distinct `project.created` id means a cross-machine bind
+ * clobbered identity (the pre-clone-on-bind bug) — `reduceProjectState` now
+ * throws on this, and `getProjectProjection` would otherwise have returned an
+ * empty/wrong row. Uses a raw SQL COUNT(DISTINCT …) rather than
+ * `reduceProjectState` so doctor still runs on an already-diverged store (the
+ * reducer would throw before we could report).
+ */
+function checkProjectIdentity(projectId: string): DoctorCheck {
+  const distinct = (
+    getDb(projectId)
+      .prepare(
+        "SELECT COUNT(DISTINCT json_extract(payload, '$.id')) AS n " +
+          "FROM events WHERE type = 'project.created'",
+      )
+      .get() as { n: number }
+  ).n;
+  if (distinct > 1) {
+    return {
+      id: 'project.identity',
+      label: 'Single project identity in event log',
+      status: 'error',
+      message:
+        `Event log holds ${distinct} distinct project.created ids (#30 ` +
+        'cross-machine clobber). Re-clone into a fresh directory ' +
+        '(`memorize project clone <id> --remote-path <path>`); in-place repair ' +
+        'of a diverged log is unsupported.',
+      fix: 'memorize project clone <remoteProjectId> --remote-path <path> (fresh dir)',
+    };
+  }
+  return {
+    id: 'project.identity',
+    label: 'Single project identity in event log',
+    status: 'ok',
+    message: 'Event log holds a single project identity',
+  };
+}
+
+/**
  * `seq` is an autoincrement primary key, so a healthy append-only log has
  * `MAX(seq) === COUNT(*)` (rows 1..N with no holes). A mismatch means rows
  * were deleted from the middle of the log — the append-only contract is
@@ -461,6 +500,7 @@ export async function doctor(cwd: string): Promise<DoctorReport> {
     const dbIntegrity = checkDbIntegrity(projectId);
     checks.push(dbIntegrity);
 
+    checks.push(checkProjectIdentity(projectId));
     checks.push(checkProjectionBuilt(projectId));
 
     const ndjsonCheck = await checkNdjsonMigrated(projectId);

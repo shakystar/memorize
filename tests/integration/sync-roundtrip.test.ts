@@ -10,9 +10,9 @@ import { closeAll } from '../../src/storage/db.js';
 import { createProject } from '../../src/services/project-service.js';
 import { createTask } from '../../src/services/task-service.js';
 import {
+  cloneProject,
   pullProject,
   pushProject,
-  updateSyncState,
 } from '../../src/services/sync-service.js';
 import { readEvents } from '../../src/storage/event-store.js';
 
@@ -32,22 +32,27 @@ afterEach(async () => {
   await rm(sandbox, { recursive: true, force: true });
 });
 
-describe('sync roundtrip via file transport', () => {
-  it('pushes events from project A and lets project B pull them via the service API', async () => {
+// A true replica uses the SAME projectId on both "machines"; `getDb` caches
+// connections by projectId (ignoring MEMORIZE_ROOT), so switching roots in one
+// process must drop the cache to rebind to the other root's DB. Real separate
+// processes get this for free.
+function useMachine(root: string): void {
+  closeAll();
+  process.env.MEMORIZE_ROOT = root;
+}
+
+describe('sync roundtrip via file transport (true-replica clone)', () => {
+  it('A pushes, B clone-adopts A id and receives A events', async () => {
     const remotePath = join(sandbox, 'remote');
     const homeA = join(sandbox, 'home-a');
     const homeB = join(sandbox, 'home-b');
 
-    process.env.MEMORIZE_ROOT = homeA;
+    useMachine(homeA);
     const projectA = await createProject({
       title: 'Project A',
       rootPath: join(sandbox, 'a'),
     });
-    await createTask({
-      projectId: projectA.id,
-      title: 'Task from A',
-      actor: 'user',
-    });
+    await createTask({ projectId: projectA.id, title: 'Task from A', actor: 'user' });
 
     const transport = createFileSyncTransport(remotePath);
     const pushResponse = await pushProject(projectA.id, transport);
@@ -57,63 +62,47 @@ describe('sync roundtrip via file transport', () => {
     const idempotentPush = await pushProject(projectA.id, transport);
     expect(idempotentPush.accepted).toHaveLength(0);
 
-    process.env.MEMORIZE_ROOT = homeB;
-    const projectB = await createProject({
-      title: 'Project B',
-      rootPath: join(sandbox, 'b'),
-    });
-    await updateSyncState(projectB.id, { remoteProjectId: projectA.id });
+    // B clones — adopts A's id (no divergent local id minted).
+    useMachine(homeB);
+    const clone = await cloneProject(join(sandbox, 'b'), projectA.id, transport);
+    expect(clone.projectId).toBe(projectA.id);
+    expect(clone.pulled).toBeGreaterThan(0);
 
-    const pullResult = await pullProject(projectB.id, transport);
-    expect(pullResult.total).toBeGreaterThan(0);
-    expect(pullResult.inserted).toBe(pullResult.total);
-    expect(pullResult.lastRemoteEventId).toBe(pushResponse.lastAcceptedEventId);
-
-    const inbound = await readEvents(projectB.id);
+    const inbound = await readEvents(projectA.id);
     expect(inbound.some((event) => event.type === 'task.created')).toBe(true);
+    // Exactly one identity — the #30 invariant.
+    expect(inbound.filter((e) => e.type === 'project.created')).toHaveLength(1);
   });
 
-  it('re-pull after apply inserts nothing (idempotent watermark)', async () => {
+  it('re-pull after clone inserts nothing (idempotent watermark)', async () => {
     const remotePath = join(sandbox, 'remote');
     const homeA = join(sandbox, 'home-a');
     const homeB = join(sandbox, 'home-b');
 
-    process.env.MEMORIZE_ROOT = homeA;
+    useMachine(homeA);
     const projectA = await createProject({
       title: 'Project A',
       rootPath: join(sandbox, 'a'),
     });
-    await createTask({
-      projectId: projectA.id,
-      title: 'Task from A',
-      actor: 'user',
-    });
+    await createTask({ projectId: projectA.id, title: 'Task from A', actor: 'user' });
     const transport = createFileSyncTransport(remotePath);
     await pushProject(projectA.id, transport);
 
-    process.env.MEMORIZE_ROOT = homeB;
-    const projectB = await createProject({
-      title: 'Project B',
-      rootPath: join(sandbox, 'b'),
-    });
-    await updateSyncState(projectB.id, { remoteProjectId: projectA.id });
-
-    const firstPull = await pullProject(projectB.id, transport);
-    expect(firstPull.inserted).toBe(firstPull.total);
-    expect(firstPull.inserted).toBeGreaterThan(0);
+    useMachine(homeB);
+    const clone = await cloneProject(join(sandbox, 'b'), projectA.id, transport);
+    expect(clone.pulled).toBeGreaterThan(0);
 
     const domainEvents = (e: Awaited<ReturnType<typeof readEvents>>) =>
       e.filter((ev) => ev.type !== 'sync.state.updated');
-    const countAfterFirst = domainEvents(await readEvents(projectB.id)).length;
-    expect(countAfterFirst).toBeGreaterThan(0);
+    const countAfterClone = domainEvents(await readEvents(projectA.id)).length;
+    expect(countAfterClone).toBeGreaterThan(0);
 
-    const secondPull = await pullProject(projectB.id, transport);
+    const secondPull = await pullProject(projectA.id, transport);
     expect(secondPull.inserted).toBe(0);
-    // Idempotency at the store level: re-pull did not grow the domain event log.
-    expect(domainEvents(await readEvents(projectB.id)).length).toBe(countAfterFirst);
+    expect(domainEvents(await readEvents(projectA.id)).length).toBe(countAfterClone);
   });
 
-  it('exposes push/pull/bind through the cli with --remote-path', { timeout: 30_000 }, async () => {
+  it('exposes push + clone through the cli with --remote-path', { timeout: 30_000 }, async () => {
     const sandboxA = join(sandbox, 'a-cli');
     const sandboxB = join(sandbox, 'b-cli');
     const homeA = join(sandbox, 'home-a-cli');
@@ -150,26 +139,19 @@ describe('sync roundtrip via file transport', () => {
     expect(pushA.status).toBe(0);
     expect(pushA.stdout).toContain('Pushed');
 
-    expect(runCli(['project', 'init'], sandboxB, homeB).status).toBe(0);
-
     const showA = runCli(['project', 'show'], sandboxA, homeA);
     const projectIdA = (JSON.parse(String(showA.stdout)) as { id: string }).id;
 
-    const bindB = runCli(
-      ['project', 'sync', '--bind', projectIdA],
+    // B clones into a fresh dir → adopts A's id.
+    const cloneB = runCli(
+      ['project', 'clone', projectIdA, '--remote-path', sharedRemote],
       sandboxB,
       homeB,
     );
-    expect(bindB.status).toBe(0);
-    expect(bindB.stdout).toContain(projectIdA);
+    expect(cloneB.status).toBe(0);
+    expect(cloneB.stdout).toContain('Cloned project');
 
-    const pullB = runCli(
-      ['project', 'sync', '--pull', '--remote-path', sharedRemote],
-      sandboxB,
-      homeB,
-    );
-    expect(pullB.status).toBe(0);
-    expect(pullB.stdout).toContain('Pulled');
-    expect(pullB.stdout).not.toContain('Pulled 0 events');
+    const showB = runCli(['project', 'show'], sandboxB, homeB);
+    expect((JSON.parse(String(showB.stdout)) as { id: string }).id).toBe(projectIdA);
   });
 });
