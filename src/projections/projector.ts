@@ -27,6 +27,16 @@ import type {
 export interface MemoryRecord extends ConsolidatedMemory {
   invalidAt?: string;
   supersededBy?: string;
+  /**
+   * Cross-machine dedup loser marker (P3-a auto-convergence): set to the
+   * winning memory's id when this record was collapsed as a duplicate (same
+   * `sourceObservationIds` distilled concurrently on two replicas). Distinct
+   * from `supersededBy` (event-driven bi-temporal contradiction): `dedupedBy`
+   * is projection-computed, deterministic, and carries no "what was true then"
+   * value. Like `supersededBy`, it also closes the validity window via
+   * `invalidAt` so `listValidMemories` excludes it with no query change.
+   */
+  dedupedBy?: string;
 }
 
 export interface ProjectState {
@@ -41,6 +51,49 @@ export interface ProjectState {
   sessions: Record<string, Session>;
   observations: Record<string, Observation>;
   memories: Record<string, MemoryRecord>;
+}
+
+/**
+ * Collapse duplicate consolidated memories in place. Groups still-valid
+ * memories by their EXACT `sourceObservationIds` set (sorted), and for any
+ * group with >1 member keeps the deterministic winner — `(createdAt, id)`
+ * ascending — marking the rest as dedup losers (`invalidAt` = winner.createdAt,
+ * `dedupedBy` = winner.id). Empty/absent source sets never group (each stands
+ * alone). Already-superseded memories are skipped so a genuine contradiction
+ * stays invalid and is never chosen. Pure + content-keyed → identical result on
+ * every replica regardless of sync order.
+ */
+function dedupeMemoriesBySource(memories: Record<string, MemoryRecord>): void {
+  const groups = new Map<string, MemoryRecord[]>();
+  for (const memory of Object.values(memories)) {
+    if (memory.invalidAt) continue;
+    const ids = memory.sourceObservationIds ?? [];
+    if (ids.length === 0) continue;
+    const key = [...ids].sort().join(',');
+    const bucket = groups.get(key);
+    if (bucket) bucket.push(memory);
+    else groups.set(key, [memory]);
+  }
+  for (const members of groups.values()) {
+    if (members.length < 2) continue;
+    members.sort((a, b) =>
+      a.createdAt !== b.createdAt
+        ? a.createdAt < b.createdAt
+          ? -1
+          : 1
+        : a.id < b.id
+          ? -1
+          : 1,
+    );
+    const winner = members[0]!;
+    for (const loser of members.slice(1)) {
+      memories[loser.id] = {
+        ...loser,
+        invalidAt: winner.createdAt,
+        dedupedBy: winner.id,
+      };
+    }
+  }
 }
 
 export function reduceProjectState(events: DomainEvent[]): ProjectState {
@@ -223,6 +276,14 @@ export function reduceProjectState(events: DomainEvent[]): ProjectState {
         break;
     }
   }
+
+  // Cross-machine duplicate dedup (P3-a auto-convergence). Two replicas that
+  // consolidate the SAME observation window before syncing each emit a
+  // memory.consolidated with identical sourceObservationIds → duplicates once
+  // merged. Collapse them deterministically here (pure function of the merged
+  // log → every replica picks the same winner, no new event), so
+  // listValidMemories / search / retrieval all converge to one record.
+  dedupeMemoriesBySource(state.memories);
 
   if (state.project) {
     state.project = {
