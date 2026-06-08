@@ -1,9 +1,10 @@
-import type { StartupContextPayload } from '../../domain/entities.js';
+import type { LiveUpdate, StartupContextPayload } from '../../domain/entities.js';
 import {
   UNTRUSTED_PREAMBLE,
   wrapUntrusted,
 } from '../../shared/content-safety.js';
 import { buildHandoffRows } from '../shared/handoff-rows.js';
+import { renderLiveUpdateBlocks } from '../shared/live-update.js';
 import {
   type RenderBlock,
   applyRenderBudget,
@@ -222,4 +223,10 @@ export function renderCodexStartupContext(
     '',
     renderedBlocks.join('\n\n'),
   ].join('\n');
+}
+
+export function renderCodexLiveUpdate(update: LiveUpdate): string {
+  return renderLiveUpdateBlocks(update, {
+    heading: '# Memorize live update (parallel sessions)',
+  });
 }

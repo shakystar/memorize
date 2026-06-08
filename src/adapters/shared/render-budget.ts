@@ -11,6 +11,14 @@
  */
 export const MAX_STARTUP_CONTEXT_CHARS = 8000;
 
+/**
+ * CLS Phase 2 live-update budget. Far smaller than the startup budget because
+ * it fires on EVERY sibling-active tool call, not once at session start. The
+ * two budgets never co-occur (PostToolUse vs SessionStart), so they are
+ * independent.
+ */
+export const LIVE_UPDATE_BUDGET_CHARS = 1200;
+
 export interface RenderBlock {
   /** Lower number = higher priority. Priority 1 blocks survive unless the
    *  budget itself is smaller than the priority-1 block, in which case

@@ -5,6 +5,8 @@ import { spawnSync } from 'node:child_process';
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
+import { POST_TOOL_USE_MATCHER } from '../../src/services/capture-service.js';
+
 let sandbox: string;
 let memorizeRoot: string;
 let codexHome: string;
@@ -427,7 +429,10 @@ describe('install integration', () => {
       group.hooks.some((entry) => /memorize hook claude PostToolUse/.test(entry.command)),
     );
     expect(postToolUse).toBeDefined();
-    expect(postToolUse?.matcher).toBe('Write|Edit|MultiEdit|Bash');
+    // Asserted against the single-source constant so matcher/filter can never
+    // drift. apply_patch is included for codex file-edit capture symmetry.
+    expect(postToolUse?.matcher).toBe(POST_TOOL_USE_MATCHER);
+    expect(postToolUse?.matcher).toContain('apply_patch');
 
     // Re-install must not duplicate the matcher'd entry.
     runCli(['install', 'claude']);

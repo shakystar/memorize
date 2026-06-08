@@ -2,17 +2,63 @@ import { describe, expect, it } from 'vitest';
 
 import {
   evaluateCapture,
+  extractApplyPatchPaths,
   parsePostToolUsePayload,
 } from '../../src/services/capture-service.js';
 
 describe('CLS capture filter (decision ③ — conservative whitelist)', () => {
-  it('captures Write/Edit/MultiEdit as write-tool signals', () => {
+  it('captures Write/Edit/MultiEdit as write-tool signals with a structured filePath', () => {
     for (const tool of ['Write', 'Edit', 'MultiEdit']) {
       const verdict = evaluateCapture(tool, '/repo/src/index.ts');
       expect(verdict.capture).toBe(true);
       expect(verdict.signal).toBe('write-tool');
       expect(verdict.summary).toContain('/repo/src/index.ts');
+      expect(verdict.filePath).toBe('/repo/src/index.ts');
     }
+  });
+
+  it('captures codex apply_patch edits as write-tool signals (vendor symmetry)', () => {
+    const patch = [
+      '*** Begin Patch',
+      '*** Update File: src/app.ts',
+      '@@',
+      '-const a = 1;',
+      '+const a = 2;',
+      '*** End Patch',
+    ].join('\n');
+    const verdict = evaluateCapture('apply_patch', patch);
+    expect(verdict.capture).toBe(true);
+    expect(verdict.signal).toBe('write-tool');
+    expect(verdict.filePath).toBe('src/app.ts');
+    expect(verdict.summary).toContain('src/app.ts');
+  });
+
+  it('extractApplyPatchPaths pulls Add/Update/Delete/Move paths', () => {
+    const patch = [
+      '*** Begin Patch',
+      '*** Add File: src/new.ts',
+      '*** Update File: src/old.ts',
+      '*** Move to: src/renamed.ts',
+      '*** Delete File: src/gone.ts',
+      '*** End Patch',
+    ].join('\n');
+    expect(extractApplyPatchPaths(patch)).toEqual([
+      'src/new.ts',
+      'src/old.ts',
+      'src/renamed.ts',
+      'src/gone.ts',
+    ]);
+    // First path becomes the observation's filePath; full list in summary.
+    const verdict = evaluateCapture('apply_patch', patch);
+    expect(verdict.filePath).toBe('src/new.ts');
+    expect(verdict.summary).toContain('src/old.ts');
+  });
+
+  it('still captures apply_patch even when the body is not a recognizable patch', () => {
+    const verdict = evaluateCapture('apply_patch', 'garbled non-patch text');
+    expect(verdict.capture).toBe(true);
+    expect(verdict.signal).toBe('write-tool');
+    expect(verdict.filePath).toBeUndefined();
   });
 
   it('rejects read-only tools outright', () => {

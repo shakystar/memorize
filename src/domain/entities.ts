@@ -51,6 +51,12 @@ export {
 } from './entities/startup-context.js';
 export { type MemoryIndex } from './entities/memory-index.js';
 export {
+  type FileConflictWarning,
+  type LiveUpdate,
+  type SiblingMemoryItem,
+  type SiblingObservationItem,
+} from './entities/live-update.js';
+export {
   MAX_SALIENCE,
   MIN_SALIENCE,
   type ConsolidatedMemory,
