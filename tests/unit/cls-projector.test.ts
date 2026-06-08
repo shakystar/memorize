@@ -106,3 +106,96 @@ describe('projector — CLS events', () => {
     expect(Object.keys(state.memories)).toHaveLength(0);
   });
 });
+
+// Build a memory with a controlled id + createdAt for deterministic dedup.
+function mem(
+  id: string,
+  createdAt: string,
+  sourceObservationIds: string[],
+  text = 'distilled',
+) {
+  return {
+    ...createConsolidatedMemory({
+      projectId,
+      kind: 'progress',
+      text,
+      salience: 5,
+      sourceObservationIds,
+    }),
+    id,
+    createdAt,
+  };
+}
+
+describe('projector — cross-machine duplicate dedup (P3-a)', () => {
+  it('collapses memories with the same sourceObservationIds to one (createdAt,id) winner', () => {
+    const winner = mem('mem_aaa', ts, ['obs_x', 'obs_y'], 'A');
+    // Same source set, different order + later createdAt → loser.
+    const loser = mem('mem_bbb', tsLater, ['obs_y', 'obs_x'], 'B');
+
+    const state = reduceProjectState([
+      evt({ id: 'evt_m1', type: 'memory.consolidated', payload: winner }),
+      evt({ id: 'evt_m2', type: 'memory.consolidated', payload: loser }),
+    ]);
+
+    expect(state.memories[winner.id]!.invalidAt).toBeUndefined();
+    expect(state.memories[winner.id]!.dedupedBy).toBeUndefined();
+    expect(state.memories[loser.id]!.invalidAt).toBe(winner.createdAt);
+    expect(state.memories[loser.id]!.dedupedBy).toBe(winner.id);
+  });
+
+  it('does NOT group memories with empty/absent sourceObservationIds', () => {
+    const m1 = mem('mem_e1', ts, []);
+    const m2 = mem('mem_e2', tsLater, []);
+    const state = reduceProjectState([
+      evt({ id: 'evt_m1', type: 'memory.consolidated', payload: m1 }),
+      evt({ id: 'evt_m2', type: 'memory.consolidated', payload: m2 }),
+    ]);
+    expect(state.memories[m1.id]!.invalidAt).toBeUndefined();
+    expect(state.memories[m2.id]!.invalidAt).toBeUndefined();
+  });
+
+  it('a genuinely superseded winner frees the former dedup loser', () => {
+    const winner = mem('mem_w', ts, ['obs_x']);
+    const dup = mem('mem_d', tsLater, ['obs_x']);
+    const replacement = mem('mem_r', tsLater, ['obs_z'], 'reversed');
+    const state = reduceProjectState([
+      evt({ id: 'evt_w', type: 'memory.consolidated', payload: winner }),
+      evt({ id: 'evt_d', type: 'memory.consolidated', payload: dup }),
+      evt({ id: 'evt_r', type: 'memory.consolidated', payload: replacement }),
+      evt({
+        id: 'evt_s',
+        type: 'memory.superseded',
+        createdAt: tsLater,
+        payload: {
+          supersedes: winner.id,
+          supersededBy: replacement.id,
+          reason: 'reversed',
+        },
+      }),
+    ]);
+    // Winner is superseded (event), so it is skipped by dedup and the former
+    // duplicate is no longer collapsed → it stays valid.
+    expect(state.memories[winner.id]!.supersededBy).toBe(replacement.id);
+    expect(state.memories[dup.id]!.invalidAt).toBeUndefined();
+    expect(state.memories[dup.id]!.dedupedBy).toBeUndefined();
+  });
+
+  it('a superseded duplicate stays invalid via supersededBy, not dedupedBy', () => {
+    const winner = mem('mem_w', ts, ['obs_x']);
+    const dup = mem('mem_d', tsLater, ['obs_x']);
+    const state = reduceProjectState([
+      evt({ id: 'evt_w', type: 'memory.consolidated', payload: winner }),
+      evt({ id: 'evt_d', type: 'memory.consolidated', payload: dup }),
+      evt({
+        id: 'evt_s',
+        type: 'memory.superseded',
+        createdAt: tsLater,
+        payload: { supersedes: dup.id, supersededBy: 'mem_other', reason: 'x' },
+      }),
+    ]);
+    expect(state.memories[dup.id]!.supersededBy).toBe('mem_other');
+    expect(state.memories[dup.id]!.dedupedBy).toBeUndefined();
+    expect(state.memories[winner.id]!.invalidAt).toBeUndefined();
+  });
+});

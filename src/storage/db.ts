@@ -185,6 +185,15 @@ const MIGRATIONS: ReadonlyArray<(db: Database.Database) => void> = [
       CREATE INDEX IF NOT EXISTS idx_memories_kind ON memories(kind);
     `);
   },
+  // v7 — cross-machine dedup loser marker (P3-a auto-convergence). Additive
+  // column on the DERIVED memories table; events stay append-only. A duplicate
+  // memory (same sourceObservationIds distilled concurrently on two replicas)
+  // is marked with the winning memory's id here; the replace-all rebuild
+  // backfills it deterministically. Separate ALTER (not folded into the v6
+  // CREATE) so DBs already at v6 get the column on upgrade.
+  (db) => {
+    db.exec('ALTER TABLE memories ADD COLUMN deduped_by TEXT;');
+  },
 ];
 
 function runMigrations(db: Database.Database): void {

@@ -333,10 +333,10 @@ export async function rebuildProjectProjection(
     const insertMemory = db.prepare(
       `INSERT INTO memories
          (id, kind, salience, created_at, invalid_at, superseded_by,
-          last_accessed_at, data)
+          deduped_by, last_accessed_at, data)
        VALUES
          (@id, @kind, @salience, @createdAt, @invalidAt, @supersededBy,
-          @lastAccessedAt, @data)`,
+          @dedupedBy, @lastAccessedAt, @data)`,
     );
     for (const memory of Object.values(state.memories)) {
       insertMemory.run({
@@ -346,12 +346,18 @@ export async function rebuildProjectProjection(
         createdAt: memory.createdAt,
         invalidAt: memory.invalidAt ?? null,
         supersededBy: memory.supersededBy ?? null,
+        dedupedBy: memory.dedupedBy ?? null,
         lastAccessedAt: lastAccessedById.get(memory.id) ?? null,
         data: JSON.stringify(memory),
       });
       // Superseded memories stay indexed — "what was true then" remains
-      // findable; retrieval-time ranking is what filters to valid-only.
-      indexEntity(memory.id, 'memory', searchText([memory.text]));
+      // findable; retrieval-time ranking is what filters to valid-only. Dedup
+      // losers are NOT indexed: unlike a contradiction, a cross-machine
+      // duplicate has no distinct "then" to recover, and keeping it out of FTS
+      // means searchProject converges to the single winner too.
+      if (!memory.dedupedBy) {
+        indexEntity(memory.id, 'memory', searchText([memory.text]));
+      }
     }
 
     for (const topic of topicSearchRows) {
