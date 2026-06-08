@@ -60,9 +60,25 @@ export function reduceProjectState(events: DomainEvent[]): ProjectState {
 
   for (const event of events) {
     switch (event.type) {
-      case 'project.created':
-        state.project = event.payload as Project;
+      case 'project.created': {
+        // True-replica invariant (#30): a project's event log holds exactly
+        // ONE identity. Two distinct project.created ids in one store means a
+        // cross-machine bind clobbered identity (the pre-clone-on-bind bug).
+        // Fail LOUD instead of silently letting the last-by-seq id win and
+        // leaving getProjectProjection() returning an empty/wrong row. A
+        // repeated SAME id (idempotent re-pull) is fine.
+        const incoming = event.payload as Project;
+        if (state.project && state.project.id !== incoming.id) {
+          throw new Error(
+            `Divergent project identity in event log: project.created for ` +
+              `${state.project.id} and ${incoming.id} in the same store (#30). ` +
+              `Re-clone into a fresh directory — in-place repair of a diverged ` +
+              `log is unsupported.`,
+          );
+        }
+        state.project = incoming;
         break;
+      }
       case 'project.updated':
         if (state.project) {
           state.project = {

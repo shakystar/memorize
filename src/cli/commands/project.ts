@@ -11,6 +11,7 @@ import {
 import { inspectProject } from '../../services/repair-service.js';
 import { setupProject } from '../../services/setup-service.js';
 import {
+  cloneProject,
   getQueueSnapshot,
   pullProject,
   pushProject,
@@ -49,6 +50,31 @@ export async function runProjectCommand(
     const result = await setupProject(cwd);
     console.log(
       `Initialized project ${result.project.title} (${result.project.id})\nImported context files: ${result.importedContextCount}`,
+    );
+    return;
+  }
+
+  if (subcommand === 'clone') {
+    // True-replica join (#30): adopt the remote projectId in a FRESH dir so the
+    // same project has one identity on every machine (git-clone analog).
+    const remoteProjectId = args[1];
+    if (!remoteProjectId) {
+      throw new Error(
+        'Usage: memorize project clone <remoteProjectId> --remote-path <path>',
+      );
+    }
+    const flags = parseFlags(args.slice(2), { single: ['remote-path'] });
+    const remotePath = flags.single['remote-path'];
+    if (!remotePath) {
+      throw new Error('--remote-path is required for clone.');
+    }
+    const transport = createFileSyncTransport(remotePath);
+    const result = await cloneProject(cwd, remoteProjectId, transport);
+    console.log(
+      result.pulled > 0
+        ? `Cloned project ${result.projectId} (${result.pulled} events pulled).`
+        : `Bound to remote project ${result.projectId}; no events yet. ` +
+            'Run `memorize project sync --pull --remote-path <path>` after the source pushes.',
     );
     return;
   }

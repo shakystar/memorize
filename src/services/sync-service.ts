@@ -1,4 +1,9 @@
-import { ACTOR_SYSTEM, nowIso } from '../domain/common.js';
+import {
+  ACTOR_SYSTEM,
+  CURRENT_SCHEMA_VERSION,
+  assertValidId,
+  nowIso,
+} from '../domain/common.js';
 import type { ProjectSyncState } from '../domain/entities.js';
 import type {
   SyncPullResponse,
@@ -8,8 +13,10 @@ import type {
   SyncQueueSnapshot,
 } from '../domain/sync-protocol.js';
 import type { SyncTransport } from '../domain/sync-transport.js';
+import { bindProject, resolveProjectIdForPath } from '../storage/bindings-store.js';
 import {
   appendEvent,
+  ensureProjectDirectories,
   insertExternalEvents,
   readEventsSince,
 } from '../storage/event-store.js';
@@ -164,6 +171,71 @@ export async function pullProject(
       ? { lastRemoteEventId: response.lastRemoteEventId }
       : {}),
   };
+}
+
+export interface CloneResult {
+  /** The adopted (remote) projectId — same on every machine. */
+  projectId: string;
+  /** Events pulled from the remote during the clone. */
+  pulled: number;
+}
+
+/**
+ * Clone-on-bind (#30, true replica): join a remote project from a FRESH cwd by
+ * ADOPTING the remote projectId — never minting a local one. The replica's
+ * `projectId === remoteProjectId`; on a different machine it lives under a
+ * different MEMORIZE_ROOT (git analog: same SHAs, different working copy).
+ *
+ * Because the cwd is fresh, there is no local data to migrate and exactly ONE
+ * `project.created` (the remote's, at seq 1) ever lands in the store — no
+ * identity clobber. This is the fix for the root cause of #30: today B mints
+ * its own id (`createProject`) BEFORE binding, so two identities collide in one
+ * DB. Clone adopts the id up front instead.
+ */
+export async function cloneProject(
+  cwd: string,
+  remoteProjectId: string,
+  transport: SyncTransport,
+): Promise<CloneResult> {
+  assertValidId(remoteProjectId, 'remoteProjectId');
+
+  // Fresh-cwd guard. Bound to the SAME id → idempotent re-pull below. Bound to
+  // a DIFFERENT id → refuse: that is a diverged-history merge (#30 follow-up),
+  // not a clone. Converting today's SILENT clobber into a loud failure.
+  const existing = await resolveProjectIdForPath(cwd);
+  if (existing && existing !== remoteProjectId) {
+    throw new Error(
+      `Directory is already bound to project ${existing}. Clone requires a ` +
+        `fresh directory; re-binding existing local history to a remote ` +
+        `(diverged-history merge) is not yet supported (#30 follow-up).`,
+    );
+  }
+
+  if (!existing) {
+    // Adopt the remote identity WITHOUT minting a new project. Write the sync
+    // state with writeJson — NOT writeState/updateSyncState, which append a
+    // `sync.state.updated` event that would become seq 1 and make the first
+    // rebuild throw "no project.created". The pull below brings the remote's
+    // `project.created` as the first event instead. The pre-seeded
+    // remoteProjectId is what lets pullProject pass its own guard.
+    await ensureProjectDirectories(remoteProjectId);
+    const now = nowIso();
+    const initial: ProjectSyncState = {
+      id: `sync_${remoteProjectId}`,
+      schemaVersion: CURRENT_SCHEMA_VERSION,
+      createdAt: now,
+      updatedAt: now,
+      projectId: remoteProjectId,
+      remoteProjectId,
+      syncEnabled: true,
+      syncStatus: 'idle',
+    };
+    await writeJson(getSyncFile(remoteProjectId), initial);
+    await bindProject(cwd, remoteProjectId);
+  }
+
+  const result = await pullProject(remoteProjectId, transport);
+  return { projectId: remoteProjectId, pulled: result.inserted };
 }
 
 export async function getQueueSnapshot(
