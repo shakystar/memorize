@@ -24,12 +24,48 @@ import { resolveSessionContext } from './session-context.js';
 const WRITE_TOOLS = new Set(['Write', 'Edit', 'MultiEdit']);
 
 /**
+ * Codex performs file edits through a single `apply_patch` tool rather than
+ * Write/Edit/MultiEdit. Its hook input reports `tool_name: "apply_patch"` and
+ * carries the raw patch body in `tool_input.command` (openai/codex#18391,
+ * merged 2026-04-22, shipped in codex 0.137.0). Treating it as a write signal
+ * is what makes codex sessions contribute file observations — without it,
+ * codex's edits are invisible to cross-session sharing and collision
+ * detection (Phase 1 only saw codex's Bash activity).
+ */
+const APPLY_PATCH_TOOLS = new Set(['apply_patch', 'ApplyPatch']);
+
+/**
  * SINGLE SOURCE for the PostToolUse hook registration matcher. Derived from
  * the same whitelist evaluateCapture enforces, so install-service can never
  * drift from the filter: a tool added here both fires the hook AND passes
- * the filter; a tool absent here does neither.
+ * the filter; a tool absent here does neither. (Codex registers PostToolUse
+ * with NO matcher — every fired tool reaches the filter — so apply_patch is
+ * already delivered there; listing it here keeps Claude registration and the
+ * filter in lockstep.)
  */
-export const POST_TOOL_USE_MATCHER = [...WRITE_TOOLS, 'Bash'].join('|');
+export const POST_TOOL_USE_MATCHER = [
+  ...WRITE_TOOLS,
+  ...APPLY_PATCH_TOOLS,
+  'Bash',
+].join('|');
+
+/**
+ * Extract the file paths an apply_patch envelope touches. The patch body uses
+ * `*** Add File: <path>` / `*** Update File: <path>` / `*** Delete File:
+ * <path>` headers (and `*** Move to: <path>` for renames). Returns every
+ * referenced path in order; empty when the body is not a recognizable patch.
+ */
+export function extractApplyPatchPaths(patchBody: string): string[] {
+  const paths: string[] = [];
+  // "*** Add File: p" / "*** Update File: p" / "*** Delete File: p" plus the
+  // rename target "*** Move to: p" (which has no "File" keyword).
+  const pattern = /^\*\*\*\s+(?:(?:Add|Update|Delete)\s+File|Move to):\s*(.+?)\s*$/gm;
+  let match: RegExpExecArray | null;
+  while ((match = pattern.exec(patchBody)) !== null) {
+    paths.push(match[1]!);
+  }
+  return paths;
+}
 
 /**
  * Mutating Bash command patterns (tuning parameter — seed list from the
@@ -64,6 +100,10 @@ export interface CaptureVerdict {
   signal?: ObservationSignal;
   /** Cheap rule-derived one-liner for the observation row. */
   summary?: string;
+  /** Structured file path for write signals (Phase 2 collision detection).
+   *  For apply_patch (multi-file) this is the FIRST touched path; the full
+   *  list is in `summary`. */
+  filePath?: string;
 }
 
 function clip(text: string): string {
@@ -88,11 +128,26 @@ export function evaluateCapture(
       capture: true,
       signal: 'write-tool',
       summary: clip(`${toolName}: ${toolInputText}`),
+      ...(toolInputText ? { filePath: toolInputText } : {}),
     };
   }
 
-  // Codex fires PostToolUse for Bash-like tools only (#16732), so the Bash
-  // branch is the entirety of codex capture coverage.
+  // Codex edits via apply_patch (tool_input.command = raw patch body). Extract
+  // the touched paths so the observation carries a structured filePath for
+  // collision detection, exactly like a Write/Edit.
+  if (APPLY_PATCH_TOOLS.has(toolName)) {
+    const paths = extractApplyPatchPaths(toolInputText);
+    return {
+      capture: true,
+      signal: 'write-tool',
+      summary: clip(
+        paths.length > 0 ? `apply_patch: ${paths.join(', ')}` : `apply_patch: ${toolInputText}`,
+      ),
+      ...(paths[0] ? { filePath: paths[0] } : {}),
+    };
+  }
+
+  // Codex also fires PostToolUse for Bash-like shell tools.
   if (toolName === 'Bash' || toolName === 'shell') {
     if (TASK_TRANSITION_PATTERN.test(toolInputText)) {
       return {
@@ -202,12 +257,17 @@ export async function captureObservation(params: {
     debugLabel: 'hook-post-tool-use',
   });
 
+  // The structured file path (set by evaluateCapture for Write/Edit/MultiEdit
+  // and apply_patch) lets Phase 2 live sharing detect cross-session file
+  // collisions without re-parsing the clipped summary. Bash signals carry a
+  // command, not a path — left unset there.
   const observation = createObservation({
     projectId: params.projectId,
     signal: verdict.signal,
     ...(sessionCtx.sessionId ? { sessionId: sessionCtx.sessionId } : {}),
     ...(payload.toolName ? { toolName: payload.toolName } : {}),
     ...(verdict.summary ? { summary: verdict.summary } : {}),
+    ...(verdict.filePath ? { filePath: verdict.filePath } : {}),
     ...(payload.transcriptPath
       ? { transcriptPath: payload.transcriptPath }
       : {}),

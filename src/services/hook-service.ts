@@ -15,6 +15,7 @@ import { getProjectRoot } from '../storage/path-resolver.js';
 import path from 'node:path';
 import { captureObservation } from './capture-service.js';
 import { consolidate } from './consolidate-service.js';
+import { composeLiveUpdate } from './realtime-share-service.js';
 import { composeStartupContext } from './startup-context-service.js';
 import {
   ensureBoundProjectId,
@@ -387,10 +388,12 @@ const handleSessionEnd: HookHandler = async (ctx) => {
 // has nothing to contribute (PreCompact, PreToolUse, etc.).
 const EMPTY_HOOK_RESULT = JSON.stringify({});
 
-// CLS short-term capture. Fires on every whitelisted tool use, so it must
-// be cheap (rule filter + one append, no LLM, no FTS reindex) and must
-// NEVER fail the agent's tool flow — any error degrades to a no-op warn.
+// CLS short-term capture + Phase 2 real-time share. Fires on every
+// whitelisted tool use, so both halves must be cheap (rule filter + one
+// append; a seq-keyed delta read — no LLM, no FTS reindex) and must NEVER
+// fail the agent's tool flow — any error degrades to a no-op warn.
 const handlePostToolUse: HookHandler = async (ctx) => {
+  // 1. Capture this session's own observation (short-term layer).
   try {
     await captureObservation({
       projectId: ctx.projectId,
@@ -401,6 +404,30 @@ const handlePostToolUse: HookHandler = async (ctx) => {
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     process.stderr.write(`WARN: observation capture skipped (${message})\n`);
+  }
+
+  // 2. Real-time share: inject the delta from PARALLEL sessions, if any.
+  // additionalContext IS injectable on PostToolUse (Claude Code); codex may
+  // ignore it, which is a harmless no-op (capture above still ran). The
+  // watermark guard inside composeLiveUpdate keeps this silent unless a
+  // sibling session actually produced new events.
+  try {
+    const additionalContext = await composeLiveUpdate({
+      projectId: ctx.projectId,
+      agent: ctx.agent,
+      cwd: ctx.cwd,
+    });
+    if (additionalContext) {
+      return JSON.stringify({
+        hookSpecificOutput: {
+          hookEventName: 'PostToolUse',
+          additionalContext,
+        },
+      });
+    }
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    process.stderr.write(`WARN: live share skipped (${message})\n`);
   }
   return EMPTY_HOOK_RESULT;
 };

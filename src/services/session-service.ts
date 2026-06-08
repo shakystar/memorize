@@ -20,6 +20,10 @@ import {
   writeCwdPointer,
 } from '../storage/cwd-session-store.js';
 import { appendEvent } from '../storage/event-store.js';
+import {
+  deleteShareWatermark,
+  sweepOrphanShareWatermarks,
+} from './realtime-share-service.js';
 import { resolveSessionContext } from './session-context.js';
 import {
   getSession,
@@ -157,10 +161,31 @@ export async function reapStaleSessions(
       // session.abandoned only mutates session state — no searchable entity
       // changes, so the FTS reindex is safely skipped.
       await rebuildProjectProjection(pointer.projectId, { reindexSearch: false });
+      // Phase 2: drop this session's per-session live-share watermark so the
+      // meta table does not accumulate a row per dead session.
+      deleteShareWatermark(pointer.projectId, pointer.sessionId);
     }
 
     await deleteCwdPointer(cwd, pointer.sessionId);
     reaped.push(pointer.sessionId);
+  }
+
+  // Defensive sweep: remove any live-share watermarks whose session crashed
+  // without ever being reaped (orphans). Scoped per project touched here.
+  const projectIds = new Set(
+    pointers
+      .map((p) => p.projectId)
+      .filter((id): id is string => typeof id === 'string'),
+  );
+  for (const projectId of projectIds) {
+    try {
+      const live = new Set(
+        (await readActiveSessions(projectId)).map((s) => s.id),
+      );
+      sweepOrphanShareWatermarks(projectId, live);
+    } catch {
+      // best-effort cleanup
+    }
   }
 
   return { reapedSessionIds: reaped };
@@ -396,6 +421,8 @@ export async function endSession(
     // handoff/checkpoint) — no searchable entity changes, so the FTS reindex
     // is safely skipped.
     await rebuildProjectProjection(pointer.projectId, { reindexSearch: false });
+    // Phase 2: drop this session's per-session live-share watermark.
+    deleteShareWatermark(pointer.projectId, pointer.sessionId);
   }
 
   await deleteCwdPointer(cwd, pointer.sessionId);

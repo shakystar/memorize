@@ -28,6 +28,14 @@ export interface Observation extends BaseEntity {
   signal: ObservationSignal;
   /** Cheap rule-derived one-liner (file path, command head) — NOT an LLM summary. */
   summary?: string;
+  /**
+   * Structured file path for write-tool observations (raw, un-clipped) — set
+   * so Phase 2 live sharing can detect cross-session file collisions without
+   * re-parsing the possibly-truncated `summary`. Absent for Bash signals and
+   * for legacy rows captured before this field existed (readers fall back to
+   * parsing `summary`).
+   */
+  filePath?: string;
   /** Transcript locator for the boundary consolidator (hybrid ownership, D2). */
   transcriptPath?: string;
 }
@@ -38,6 +46,7 @@ export function createObservation(input: {
   sessionId?: string;
   toolName?: string;
   summary?: string;
+  filePath?: string;
   transcriptPath?: string;
 }): Observation {
   return {
@@ -47,6 +56,7 @@ export function createObservation(input: {
     ...(input.sessionId ? { sessionId: input.sessionId } : {}),
     ...(input.toolName ? { toolName: input.toolName } : {}),
     ...(input.summary ? { summary: input.summary } : {}),
+    ...(input.filePath ? { filePath: input.filePath } : {}),
     ...(input.transcriptPath ? { transcriptPath: input.transcriptPath } : {}),
   };
 }
