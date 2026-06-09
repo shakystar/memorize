@@ -83,9 +83,19 @@ export interface DetectContradictionsResult {
   detected: number;
 }
 
-const DEFAULT_THRESHOLD = 0.82;
+// A LOOSE cosine pre-filter, not a precise gate — the LLM judge is the actual
+// contradiction decision; cosine only prunes obviously-unrelated pairs to bound
+// judge cost. Calibrated against real embeddings (nomic-embed-text): same-topic
+// decisions land ~0.5, unrelated ~0.4, so 0.5 catches candidates with margin.
+// Embedding scales vary by model — override with MEMORIZE_CONTRADICTION_MIN_SIMILARITY.
+const DEFAULT_THRESHOLD = 0.5;
 const DEFAULT_MAX_PAIRS = 20;
 const JUDGE_TIMEOUT_MS = 15_000;
+
+function defaultThreshold(): number {
+  const env = Number(process.env.MEMORIZE_CONTRADICTION_MIN_SIMILARITY);
+  return Number.isFinite(env) && env > 0 ? env : DEFAULT_THRESHOLD;
+}
 
 const JUDGE_SYSTEM_PROMPT = [
   'You are a contradiction judge for a coding-agent memory system.',
@@ -202,7 +212,7 @@ export async function detectContradictions(
     const vectorById = new Map(
       listEmbeddings(projectId, 'memory').map((row) => [row.entityId, row.vector]),
     );
-    const threshold = opts.threshold ?? DEFAULT_THRESHOLD;
+    const threshold = opts.threshold ?? defaultThreshold();
 
     const candidates: Array<{ a: MemoryRecord; b: MemoryRecord; sim: number }> =
       [];
