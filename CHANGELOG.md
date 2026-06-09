@@ -7,6 +7,38 @@ loosely. The project adheres to [Semantic Versioning](https://semver.org/);
 major-version bumps are reserved for breaking changes to the on-disk event
 log layout or the public CLI surface.
 
+## [1.1.0] — 2026-06-09
+
+Additive, backward-compatible feature release. Every new capability is
+optional and off by default — with nothing configured, behavior is
+identical to 1.0.0 (file-based sync, FTS5 lexical search, no contradiction
+pass). The on-disk event log layout and existing CLI surface are unchanged.
+
+### Added
+
+- **HTTP relay sync transport (P3-b-2).** An optional `http` sync transport
+  lets machines that do not share a filesystem auto-sync through a relay.
+  Client-side only (the relay server is a separate project); configured via
+  `memorize project sync --remote-url <url> [--token <t>]` and
+  `memorize project clone <id> --remote-url <url>`. No relay configured =
+  the existing file transport, unchanged.
+- **Semantic search (P3-c).** An optional OpenAI-compatible `/embeddings`
+  endpoint (`MEMORIZE_EMBEDDINGS_ENDPOINT`/`_API_KEY`/`_MODEL`; works with a
+  local Ollama, no key required) adds embedding similarity on top of FTS5.
+  Embeddings are a best-effort auxiliary index filled at consolidation
+  boundaries; search and startup injection use a hybrid (RRF) ranking.
+  `memorize search --lexical` forces pure FTS. Unset = FTS5 only.
+- **Semantic contradiction detection (P3-c).** When both an embedder and an
+  LLM are configured, the consolidation boundary surfaces `decision`
+  memories that assert incompatible facts: the more recent decision is kept
+  as current truth (deterministic, replica-convergent), the older is
+  non-destructively superseded, and a conflict is raised for the agent to
+  resolve. Cross-session forks are tagged. Unconfigured = no-op.
+- **`memorize uninstall claude|codex`.** The inverse of `install` — removes
+  memorize's hook entries and integration blocks while preserving the user's
+  other config. Idempotent; captured memory (events/projection) is left
+  intact.
+
 ## [1.0.0] — 2026-05-06
 
 First stable release. The 1.0 cut closes the rc.5..rc.12 alpha
