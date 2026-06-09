@@ -7,17 +7,29 @@ loosely. The project adheres to [Semantic Versioning](https://semver.org/);
 major-version bumps are reserved for breaking changes to the on-disk event
 log layout or the public CLI surface.
 
-## [Unreleased]
+## [2.0.0] — 2026-06-10
+
+The first AGPL release. Supersedes 1.1.0 (published briefly under MIT, then
+unpublished); 2.0.0 carries all of 1.1.0's features (listed under 1.1.0 below)
+plus the relicense.
 
 ### Changed
 
-- **License: MIT → AGPL-3.0-or-later.** memorize is now copyleft — derivative
-  works and network/SaaS deployments must release their complete corresponding
-  source under the same license. Versions 1.0.0–1.1.0 were published under MIT
-  and remain available under those terms; the relicense applies to the current
-  source and all future releases.
+- **BREAKING — License: MIT → AGPL-3.0-or-later.** memorize is now copyleft:
+  derivative works and network/SaaS deployments must release their complete
+  corresponding source under the same license. Versions 1.0.0–1.1.0 were
+  published under MIT and remain available under those terms (the grant on
+  already-distributed copies is not retroactively revocable); the relicense
+  applies to 2.0.0 and every future release.
 
-## [1.1.0] — 2026-06-09
+### Notes
+
+- The HTTP relay **client** ships, but the relay **server** is a separate,
+  forthcoming project — `project sync --remote-url` / `project clone
+  --remote-url` are not usable until a compatible relay exists. The default
+  file transport and all local features are unaffected.
+
+## [1.1.0] — 2026-06-09 (unpublished — superseded by 2.0.0)
 
 Additive, backward-compatible feature release. Every new capability is
 optional and off by default — with nothing configured, behavior is
