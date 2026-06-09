@@ -63,6 +63,14 @@ export function retrieveMemoryContext(
     taskTitle?: string;
     /** ISO timestamp for deterministic tests; defaults to now. */
     nowIso?: string;
+    /**
+     * P3-c — optional id→cosine-similarity (in [0,1]) for the task, computed by
+     * the caller (async, best-effort). When present, a GRADED semantic boost
+     * (RELEVANCE_BOOST × similarity) replaces/augments the binary FTS boost. When
+     * absent (no embeddings endpoint, or the embed timed out), ranking is exactly
+     * the pre-P3-c FTS behavior.
+     */
+    semanticScores?: Map<string, number>;
   } = {},
 ): RetrievedMemoryContext {
   const nowMs = Date.parse(opts.nowIso ?? nowIso());
@@ -95,8 +103,14 @@ export function retrieveMemoryContext(
         : memory.createdAt;
     const base =
       0.5 * (memory.salience / 10) + 0.5 * recencyScore(reference, nowMs);
-    const score =
-      LONG_TERM_WEIGHT * (base + (relevantIds.has(memory.id) ? RELEVANCE_BOOST : 0));
+    // Relevance boost: take the stronger of the binary FTS signal and the
+    // graded semantic signal (when P3-c embeddings are configured). No semantic
+    // scores → identical to the pre-P3-c FTS-only boost.
+    const ftsBoost = relevantIds.has(memory.id) ? RELEVANCE_BOOST : 0;
+    const semBoost = opts.semanticScores
+      ? RELEVANCE_BOOST * Math.max(0, opts.semanticScores.get(memory.id) ?? 0)
+      : 0;
+    const score = LONG_TERM_WEIGHT * (base + Math.max(ftsBoost, semBoost));
     pool.push({
       score,
       chars: memory.text.length + 24,

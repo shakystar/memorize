@@ -1,5 +1,6 @@
 import {
   DEFAULT_SEARCH_LIMIT,
+  hybridSearchFromCwd,
   searchFromCwd,
 } from '../../services/search-service.js';
 import type { CliContext } from '../context.js';
@@ -9,7 +10,10 @@ export async function runSearchCommand(
   args: string[],
   ctx: CliContext,
 ): Promise<void> {
-  const flags = parseFlags(args, { single: ['limit'], boolean: ['json'] });
+  const flags = parseFlags(args, {
+    single: ['limit'],
+    boolean: ['json', 'lexical'],
+  });
   const query = flags.positional.join(' ').trim();
   if (!query) {
     throw new Error('Search query is required.');
@@ -23,7 +27,11 @@ export async function runSearchCommand(
     }
   }
 
-  const hits = await searchFromCwd(ctx.cwd, query, limit);
+  // Hybrid (lexical + semantic) by default; --lexical forces pure FTS. With no
+  // embeddings endpoint configured, hybrid already degrades to lexical.
+  const hits = flags.boolean.lexical
+    ? await searchFromCwd(ctx.cwd, query, limit)
+    : await hybridSearchFromCwd(ctx.cwd, query, limit);
 
   if (flags.boolean.json) {
     console.log(JSON.stringify(hits, null, 2));

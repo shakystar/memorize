@@ -440,6 +440,109 @@ async function stripMemorizeFromFile(
   await fs.writeFile(filePath, cleaned, 'utf8');
 }
 
+/**
+ * Strip every memorize hook entry (all command forms) across the given events
+ * from a raw hooks map, preserving other tools' entries. Shared by the claude
+ * and codex uninstall paths. Mirrors install's coerce→strip pipeline so an
+ * uninstall faithfully reverses what install wrote.
+ */
+function stripAllMemorizeHooks(
+  rawHooks: Record<string, unknown>,
+  agent: 'claude' | 'codex',
+  events: readonly string[],
+): HooksMap {
+  const migrated: HooksMap = {};
+  for (const [event, value] of Object.entries(rawHooks)) {
+    const groups = coerceLegacyList(value);
+    if (groups) migrated[event] = groups;
+  }
+  const cleaned: HooksMap = { ...migrated };
+  for (const event of events) {
+    const stripped = stripMemorizeForEvent(cleaned[event], agent, event);
+    if (stripped) {
+      cleaned[event] = stripped;
+    } else {
+      delete cleaned[event];
+    }
+  }
+  return cleaned;
+}
+
+/**
+ * Remove memorize's Claude integration: strip every memorize hook entry (active
+ * + legacy events, all command forms) from `.claude/settings.local.json`,
+ * preserving the user's other hooks and settings keys. Idempotent — a missing
+ * file or an already-clean file is a silent no-op. Captured data (events/db) is
+ * NOT touched; this reverses `install`, not the memory itself.
+ */
+export async function uninstallClaudeIntegration(cwd: string): Promise<string> {
+  const settingsPath = path.join(cwd, '.claude', 'settings.local.json');
+  let settings: { hooks?: Record<string, unknown> } = {};
+  try {
+    settings = JSON.parse(await fs.readFile(settingsPath, 'utf8')) as {
+      hooks?: Record<string, unknown>;
+    };
+  } catch (error) {
+    if (isEnoent(error)) return settingsPath; // nothing installed
+    throw error;
+  }
+
+  const cleaned = stripAllMemorizeHooks(settings.hooks ?? {}, 'claude', [
+    ...CLAUDE_HOOK_EVENTS,
+    ...CLAUDE_LEGACY_MEMORIZE_HOOK_EVENTS,
+  ]);
+
+  const merged: { hooks?: Record<string, unknown> } = { ...settings };
+  if (Object.keys(cleaned).length > 0) {
+    merged.hooks = cleaned;
+  } else {
+    delete merged.hooks;
+  }
+  await writeJson(settingsPath, merged);
+  return settingsPath;
+}
+
+/**
+ * Remove memorize's Codex integration: strip memorize entries from
+ * `~/.codex/hooks.json` (preserving others) and remove any historical memorize
+ * blocks from AGENTS.override.md / AGENTS.md. Idempotent; data untouched. Codex
+ * hook-trust state is codex's own — nothing to undo there.
+ */
+export async function uninstallCodexIntegration(cwd: string): Promise<string> {
+  const hooksPath = codexHooksPath();
+  let settings: { hooks?: Record<string, unknown> } | undefined;
+  try {
+    settings = JSON.parse(await fs.readFile(hooksPath, 'utf8')) as {
+      hooks?: Record<string, unknown>;
+    };
+  } catch (error) {
+    if (!isEnoent(error)) throw error;
+  }
+
+  if (settings) {
+    const cleaned = stripAllMemorizeHooks(settings.hooks ?? {}, 'codex', [
+      ...CODEX_HOOK_EVENTS,
+      ...CODEX_LEGACY_MEMORIZE_HOOK_EVENTS,
+    ]);
+    const merged: { hooks?: Record<string, unknown> } = { ...settings };
+    if (Object.keys(cleaned).length > 0) {
+      merged.hooks = cleaned;
+    } else {
+      delete merged.hooks;
+    }
+    await writeJson(hooksPath, merged);
+  }
+
+  // Reverse any historical AGENTS injection (no-op when absent).
+  await stripMemorizeFromFile(path.join(cwd, 'AGENTS.override.md'), {
+    deleteIfEmpty: true,
+  });
+  await stripMemorizeFromFile(path.join(cwd, 'AGENTS.md'), {
+    deleteIfEmpty: false,
+  });
+  return hooksPath;
+}
+
 export async function installCodexIntegration(cwd: string): Promise<string> {
   const hooksPath = await installCodexHooks();
 

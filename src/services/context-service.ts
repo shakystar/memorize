@@ -3,11 +3,19 @@ import type {
   Rule,
   StartupContextPayload,
 } from '../domain/entities.js';
+import {
+  getEmbedder,
+  resolveEmbeddingsConfig,
+} from './embeddings-service.js';
 import { freshnessLabel } from './freshness.js';
 import {
   reinforceInjectedMemories,
   retrieveMemoryContext,
 } from './memory-retrieval-service.js';
+import { semanticMemoryScores } from './search-service.js';
+
+/** Tight embed timeout at SessionStart — the network must never block boot. */
+const SESSION_START_EMBED_TIMEOUT_MS = 5_000;
 import {
   getMemoryIndex,
   getRule,
@@ -138,11 +146,34 @@ export async function loadStartContext(params: {
     ...(params.selfSessionId ? { selfSessionId: params.selfSessionId } : {}),
   });
 
+  // P3-c — semantic relevance boost: embed the task title and score memories
+  // by cosine similarity (graded boost in retrieveMemoryContext). Best-effort
+  // with a tight timeout so SessionStart never blocks on the network; degrades
+  // to FTS-only when no embeddings endpoint is configured or the embed times
+  // out. semanticMemoryScores is itself never-throw, but guard defensively.
+  let semanticScores: Map<string, number> | undefined;
+  if (task?.title) {
+    try {
+      const config = resolveEmbeddingsConfig();
+      if (config) {
+        const scores = await semanticMemoryScores(
+          params.projectId,
+          task.title,
+          getEmbedder({ ...config, timeoutMs: SESSION_START_EMBED_TIMEOUT_MS }),
+        );
+        if (scores.size > 0) semanticScores = scores;
+      }
+    } catch {
+      // best-effort — fall back to FTS relevance only.
+    }
+  }
+
   // CLS two-layer retrieval: rank consolidated memories + the previous
   // session's observation tail in one pool, then stamp the injected
   // memories as accessed (reinforcement — projection-only, best-effort ⑤).
   const retrieved = retrieveMemoryContext(params.projectId, {
     ...(task?.title ? { taskTitle: task.title } : {}),
+    ...(semanticScores ? { semanticScores } : {}),
   });
   reinforceInjectedMemories(params.projectId, retrieved.memories);
 

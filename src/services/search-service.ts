@@ -1,5 +1,12 @@
 import { getDb } from '../storage/db.js';
-import type { SearchKind } from './projection-store.js';
+import {
+  cosineSimilarity,
+  getEmbedder,
+  reciprocalRankFusion,
+  type Embedder,
+} from './embeddings-service.js';
+import { listEmbeddings } from './embeddings-store.js';
+import { listValidMemories, type SearchKind } from './projection-store.js';
 import { requireBoundProjectId } from './project-service.js';
 
 export interface SearchHit {
@@ -78,4 +85,108 @@ export async function searchFromCwd(
 ): Promise<SearchHit[]> {
   const projectId = await requireBoundProjectId(cwd);
   return searchProject(projectId, query, limit ?? DEFAULT_SEARCH_LIMIT);
+}
+
+// --- P3-c semantic + hybrid search ------------------------------------------
+
+function snippetFromText(text: string, max = 120): string {
+  const trimmed = text.trim();
+  return trimmed.length <= max ? trimmed : `${trimmed.slice(0, max)}…`;
+}
+
+/**
+ * Cosine similarity of `query` against every valid-memory embedding, as an
+ * id→score map (score in [-1, 1]). Empty when embeddings are unconfigured, the
+ * corpus is unembedded, or the query embed fails (best-effort — the caller then
+ * degrades to lexical-only). This is the shared core for both semanticSearch and
+ * the injection-time relevance boost.
+ */
+export async function semanticMemoryScores(
+  projectId: string,
+  query: string,
+  embedder: Embedder | undefined = getEmbedder(),
+): Promise<Map<string, number>> {
+  if (!embedder || !query.trim()) return new Map();
+  const corpus = listEmbeddings(projectId, 'memory');
+  if (corpus.length === 0) return new Map();
+  let queryVec: number[] | undefined;
+  try {
+    [queryVec] = await embedder.embed([query]);
+  } catch {
+    return new Map();
+  }
+  if (!queryVec || queryVec.length === 0) return new Map();
+  const scores = new Map<string, number>();
+  for (const row of corpus) {
+    scores.set(row.entityId, cosineSimilarity(queryVec, row.vector));
+  }
+  return scores;
+}
+
+/** Memory hits ranked by embedding similarity (best-first). Empty when off. */
+export async function semanticSearch(
+  projectId: string,
+  query: string,
+  limit: number = DEFAULT_SEARCH_LIMIT,
+  embedder: Embedder | undefined = getEmbedder(),
+): Promise<SearchHit[]> {
+  const scores = await semanticMemoryScores(projectId, query, embedder);
+  if (scores.size === 0) return [];
+  const textById = new Map(
+    listValidMemories(projectId).map((row) => [row.memory.id, row.memory.text]),
+  );
+  return [...scores.entries()]
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, limit)
+    .map(([entityId, score]) => ({
+      entityId,
+      kind: 'memory' as SearchKind,
+      score,
+      snippet: snippetFromText(textById.get(entityId) ?? ''),
+    }));
+}
+
+/**
+ * Fuse FTS5 lexical and semantic (embedding) rankings via Reciprocal Rank
+ * Fusion — scale-free, no score normalization. Returns SearchHit[] best-first.
+ *
+ * NOTE: unlike searchProject (`score` = bm25, lower is better), the hybrid
+ * `score` is the RRF score (higher is better). When embeddings are off the
+ * semantic list is empty and this returns exactly searchProject's FTS order.
+ */
+export async function hybridSearch(
+  projectId: string,
+  query: string,
+  limit: number = DEFAULT_SEARCH_LIMIT,
+  embedder: Embedder | undefined = getEmbedder(),
+): Promise<SearchHit[]> {
+  // Pull a wider slice from each ranker so fusion has overlap to reward.
+  const poolSize = Math.max(limit * 2, DEFAULT_SEARCH_LIMIT);
+  const ftsHits = searchProject(projectId, query, poolSize);
+  const semantic = await semanticSearch(projectId, query, poolSize, embedder);
+  if (semantic.length === 0) return ftsHits.slice(0, limit);
+
+  const fused = reciprocalRankFusion([
+    ftsHits.map((hit) => hit.entityId),
+    semantic.map((hit) => hit.entityId),
+  ]);
+  // FTS snippet preferred (sentence-aware highlight); fall back to the
+  // semantic hit's truncated memory text for semantic-only matches.
+  const byId = new Map<string, SearchHit>();
+  for (const hit of semantic) byId.set(hit.entityId, hit);
+  for (const hit of ftsHits) byId.set(hit.entityId, hit);
+  return [...fused.entries()]
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, limit)
+    .map(([entityId, score]) => ({ ...byId.get(entityId)!, score }));
+}
+
+/** Resolve the project bound to `cwd`, then hybrid-search it (FTS when off). */
+export async function hybridSearchFromCwd(
+  cwd: string,
+  query: string,
+  limit?: number,
+): Promise<SearchHit[]> {
+  const projectId = await requireBoundProjectId(cwd);
+  return hybridSearch(projectId, query, limit ?? DEFAULT_SEARCH_LIMIT);
 }

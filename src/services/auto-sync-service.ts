@@ -1,4 +1,5 @@
 import { createFileSyncTransport } from '../adapters/sync-transport-file.js';
+import { createHttpSyncTransport } from '../adapters/sync-transport-http.js';
 import type { ProjectSyncState } from '../domain/entities.js';
 import type { SyncTransport } from '../domain/sync-transport.js';
 import { readSyncState } from './project-service.js';
@@ -26,8 +27,8 @@ export interface AutoSyncResult {
 
 /**
  * Rebuild a live transport from persisted config so auto-sync doesn't need a
- * CLI `--remote-path`. Returns undefined when nothing is configured (or for a
- * not-yet-supported transport type, e.g. a future `http` relay).
+ * CLI `--remote-path`/`--remote-url`. Returns undefined when nothing is
+ * configured (or for an unrecognized transport type from a newer schema).
  */
 export function resolveTransport(
   state: ProjectSyncState,
@@ -35,6 +36,12 @@ export function resolveTransport(
   const config = state.syncTransport;
   if (!config) return undefined;
   if (config.type === 'file') return createFileSyncTransport(config.location);
+  if (config.type === 'http') {
+    return createHttpSyncTransport(
+      config.url,
+      config.token ? { token: config.token } : {},
+    );
+  }
   return undefined;
 }
 

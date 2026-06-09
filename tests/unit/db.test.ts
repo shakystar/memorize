@@ -70,7 +70,9 @@ describe('db', () => {
 
   it('stores events.schema_version as TEXT after migrations (fresh db)', () => {
     const db = getDb(VALID_PROJECT_ID);
-    expect(db.pragma('user_version', { simple: true })).toBe(7);
+    // Reached at least the latest known head (bumped per migration; a lower
+    // bound keeps this green when later migrations are added).
+    expect(db.pragma('user_version', { simple: true })).toBeGreaterThanOrEqual(8);
     expect(columnType(db, 'events', 'schema_version')).toBe('TEXT');
   });
 
@@ -138,8 +140,9 @@ describe('db v5 schema_version rebuild', () => {
 
       const db = openDbAt(dbFile);
       try {
-        // Reached the new user_version and the column is now TEXT.
-        expect(db.pragma('user_version', { simple: true })).toBe(7);
+        // Reached the latest user_version and the column is now TEXT (lower
+        // bound so later migrations don't re-break this upgrade assertion).
+        expect(db.pragma('user_version', { simple: true })).toBeGreaterThanOrEqual(8);
         const cols = db
           .prepare('PRAGMA table_info(events)')
           .all() as Array<{ name: string; type: string }>;

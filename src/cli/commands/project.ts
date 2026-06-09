@@ -1,6 +1,9 @@
 import path from 'node:path';
 
 import { createFileSyncTransport } from '../../adapters/sync-transport-file.js';
+import { createHttpSyncTransport } from '../../adapters/sync-transport-http.js';
+import type { SyncTransportConfig } from '../../domain/entities.js';
+import type { SyncTransport } from '../../domain/sync-transport.js';
 import {
   createProject,
   getBoundProjectId,
@@ -20,6 +23,44 @@ import {
 import type { CliContext } from '../context.js';
 import { parseFlags } from '../parse-flags.js';
 import { renderScaffoldUsage } from '../usage.js';
+
+/**
+ * Resolve a sync transport + the config to persist from CLI flags. Exactly one
+ * of `--remote-path` (file) or `--remote-url` (http relay, P3-b-2) is required;
+ * `--token` is only meaningful with `--remote-url`. The returned config is
+ * written to ProjectSyncState so later boundaries auto-sync with no flag.
+ */
+function resolveTransportFlags(flags: {
+  'remote-path'?: string;
+  'remote-url'?: string;
+  token?: string;
+}): { transport: SyncTransport; config: SyncTransportConfig } {
+  const remotePath = flags['remote-path'];
+  const remoteUrl = flags['remote-url'];
+  if (remotePath && remoteUrl) {
+    throw new Error('Pass only one of --remote-path or --remote-url, not both.');
+  }
+  if (remoteUrl) {
+    const token = flags.token;
+    return {
+      transport: createHttpSyncTransport(
+        remoteUrl,
+        token ? { token } : {},
+      ),
+      config: { type: 'http', url: remoteUrl, ...(token ? { token } : {}) },
+    };
+  }
+  if (remotePath) {
+    if (flags.token) {
+      throw new Error('--token is only valid with --remote-url.');
+    }
+    return {
+      transport: createFileSyncTransport(remotePath),
+      config: { type: 'file', location: remotePath },
+    };
+  }
+  throw new Error('--remote-path or --remote-url is required.');
+}
 
 export async function runProjectCommand(
   args: string[],
@@ -60,20 +101,16 @@ export async function runProjectCommand(
     const remoteProjectId = args[1];
     if (!remoteProjectId) {
       throw new Error(
-        'Usage: memorize project clone <remoteProjectId> --remote-path <path>',
+        'Usage: memorize project clone <remoteProjectId> ' +
+          '(--remote-path <path> | --remote-url <url> [--token <t>])',
       );
     }
-    const flags = parseFlags(args.slice(2), { single: ['remote-path'] });
-    const remotePath = flags.single['remote-path'];
-    if (!remotePath) {
-      throw new Error('--remote-path is required for clone.');
-    }
-    const transport = createFileSyncTransport(remotePath);
-    // Persist the location so later boundaries auto-sync with no flag (P3-b).
-    const result = await cloneProject(cwd, remoteProjectId, transport, {
-      type: 'file',
-      location: remotePath,
+    const flags = parseFlags(args.slice(2), {
+      single: ['remote-path', 'remote-url', 'token'],
     });
+    // Persist the location so later boundaries auto-sync with no flag (P3-b).
+    const { transport, config } = resolveTransportFlags(flags.single);
+    const result = await cloneProject(cwd, remoteProjectId, transport, config);
     console.log(
       result.pulled > 0
         ? `Cloned project ${result.projectId} (${result.pulled} events pulled).`
@@ -98,7 +135,7 @@ export async function runProjectCommand(
   if (subcommand === 'sync') {
     const projectId = await requireBoundProjectId(cwd);
     const flags = parseFlags(args.slice(1), {
-      single: ['remote-path', 'bind'],
+      single: ['remote-path', 'remote-url', 'token', 'bind'],
       boolean: ['push', 'pull'],
     });
 
@@ -112,19 +149,11 @@ export async function runProjectCommand(
     }
 
     if (flags.boolean.push || flags.boolean.pull) {
-      const remotePath = flags.single['remote-path'];
-      if (!remotePath) {
-        throw new Error(
-          '--remote-path is required when using --push or --pull.',
-        );
-      }
-      const transport = createFileSyncTransport(remotePath);
+      const { transport, config } = resolveTransportFlags(flags.single);
       // Persist the transport location so background auto-sync (P3-b) can run
       // at boundaries without a flag — this manual push/pull is how the origin
       // machine opts in.
-      await updateSyncState(projectId, {
-        syncTransport: { type: 'file', location: remotePath },
-      });
+      await updateSyncState(projectId, { syncTransport: config });
       if (flags.boolean.push) {
         const response = await pushProject(projectId, transport);
         console.log(
