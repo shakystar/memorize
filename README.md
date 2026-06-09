@@ -168,15 +168,22 @@ pnpm qa:full                      # typecheck + lint + unit + integration + gold
 
 ## License
 
-Released under the [MIT License](./LICENSE). Copyright (c) 2026
-shakystar.
+Released under the [GNU Affero General Public License v3.0](./LICENSE)
+(AGPL-3.0). Copyright (c) 2026 shakystar.
+
+AGPL-3.0 keeps memorize open: you may use, modify, and redistribute it,
+but **derivative works and network/SaaS deployments must make their
+complete corresponding source available under the same license**. This
+prevents memorize from being absorbed into a closed-source product or a
+hosted service without giving back. (Versions 1.0.0–1.1.0 were released
+under the MIT License and remain available under those terms.)
 
 "Memorize" and the Memorize logo are unregistered trademarks of
-shakystar. The MIT License grants you permission to use, modify, and
-redistribute the source code, but does not grant permission to use
-these marks in the name of a derivative product, fork, or service in a
-way that could cause confusion about origin or endorsement. Factual
-references ("built on Memorize") are welcome.
+shakystar. The license grants permission to use, modify, and redistribute
+the source code, but does not grant permission to use these marks in the
+name of a derivative product, fork, or service in a way that could cause
+confusion about origin or endorsement. Factual references ("built on
+Memorize") are welcome.
 
 ## Security
 

@@ -7,6 +7,16 @@ loosely. The project adheres to [Semantic Versioning](https://semver.org/);
 major-version bumps are reserved for breaking changes to the on-disk event
 log layout or the public CLI surface.
 
+## [Unreleased]
+
+### Changed
+
+- **License: MIT → AGPL-3.0-or-later.** memorize is now copyleft — derivative
+  works and network/SaaS deployments must release their complete corresponding
+  source under the same license. Versions 1.0.0–1.1.0 were published under MIT
+  and remain available under those terms; the relicense applies to the current
+  source and all future releases.
+
 ## [1.1.0] — 2026-06-09
 
 Additive, backward-compatible feature release. Every new capability is
