@@ -115,12 +115,13 @@ needs detail.
   `memorize project show` to confirm the project id matches; you may be
   inside a different bound project.
 - Completely remove memorize from a project:
-  - delete `.memorize/` in your project
-  - delete the memorize hooks from `.claude/settings.local.json`
-  - delete the memorize hook entries from `~/.codex/hooks.json`
-    (if you ran `install codex`)
-  - optionally `rm -rf ~/.memorize` to clear durable state across
-    all projects
+  - `memorize uninstall claude` and/or `memorize uninstall codex` —
+    removes the memorize hooks (and any integration blocks) while
+    preserving your other hooks/config. Idempotent. Your captured memory
+    is left intact.
+  - delete `.memorize/` in your project to drop per-project runtime state
+  - optionally `rm -rf ~/.memorize` to clear the durable event log across
+    all projects — this is the only step that deletes captured memory
 
 ## For AI assistants
 

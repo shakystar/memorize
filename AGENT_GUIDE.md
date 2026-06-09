@@ -307,6 +307,42 @@ under the `hooks` map for these events:
 Existing user hooks for the same events are preserved — memorize
 appends its own command array entry, it does not overwrite.
 
+### `memorize uninstall claude` / `memorize uninstall codex`
+
+Reverses `install`. Strips memorize's hook entries (and any historical
+integration blocks) from `.claude/settings.local.json` /
+`~/.codex/hooks.json`, preserving your other hooks and config. Idempotent
+— safe when nothing is installed. With no target (`memorize uninstall`) it
+does both. Captured memory (events/projection under `MEMORIZE_ROOT`) is
+NOT removed — uninstall undoes the editor integration, not the data.
+
+### Optional: LLM extraction & semantic search (env)
+
+All optional and OFF by default. Unset, memorize uses rule-based
+consolidation and FTS5 lexical search only — identical to pre-1.1
+behavior. Point these at any OpenAI-compatible endpoint (a cloud provider
+or a local Ollama) to enable richer features:
+
+- `MEMORIZE_LLM_ENDPOINT` / `MEMORIZE_LLM_API_KEY` / `MEMORIZE_LLM_MODEL`
+  — LLM memory consolidation at boundaries, plus the semantic-contradiction
+  judge. `MEMORIZE_LLM_API_KEY` must be set to enable it (use any dummy
+  value, e.g. `ollama`, for a keyless local server).
+- `MEMORIZE_EMBEDDINGS_ENDPOINT` / `MEMORIZE_EMBEDDINGS_API_KEY` /
+  `MEMORIZE_EMBEDDINGS_MODEL` — embedding-based semantic search (hybrid
+  with FTS5, used in both explicit `search` and startup injection) and the
+  same-topic candidate step of contradiction detection. Enabled when the
+  endpoint **or** key is set (a keyless local Ollama works with just the
+  endpoint).
+- `MEMORIZE_CONTRADICTION_MIN_SIMILARITY` — cosine pre-filter for
+  contradiction candidates (default `0.5`; tune per embedding model).
+
+Contradiction detection needs **both** an embedder and an LLM; with either
+unset it is a silent no-op. Local Ollama example:
+`MEMORIZE_EMBEDDINGS_ENDPOINT=http://localhost:11434/v1`,
+`MEMORIZE_EMBEDDINGS_MODEL=nomic-embed-text`,
+`MEMORIZE_LLM_ENDPOINT=http://localhost:11434/v1`,
+`MEMORIZE_LLM_MODEL=llama3.2:3b`, `MEMORIZE_LLM_API_KEY=ollama`.
+
 ### `memorize install codex`
 
 Idempotent. Writes to `~/.codex/hooks.json` only.
