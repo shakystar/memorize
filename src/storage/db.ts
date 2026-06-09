@@ -194,6 +194,29 @@ const MIGRATIONS: ReadonlyArray<(db: Database.Database) => void> = [
   (db) => {
     db.exec('ALTER TABLE memories ADD COLUMN deduped_by TEXT;');
   },
+  // v8 — semantic-search embeddings (P3-c). A DERIVED, best-effort auxiliary
+  // index keyed by the memory id: one row per consolidated memory text, holding
+  // its embedding vector (JSON number[]). UNLIKE the projection tables this is
+  // NOT rebuilt by rebuildProjectProjection — embeddings need an async network
+  // call, so they are filled out-of-band at boundaries (ensureEmbeddings,
+  // never-throw) and survive replace-all rebuilds. `text_hash`+`model` let a
+  // rebuild skip re-embedding unchanged text. Absent embeddings simply mean a
+  // memory does not participate in semantic ranking (FTS still covers it), so a
+  // project with no embeddings endpoint configured behaves exactly as before.
+  (db) => {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS embeddings (
+        entity_id  TEXT PRIMARY KEY,
+        kind       TEXT NOT NULL,
+        model      TEXT NOT NULL,
+        dim        INTEGER NOT NULL,
+        vector     TEXT NOT NULL,
+        text_hash  TEXT NOT NULL,
+        created_at TEXT NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_embeddings_kind ON embeddings(kind);
+    `);
+  },
 ];
 
 function runMigrations(db: Database.Database): void {
