@@ -15,6 +15,7 @@ import { runSearchCommand } from './commands/search.js';
 import { runSessionCommand } from './commands/session.js';
 import { runSetupCommand } from './commands/setup.js';
 import { runTaskCommand } from './commands/task.js';
+import { runUninstallCommand } from './commands/uninstall.js';
 import type { CliContext, CommandHandler } from './context.js';
 import { renderScaffoldUsage } from './usage.js';
 
@@ -30,6 +31,7 @@ const handlers: Record<string, CommandHandler> = {
   search: runSearchCommand,
   doctor: runDoctorCommand,
   install: runInstallCommand,
+  uninstall: runUninstallCommand,
   hook: runHookCommand,
   task: runTaskCommand,
   conflict: runConflictCommand,
@@ -41,7 +43,13 @@ const handlers: Record<string, CommandHandler> = {
 // heartbeat for these so we never double-fire the event. `session reap`
 // is included because firing a heartbeat on the just-reaped session
 // would resurrect it as 'active' the moment after we abandoned it.
-const SESSION_MANAGING_COMMANDS = new Set(['hook', 'install', 'session', 'setup']);
+const SESSION_MANAGING_COMMANDS = new Set([
+  'hook',
+  'install',
+  'uninstall',
+  'session',
+  'setup',
+]);
 
 async function main(): Promise<void> {
   const [, , command, ...args] = process.argv;
