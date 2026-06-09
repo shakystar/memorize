@@ -18,6 +18,14 @@ export interface Conflict extends BaseEntity {
   rightVersion: string;
   conflictType: ConflictType;
   status: ConflictStatus;
+  /**
+   * P3-c — set when the two sides likely originated CONCURRENTLY (different
+   * sessions/replicas, sync-delayed) rather than as a causal supersession. A
+   * hint for the agent: the deterministic (createdAt,id) winner is convergent
+   * across machines, but a concurrent fork may warrant a fresh explicit
+   * decision. Precise causality detection is deferred to HLC (#39).
+   */
+  concurrent?: boolean;
   resolutionSummary?: string;
   resolvedBy?: string;
   resolvedAt?: ISODateString;
@@ -31,6 +39,7 @@ export function createConflict(input: {
   leftVersion: string;
   rightVersion: string;
   conflictType: ConflictType;
+  concurrent?: boolean;
 }): Conflict {
   return {
     ...baseEntity('conflict'),
@@ -41,6 +50,7 @@ export function createConflict(input: {
     leftVersion: input.leftVersion,
     rightVersion: input.rightVersion,
     conflictType: input.conflictType,
+    ...(input.concurrent ? { concurrent: true } : {}),
     status: 'detected',
   };
 }

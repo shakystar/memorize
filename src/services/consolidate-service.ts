@@ -18,6 +18,7 @@ import {
 } from '../storage/event-store.js';
 import { withFileLock } from '../storage/file-lock.js';
 import { getProjectRoot } from '../storage/path-resolver.js';
+import { detectContradictions } from './contradiction-service.js';
 import { ensureEmbeddings } from './embeddings-service.js';
 import {
   listValidMemories,
@@ -493,6 +494,13 @@ export async function consolidate(params: {
         // a silent no-op (FTS5 still covers these memories). Runs only at this
         // boundary, never per-turn.
         await ensureEmbeddings(params.projectId);
+        // P3-c 2라운드 — surface semantic contradictions among decision memories
+        // (newer wins, older superseded, conflict.detected raised). Needs both
+        // embedder AND LLM; never-throw, no-op when either is unconfigured.
+        await detectContradictions(params.projectId, {
+          actor: params.actor,
+          ...(params.sessionId ? { sessionId: params.sessionId } : {}),
+        });
       }
       writeWatermark(
         params.projectId,
