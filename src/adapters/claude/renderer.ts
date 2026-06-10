@@ -1,5 +1,6 @@
 import type { LiveUpdate, StartupContextPayload } from '../../domain/entities.js';
 import {
+  GROUND_RULE_LINE,
   UNTRUSTED_PREAMBLE,
   wrapUntrusted,
 } from '../../shared/content-safety.js';
@@ -208,6 +209,8 @@ export function renderClaudeStartupContext(
     '# Memorize context',
     '',
     UNTRUSTED_PREAMBLE,
+    '',
+    GROUND_RULE_LINE,
     '',
     renderedBlocks.join('\n\n'),
   ].join('\n');

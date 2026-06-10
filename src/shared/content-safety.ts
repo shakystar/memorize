@@ -15,6 +15,17 @@ export function assertArrayLength<T>(
   }
 }
 
+/**
+ * #68 — one-line single-source-of-truth reminder carried in every startup
+ * injection, as the fallback channel for sessions whose harness never read
+ * the instruction-file block. TRUSTED memorize instruction (not user_data);
+ * must stay one line — it spends injection budget every session.
+ */
+export const GROUND_RULE_LINE =
+  'Ground rule: memorize is the single source of truth for project state — ' +
+  'query it (`memorize task resume`) instead of duplicating tasks/decisions/ids ' +
+  'into your own memory.';
+
 export const UNTRUSTED_PREAMBLE = [
   '## System Instructions (TRUSTED)',
   '',

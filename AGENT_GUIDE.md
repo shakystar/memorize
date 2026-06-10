@@ -376,6 +376,15 @@ under the `hooks` map for these events:
 Existing user hooks for the same events are preserved — memorize
 appends its own command array entry, it does not overwrite.
 
+Also plants the **ground-rule block** (#68) in the project's
+`CLAUDE.md` inside `<!-- memorize:ground-rule v=1 -->` markers: the
+single-source-of-truth contract (do not duplicate project state into
+your own memory; query memorize instead; per-self content stays
+yours). Creates the file when absent; re-install replaces the block in
+place; `uninstall claude` strips exactly the block and never deletes
+the file. The same one-line rule also rides every startup injection as
+a fallback for sessions that never read the file.
+
 ### `memorize uninstall claude` / `memorize uninstall codex`
 
 Reverses `install`. Strips memorize's hook entries (and any historical
@@ -428,7 +437,9 @@ unset it is a silent no-op. Local Ollama example:
 
 ### `memorize install codex`
 
-Idempotent. Writes to `~/.codex/hooks.json` only.
+Idempotent. Writes to `~/.codex/hooks.json`, and plants the
+**ground-rule block** (#68) in the project's `AGENTS.md` (same managed
+markers and uninstall reversal as the Claude variant above).
 
 - Adds memorize's `SessionStart` and `Stop` hook entries.
 - Memorize entries are **prepended** before any existing third-party
