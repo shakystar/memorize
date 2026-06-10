@@ -7,6 +7,48 @@ loosely. The project adheres to [Semantic Versioning](https://semver.org/);
 major-version bumps are reserved for breaking changes to the on-disk event
 log layout or the public CLI surface.
 
+## [2.3.0] — 2026-06-11
+
+Shaped end-to-end by the first external user's report (#82): three
+parallel sessions, a fourth asking "what are my other sessions doing?",
+and no good answer. Additive and backward-compatible.
+
+### Added
+
+- **`memorize session list` / `memorize session activity [--limit N]
+  [--json]`** (#83) — on-demand sibling visibility: claiming sessions
+  with actor/status/lastSeenAt (asking session marked `self`), and per
+  session the recent captured observations. Quiet sessions are shown as
+  "(no captured activity yet)" rather than omitted — plan-mode sessions
+  mostly read, and read-only tools are deliberately not captured.
+- **`memorize version`** (also `--version` / `-v`) — prints the version
+  of the binary that actually ran. `npx` resolves a project
+  devDependency before the global install, so this is the tool for
+  catching the pinned-old-version trap from #82.
+
+### Changed
+
+- **The explicit-coordination layer is demoted from the front door**
+  (#85). Evidence across two machines of dogfooding plus the first
+  external user: organic task/handoff/checkpoint usage is zero while
+  ambient memory thrives. usage/README now lead with the ambient layer;
+  task commands move to an "Explicit coordination (optional)" group;
+  AI_SETUP no longer nudges users to create a first task (an empty task
+  list is normal); AGENT_GUIDE frames tasks/handoffs as the optional
+  layer and steers "what are other sessions doing?" to
+  `session activity`, not `task list`.
+- **PreCompact retired from the Claude hook contract** (#85): its
+  checkpoint-capture role was replaced wholesale by the PostCompact
+  consolidation boundary, the handler had long been a no-op, and real
+  stores show zero checkpoint events — registering it only spawned a
+  useless subprocess per compaction. Legacy entries are stripped on
+  re-install; doctor checks the live set only.
+- AGENT_GUIDE: stale codex hook wording fixed (#81) — the integration
+  registers SessionStart + PostToolUse + PostCompact, not "SessionStart
+  only" / "SessionStart and Stop". Caught when the first macOS user's
+  agent read the stale lines and rationalized a 1.x install's missing
+  hooks as intentional.
+
 ## [2.2.0] — 2026-06-10
 
 Additive, backward-compatible. Theme: making memorize the project's
