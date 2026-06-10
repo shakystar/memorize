@@ -138,7 +138,7 @@ async function appendObservation(
 async function appendMemory(
   sessionId: string,
   text: string,
-): Promise<void> {
+): Promise<string> {
   const memory = createConsolidatedMemory({
     projectId,
     kind: 'progress',
@@ -155,6 +155,7 @@ async function appendMemory(
     payload: memory,
   });
   await rebuildProjectProjection(projectId, { reindexSearch: false });
+  return memory.id;
 }
 
 beforeEach(async () => {
@@ -348,6 +349,55 @@ describe('realtime-share — composeLiveUpdate (two-session e2e)', () => {
       cwd: sandbox,
     });
     expect(again).toBeUndefined();
+  });
+
+  it('#62 — a delivered live-share memory bumps injection_count without a reinforcement stamp', async () => {
+    await seedProject();
+    const sessionA = await startSession(sandbox, {
+      actor: 'claude',
+      projectId,
+    });
+
+    // Cold start seeds the watermark.
+    await captureWriteAs(sessionA, '/repo/x.ts');
+    asSession(sessionA);
+    await composeLiveUpdate({ projectId, agent: 'claude', cwd: sandbox });
+
+    // Late background consolidation lands a memory after the boundary.
+    const memoryId = await appendMemory(sessionA, 'Late boundary memory');
+
+    asSession(sessionA);
+    const injected = await composeLiveUpdate({
+      projectId,
+      agent: 'claude',
+      cwd: sandbox,
+    });
+    expect(injected).toContain('Late boundary memory');
+
+    const row = getDb(projectId)
+      .prepare(
+        'SELECT injection_count, last_accessed_at FROM memories WHERE id = ?',
+      )
+      .get(memoryId) as {
+      injection_count: number;
+      last_accessed_at: string | null;
+    };
+    expect(row.injection_count).toBe(1);
+    // Observe-only: no last_accessed_at stamp — retrieval ranking unchanged.
+    expect(row.last_accessed_at).toBeNull();
+
+    // The advanced watermark prevents re-injection → no double count.
+    asSession(sessionA);
+    const again = await composeLiveUpdate({
+      projectId,
+      agent: 'claude',
+      cwd: sandbox,
+    });
+    expect(again).toBeUndefined();
+    const rowAfter = getDb(projectId)
+      .prepare('SELECT injection_count FROM memories WHERE id = ?')
+      .get(memoryId) as { injection_count: number };
+    expect(rowAfter.injection_count).toBe(1);
   });
 
   it('surfaces a file-collision warning and (opt-in) promotes a conflict event', async () => {

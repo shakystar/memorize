@@ -48,6 +48,14 @@ import {
  * re-forms on a later pass — no duplicate conflicts, no re-supersede.
  */
 
+/**
+ * Marker prefix on `memory.superseded` reasons written by THIS detector, vs
+ * extractor-driven supersessions. #62 telemetry classifies on it — keep the
+ * string stable (existing event logs already carry it verbatim).
+ */
+export const SEMANTIC_CONTRADICTION_REASON_PREFIX =
+  'Semantic contradiction (auto): ';
+
 export interface JudgePair {
   aId: string;
   aText: string;
@@ -273,7 +281,7 @@ export async function detectContradictions(
       const supersede: MemorySupersededPayload = {
         supersedes: loser.id,
         supersededBy: winner.id,
-        reason: `Semantic contradiction (auto): ${topic}`,
+        reason: `${SEMANTIC_CONTRADICTION_REASON_PREFIX}${topic}`,
       };
       inputs.push({
         type: 'memory.superseded',

@@ -185,8 +185,12 @@ background child — running it by hand is equally valid and idempotent
   lifecycle-evidence distribution as JSON instead (#57): per kind the
   memory count, how many carry `obsoleteWhen`, the kind-misfit count and
   tag counts, plus the verbatim `obsoleteWhen` conditions and misfit
-  reasons. Read-only; includes superseded/deduped rows because the
-  evidence is about how memories lived, not what is currently valid.
+  reasons. A `behavior` block (#62) adds the observed side per kind:
+  memories injected at least once + total injections (startup and
+  mid-session live share), superseded / contradicted / deduped counts,
+  and the age-at-invalidation distribution in days. Read-only; includes
+  superseded/deduped rows because the evidence is about how memories
+  lived, not what is currently valid.
 
 The extractor may attach observe-only lifecycle-evidence fields to each
 memory (`obsoleteWhen`, `kindMisfit` + `kindMisfitReason`,

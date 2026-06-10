@@ -217,6 +217,17 @@ const MIGRATIONS: ReadonlyArray<(db: Database.Database) => void> = [
       CREATE INDEX IF NOT EXISTS idx_embeddings_kind ON embeddings(kind);
     `);
   },
+  // v9 — #62 behavioral lifecycle telemetry: how often a memory was actually
+  // injected into an agent context (startup AND mid-session live share).
+  // DERIVED-level, observe-only counter: like `last_accessed_at` it is
+  // best-effort — carried over across routine rebuilds, reset by a true
+  // from-scratch replay — and read by NO ranking/injection consumer; only
+  // the `consolidate --report` evidence dump aggregates it.
+  (db) => {
+    db.exec(
+      'ALTER TABLE memories ADD COLUMN injection_count INTEGER NOT NULL DEFAULT 0;',
+    );
+  },
 ];
 
 function runMigrations(db: Database.Database): void {

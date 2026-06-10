@@ -154,14 +154,30 @@ export async function rebuildProjectProjection(
     // is the accepted best-effort grade of reinforcement (decision ⑤ —
     // decay stays deterministic, reinforcement is a derived-layer
     // convenience, not part of the source of truth).
-    const lastAccessedById = new Map<string, string>(
+    // `injection_count` (#62 behavioral telemetry) rides the same carry-over:
+    // projection-only, observe-only, reset by a from-scratch replay.
+    const accessStateById = new Map<
+      string,
+      { lastAccessedAt: string | null; injectionCount: number }
+    >(
       (
         db
           .prepare(
-            'SELECT id, last_accessed_at FROM memories WHERE last_accessed_at IS NOT NULL',
+            'SELECT id, last_accessed_at, injection_count FROM memories ' +
+              'WHERE last_accessed_at IS NOT NULL OR injection_count > 0',
           )
-          .all() as Array<{ id: string; last_accessed_at: string }>
-      ).map((row) => [row.id, row.last_accessed_at]),
+          .all() as Array<{
+          id: string;
+          last_accessed_at: string | null;
+          injection_count: number;
+        }>
+      ).map((row) => [
+        row.id,
+        {
+          lastAccessedAt: row.last_accessed_at,
+          injectionCount: row.injection_count,
+        },
+      ]),
     );
 
     for (const table of [...SINGLETON_TABLES, ...ENTITY_TABLES]) {
@@ -333,12 +349,13 @@ export async function rebuildProjectProjection(
     const insertMemory = db.prepare(
       `INSERT INTO memories
          (id, kind, salience, created_at, invalid_at, superseded_by,
-          deduped_by, last_accessed_at, data)
+          deduped_by, last_accessed_at, injection_count, data)
        VALUES
          (@id, @kind, @salience, @createdAt, @invalidAt, @supersededBy,
-          @dedupedBy, @lastAccessedAt, @data)`,
+          @dedupedBy, @lastAccessedAt, @injectionCount, @data)`,
     );
     for (const memory of Object.values(state.memories)) {
+      const accessState = accessStateById.get(memory.id);
       insertMemory.run({
         id: memory.id,
         kind: memory.kind,
@@ -347,7 +364,8 @@ export async function rebuildProjectProjection(
         invalidAt: memory.invalidAt ?? null,
         supersededBy: memory.supersededBy ?? null,
         dedupedBy: memory.dedupedBy ?? null,
-        lastAccessedAt: lastAccessedById.get(memory.id) ?? null,
+        lastAccessedAt: accessState?.lastAccessedAt ?? null,
+        injectionCount: accessState?.injectionCount ?? 0,
         data: JSON.stringify(memory),
       });
       // Superseded memories stay indexed — "what was true then" remains
@@ -583,12 +601,39 @@ export function touchMemoryAccess(
 ): void {
   if (memoryIds.length === 0) return;
   const database = db(projectId);
+  // #62 — startup injection is also an injection: bump the telemetry counter
+  // in the same statement as the reinforcement stamp.
   const update = database.prepare(
-    'UPDATE memories SET last_accessed_at = ? WHERE id = ?',
+    'UPDATE memories SET last_accessed_at = ?, ' +
+      'injection_count = injection_count + 1 WHERE id = ?',
   );
   database.transaction(() => {
     for (const memoryId of memoryIds) {
       update.run(accessedAtIso, memoryId);
+    }
+  })();
+}
+
+/**
+ * #62 behavioral telemetry — count a mid-session live-share injection of a
+ * memory. UNLIKE touchMemoryAccess this deliberately does NOT stamp
+ * `last_accessed_at`: reinforcement feeds retrieval ranking, and the #62
+ * contract is observe-only (no behavior change to injection/ranking). Same
+ * best-effort grade: projection-level UPDATE, carried over across routine
+ * rebuilds, reset by a from-scratch replay.
+ */
+export function bumpMemoryInjections(
+  projectId: string,
+  memoryIds: string[],
+): void {
+  if (memoryIds.length === 0) return;
+  const database = db(projectId);
+  const update = database.prepare(
+    'UPDATE memories SET injection_count = injection_count + 1 WHERE id = ?',
+  );
+  database.transaction(() => {
+    for (const memoryId of memoryIds) {
+      update.run(memoryId);
     }
   })();
 }

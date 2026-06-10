@@ -157,6 +157,13 @@ describe('memorize consolidate (CLI command — #46 Part A)', () => {
       >;
       obsoleteWhen: unknown[];
       kindMisfitReasons: unknown[];
+      behavior: {
+        memories: number;
+        byKind: Record<
+          string,
+          { count: number; totalInjections: number; superseded: number }
+        >;
+      };
     };
     // Rule-based extractor emits no evidence fields — presence counters are
     // all zero, but the shape is complete and counts the real memories.
@@ -165,6 +172,14 @@ describe('memorize consolidate (CLI command — #46 Part A)', () => {
     expect(parsed.byKind.progress!.withObsoleteWhen).toBe(0);
     expect(parsed.obsoleteWhen).toEqual([]);
     expect(parsed.kindMisfitReasons).toEqual([]);
+    // #62 — the behavioral half rides the same report. Nothing was injected
+    // or superseded in this fresh store, but the shape and counts are there.
+    expect(parsed.behavior.memories).toBe(parsed.memories);
+    expect(parsed.behavior.byKind.progress!.count).toBe(
+      parsed.byKind.progress!.count,
+    );
+    expect(parsed.behavior.byKind.progress!.totalInjections).toBe(0);
+    expect(parsed.behavior.byKind.progress!.superseded).toBe(0);
 
     // --report is read-only: the recorded last attempt is still the boundary
     // run above, not a new one.

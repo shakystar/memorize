@@ -19,6 +19,8 @@ export interface SiblingObservationItem {
 }
 
 export interface SiblingMemoryItem {
+  /** Memory id — carried for #62 injection telemetry, not rendered. */
+  id: string;
   kind: ConsolidatedMemoryKind;
   text: string;
   salience: number;

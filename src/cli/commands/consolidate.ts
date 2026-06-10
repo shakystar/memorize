@@ -6,6 +6,7 @@ import {
   buildLifecycleEvidenceReport,
   consolidate,
 } from '../../services/consolidate-service.js';
+import { buildMemoryBehaviorReport } from '../../services/memory-telemetry-service.js';
 import { requireBoundProjectId } from '../../services/project-service.js';
 import { getSession } from '../../services/projection-store.js';
 import type { CliContext } from '../context.js';
@@ -18,9 +19,11 @@ import type { CliContext } from '../context.js';
  * background child (#46) so consolidation never blocks the agent; it is
  * equally valid to run by hand.
  *
- * `memorize consolidate --report` — #57: print the observed
- * lifecycle-evidence distribution (obsolete_when presence x kind, kind-misfit
- * rate + reasons, tag x kind) as JSON instead of running a boundary.
+ * `memorize consolidate --report` — print the lifecycle evidence as JSON
+ * instead of running a boundary: the extraction-side distribution (#57 —
+ * obsolete_when presence x kind, kind-misfit rate + reasons, tag x kind)
+ * plus the behavioral side (#62 — kind x injections/superseded/contradicted/
+ * deduped/age-at-invalidation) under `behavior`.
  */
 export async function runConsolidateCommand(
   args: string[],
@@ -29,7 +32,14 @@ export async function runConsolidateCommand(
   if (args.includes('--report')) {
     const projectId = await requireBoundProjectId(ctx.cwd);
     console.log(
-      JSON.stringify(buildLifecycleEvidenceReport(projectId), null, 2),
+      JSON.stringify(
+        {
+          ...buildLifecycleEvidenceReport(projectId),
+          behavior: await buildMemoryBehaviorReport(projectId),
+        },
+        null,
+        2,
+      ),
     );
     return;
   }
