@@ -15,7 +15,7 @@ const repoRoot = process.cwd();
 const tsxCliPath = join(repoRoot, 'node_modules', 'tsx', 'dist', 'cli.mjs');
 const cliEntryPath = join(repoRoot, 'src', 'cli', 'index.ts');
 
-function runCli(args: string[]) {
+function runCli(args: string[], stdinPayload?: object) {
   return spawnSync('node', [tsxCliPath, cliEntryPath, ...args], {
     cwd: sandbox,
     encoding: 'utf8',
@@ -31,6 +31,7 @@ function runCli(args: string[]) {
       // The bare path is exercised by its own dedicated test.
       MEMORIZE_HOOK_COMMAND_FORM: 'npx',
     },
+    ...(stdinPayload ? { input: JSON.stringify(stdinPayload) } : {}),
   });
 }
 
@@ -333,6 +334,29 @@ describe('install integration', () => {
     // doctor can verify (codex keeps hook trust state internal).
     expect(codexCheck?.message).toContain('PostToolUse');
     expect(codexCheck?.message).toContain('approve');
+  });
+
+  it('doctor warns on the codex trust gap: hooks registered, other-agent sessions exist, zero codex sessions (#37)', () => {
+    runCli(['install', 'codex']);
+
+    // A claude session gets recorded; codex never records one. If the codex
+    // hooks had ever fired (i.e. were approved), a codex session.started
+    // would exist too — so their absence implies the trust gap.
+    const start = runCli(['hook', 'claude', 'SessionStart'], {
+      cwd: sandbox,
+      hook_event_name: 'SessionStart',
+      session_id: 'trust-gap-uuid-1',
+    });
+    expect(start.status).toBe(0);
+
+    const result = runCli(['doctor', '--json']);
+    const report = JSON.parse(String(result.stdout)) as {
+      checks: Array<{ id: string; status: string; message: string; fix?: string }>;
+    };
+    const codexCheck = report.checks.find((c) => c.id === 'install.codex');
+    expect(codexCheck?.status).toBe('warn');
+    expect(codexCheck?.message).toContain('no codex session');
+    expect(codexCheck?.fix).toContain('approve');
   });
 
   it('doctor reports install.codex:warn when hooks.json exists but memorize hooks are missing', async () => {

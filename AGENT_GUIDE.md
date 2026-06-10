@@ -407,6 +407,19 @@ Idempotent. Writes to `~/.codex/hooks.json` only.
   it becomes empty. Hooks are the authoritative contract now and the
   in-repo bootstrap block was pure duplication.
 
+**ACTION REQUIRED: approve the hooks once.** Codex silently skips
+externally-written hooks — no error, no log — until you approve them
+once in an interactive codex session (verified against codex
+v0.137.0). Until then the entire codex integration (session
+recording, capture, consolidation) is inert even though `install
+codex` succeeded. Start codex interactively in any project once and
+accept the hook approval prompt. `memorize doctor` infers the gap
+(#37): when memorize hooks are registered but the bound project has
+sessions from other agents and none from codex, it raises a `warn`.
+A supported non-interactive trust grant is tracked upstream in
+openai/codex#21615; once it lands, `install codex` will request
+trust itself and this step disappears.
+
 **Note: codex hooks are global.** `~/.codex/hooks.json` lives under
 your home directory, not in the project, so every codex session on
 your machine will invoke the memorize hook. In unrelated directories
