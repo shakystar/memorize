@@ -487,8 +487,16 @@ function sanitizeEvidenceTags(value: unknown): string[] | undefined {
  * array is an extractor failure and throws ExtractionParseError — only a
  * cleanly parsed result (including an empty array) lets the boundary
  * advance the watermark and consume the observations.
+ *
+ * `maxItems` defaults to the boundary noise guard; `memory import` (#69)
+ * raises it — an agent distilling weeks of docs legitimately yields more
+ * than one boundary's worth.
  */
-export function parseExtractedMemories(content: string): ExtractedMemory[] {
+export function parseExtractedMemories(
+  content: string,
+  opts: { maxItems?: number } = {},
+): ExtractedMemory[] {
+  const maxItems = opts.maxItems ?? MAX_MEMORIES_PER_BOUNDARY;
   const start = content.indexOf('[');
   const end = content.lastIndexOf(']');
   if (start === -1 || end <= start) {
@@ -545,7 +553,7 @@ export function parseExtractedMemories(content: string): ExtractedMemory[] {
       };
     })
     .filter((item): item is ExtractedMemory => item !== undefined)
-    .slice(0, MAX_MEMORIES_PER_BOUNDARY);
+    .slice(0, maxItems);
 }
 
 // --- watermark ---------------------------------------------------------------

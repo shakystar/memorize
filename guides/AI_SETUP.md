@@ -114,7 +114,33 @@ no task lists, no summaries.**
    or `error`, apply the `fix` field of each issue in order and re-run
    until status is `ok`.
 
-5. **Tell the user** briefly:
+5. **Offer to absorb pre-existing context** (mid-project adoption, #69).
+   If this project lived under you (or another agent) before memorize —
+   your harness memory has project notes, or the user keeps decision
+   docs — offer:
+
+   > This project has existing context (my session memory / your docs).
+   > Want me to distill it into memorize so every future session starts
+   > with it?
+
+   If the user accepts:
+
+   1. Ask which sources: your own harness memory (you know its path),
+      `CLAUDE.local.md` / `AGENTS.override.md`, and any doc folders the
+      user names (ADRs, plans, postmortems).
+   2. Read and distill **project state only** — decisions, constraints,
+      progress, rationale. Your per-self content (user preferences, your
+      own work-style lessons) STAYS in your harness memory. One
+      self-contained sentence per item; include `obsoleteWhen` for
+      items with a natural expiry and 1–3 free-form `tags`.
+   3. Pipe the JSON array to
+      `npx @shakystar/memorize memory import --source <label>`
+      (one invocation per source label, e.g. `claude-memory`,
+      `docs/adr`; ≤100 items each).
+   4. Report the result counts (`imported` / `skippedDuplicates`) to
+      the user. Re-running is safe — duplicates are skipped.
+
+6. **Tell the user** briefly:
 
    > Memorize is set up. Your project context will persist across
    > sessions. Create your first task with
@@ -137,6 +163,7 @@ project show         print bound project JSON
 project sync         push/pull events to a remote path
 install claude       wire hooks into .claude/settings.local.json
 install codex        wire hook entries into ~/.codex/hooks.json
+memory import        ingest agent-distilled memories (stdin JSON array)
 task create          append task.created event
 task list            list tasks with optional --status/--workstream
 task show            print task JSON

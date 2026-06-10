@@ -16,6 +16,7 @@ export function renderScaffoldUsage(): string {
     '  memorize project clone ...   Replica-clone a remote project into a fresh dir',
     '  memorize install claude      Wire Memorize into .claude/settings.local.json',
     '  memorize install codex       Wire Memorize bootstrap into AGENTS.override.md',
+    '  memorize memory import ...   Ingest agent-distilled memories (stdin JSON)',
     '',
     'Full reference (every command, flags, and failure modes):',
     '  https://github.com/shakystar/memorize/blob/main/AGENT_GUIDE.md',
