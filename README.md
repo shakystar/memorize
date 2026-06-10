@@ -6,6 +6,11 @@
 
 **English** | [한국어](./docs/i18n/README.ko.md) | [日本語](./docs/i18n/README.ja.md) | [简体中文](./docs/i18n/README.zh-CN.md) | [Español](./docs/i18n/README.es.md)
 
+<p align="center">
+  <img src="./.github/assets/social-preview.png" alt="memorize — shared memory for AI coding agents" width="720">
+</p>
+
+
 > One persistent project brain shared between you, Claude Code, and
 > Codex — local-first, event-sourced, modeled on how biological memory
 > actually works.
