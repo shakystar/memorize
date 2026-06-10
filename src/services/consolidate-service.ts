@@ -1,6 +1,9 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 
+import spawn from 'cross-spawn';
+import which from 'which';
+
 import {
   type ConsolidatedMemory,
   type ConsolidatedMemoryKind,
@@ -153,15 +156,22 @@ export function resolveLlmConfig(
 ): LlmConsolidatorConfig | undefined {
   const apiKey = env.MEMORIZE_LLM_API_KEY;
   if (!apiKey) return undefined;
-  const timeoutMs = Number.parseInt(env.MEMORIZE_LLM_TIMEOUT_MS ?? '', 10);
+  const timeoutMs = resolveTimeoutMsEnv(env);
   return {
     endpoint: env.MEMORIZE_LLM_ENDPOINT ?? DEFAULT_LLM_ENDPOINT,
     apiKey,
     model: env.MEMORIZE_LLM_MODEL ?? DEFAULT_LLM_MODEL,
     // Invalid/non-positive values fall back to the built-in default. An
     // explicit per-boundary timeoutMs (SessionStart catch-up) still wins.
-    ...(Number.isFinite(timeoutMs) && timeoutMs > 0 ? { timeoutMs } : {}),
+    ...(timeoutMs ? { timeoutMs } : {}),
   };
+}
+
+/** MEMORIZE_LLM_TIMEOUT_MS, shared by the HTTP and host-CLI extractors.
+ *  Invalid/non-positive values read as unset (built-in default applies). */
+function resolveTimeoutMsEnv(env: NodeJS.ProcessEnv): number | undefined {
+  const timeoutMs = Number.parseInt(env.MEMORIZE_LLM_TIMEOUT_MS ?? '', 10);
+  return Number.isFinite(timeoutMs) && timeoutMs > 0 ? timeoutMs : undefined;
 }
 
 const EXTRACTION_SYSTEM_PROMPT = [
@@ -176,27 +186,32 @@ const EXTRACTION_SYSTEM_PROMPT = [
   'state. Extract nothing speculative. Empty array if nothing durable.',
 ].join(' ');
 
+/** Prompt body shared verbatim by the HTTP and host-CLI extractors. */
+function buildExtractionUserContent(input: ConsolidationInput): string {
+  const observationLines = input.observations.map(
+    (o) => `- [${o.signal}${o.toolName ? `/${o.toolName}` : ''}] ${o.summary ?? '(no summary)'}`,
+  );
+  const memoryLines = input.existingMemories.map(
+    (m) => `- id=${m.id} [${m.kind}] ${m.text}`,
+  );
+  return [
+    '## Observations (this session window)',
+    observationLines.join('\n') || '(none)',
+    '',
+    '## Existing valid memories (for contradiction check)',
+    memoryLines.join('\n') || '(none)',
+    ...(input.transcriptTail
+      ? ['', '## Transcript tail (untrusted, format unstable)', input.transcriptTail]
+      : []),
+  ].join('\n');
+}
+
 export class LlmConsolidator implements Consolidator {
   constructor(private readonly config: LlmConsolidatorConfig) {}
 
   async extract(input: ConsolidationInput): Promise<ExtractedMemory[]> {
     const fetchImpl = this.config.fetchImpl ?? fetch;
-    const observationLines = input.observations.map(
-      (o) => `- [${o.signal}${o.toolName ? `/${o.toolName}` : ''}] ${o.summary ?? '(no summary)'}`,
-    );
-    const memoryLines = input.existingMemories.map(
-      (m) => `- id=${m.id} [${m.kind}] ${m.text}`,
-    );
-    const userContent = [
-      '## Observations (this session window)',
-      observationLines.join('\n') || '(none)',
-      '',
-      '## Existing valid memories (for contradiction check)',
-      memoryLines.join('\n') || '(none)',
-      ...(input.transcriptTail
-        ? ['', '## Transcript tail (untrusted, format unstable)', input.transcriptTail]
-        : []),
-    ].join('\n');
+    const userContent = buildExtractionUserContent(input);
 
     const response = await fetchImpl(
       `${this.config.endpoint.replace(/\/$/, '')}/chat/completions`,
@@ -226,6 +241,170 @@ export class LlmConsolidator implements Consolidator {
     const content = body.choices?.[0]?.message?.content ?? '';
     return parseExtractedMemories(content);
   }
+}
+
+// --- host-CLI extractor (claude -p / codex exec) — #44 ------------------------
+
+export type HostCliCommand = 'claude' | 'codex';
+
+/**
+ * Env var set on the spawned host CLI so the memorize hooks ITS session
+ * fires (SessionStart/PostToolUse/...) no-op. Without it the extractor's
+ * own invocation would be captured and consolidated, recursing forever:
+ * consolidate → claude -p → SessionStart hook → consolidate → ...
+ */
+export const SUPPRESS_HOOKS_ENV_VAR = 'MEMORIZE_SUPPRESS_HOOKS';
+
+/** Minimal child-process surface CliConsolidator needs (test-fakeable). */
+export interface CliExtractorChild {
+  stdout: {
+    on(event: 'data', listener: (chunk: unknown) => void): unknown;
+  } | null;
+  stderr: {
+    on(event: 'data', listener: (chunk: unknown) => void): unknown;
+  } | null;
+  stdin: { end(data: string): unknown } | null;
+  kill(): boolean;
+  on(event: 'error', listener: (error: Error) => void): unknown;
+  on(event: 'close', listener: (code: number | null) => void): unknown;
+}
+
+/** Spawn seam (test-injectable; cross-spawn satisfies it). */
+export type SpawnImpl = (
+  command: string,
+  args: string[],
+  options: { env: NodeJS.ProcessEnv },
+) => CliExtractorChild;
+
+export interface CliConsolidatorConfig {
+  command: HostCliCommand;
+  /** Same semantics as the HTTP timeout (boundary override wins). */
+  timeoutMs?: number;
+  /** Test seam; defaults to cross-spawn. */
+  spawnImpl?: SpawnImpl;
+}
+
+const CLI_EXTRACTOR_ARGS: Record<HostCliCommand, string[]> = {
+  claude: ['-p', '--output-format', 'text'],
+  // `-` = read the prompt from stdin (verified against codex exec --help).
+  codex: ['exec', '-', '--skip-git-repo-check', '--color', 'never'],
+};
+
+/**
+ * Host-CLI extractor: runs the user's installed `claude -p` / `codex exec`
+ * with their existing subscription auth — zero extra setup, no API key.
+ * The prompt goes via stdin (Windows argv length/quoting limits), and the
+ * combined system+user text in one block (`claude -p` has no separate
+ * system channel).
+ */
+export class CliConsolidator implements Consolidator {
+  constructor(private readonly config: CliConsolidatorConfig) {}
+
+  async extract(input: ConsolidationInput): Promise<ExtractedMemory[]> {
+    const prompt = `${EXTRACTION_SYSTEM_PROMPT}\n\n${buildExtractionUserContent(input)}`;
+    const stdout = await this.runCli(prompt);
+    return parseExtractedMemories(stdout);
+  }
+
+  private runCli(prompt: string): Promise<string> {
+    const spawnImpl: SpawnImpl = this.config.spawnImpl ?? spawn;
+    const timeoutMs = this.config.timeoutMs ?? LLM_TIMEOUT_MS;
+    const { command } = this.config;
+    return new Promise<string>((resolve, reject) => {
+      const child = spawnImpl(command, CLI_EXTRACTOR_ARGS[command], {
+        env: { ...process.env, [SUPPRESS_HOOKS_ENV_VAR]: '1' },
+      });
+      let stdout = '';
+      let stderr = '';
+      let timedOut = false;
+      // Same contract as the HTTP timeout: kill and THROW (never return [])
+      // so the watermark stays behind and the next boundary retries. The
+      // SessionStart 5s override will usually kill CLI extraction — by
+      // design; the next non-blocking boundary catches up.
+      const timer = setTimeout(() => {
+        timedOut = true;
+        child.kill();
+      }, timeoutMs);
+      child.stdout?.on('data', (chunk) => {
+        stdout += String(chunk);
+      });
+      child.stderr?.on('data', (chunk) => {
+        stderr += String(chunk);
+      });
+      child.on('error', (error) => {
+        clearTimeout(timer);
+        reject(error);
+      });
+      child.on('close', (code) => {
+        clearTimeout(timer);
+        if (timedOut) {
+          reject(
+            new Error(`${command} CLI extractor timed out after ${timeoutMs}ms`),
+          );
+        } else if (code !== 0) {
+          const detail = stderr.trim().slice(0, 200);
+          reject(
+            new Error(
+              `${command} CLI extractor exited with code ${code}${detail ? `: ${detail}` : ''}`,
+            ),
+          );
+        } else if (stdout.trim().length === 0) {
+          reject(new Error(`${command} CLI extractor produced no output`));
+        } else {
+          resolve(stdout);
+        }
+      });
+      child.stdin?.end(prompt);
+    });
+  }
+}
+
+// --- backend resolution (#44 priority order) ----------------------------------
+
+export type ConsolidatorBackend =
+  | { kind: 'llm'; config: LlmConsolidatorConfig }
+  | { kind: 'cli'; command: HostCliCommand; timeoutMs?: number }
+  | { kind: 'rule-based' };
+
+let warnedUnknownBackend = false;
+
+/**
+ * Pick the extractor backend (#44):
+ * 1. MEMORIZE_LLM_BACKEND explicit — `claude-cli` | `codex-cli` | `off`
+ *    (off = rule-based, disables LLM entirely; unknown values read as unset).
+ * 2. MEMORIZE_LLM_API_KEY set — existing HTTP LlmConsolidator (unchanged).
+ * 3. Auto-detect a host CLI on PATH (claude, then codex): highest-quality
+ *    zero-setup extractor via the user's existing agent subscription auth.
+ * 4. Nothing available — rule-based fallback.
+ */
+export function resolveConsolidatorBackend(
+  env: NodeJS.ProcessEnv = process.env,
+  isOnPath: (command: HostCliCommand) => boolean = (command) =>
+    which.sync(command, { nothrow: true }) !== null,
+): ConsolidatorBackend {
+  const timeoutMs = resolveTimeoutMsEnv(env);
+  const cli = (command: HostCliCommand): ConsolidatorBackend => ({
+    kind: 'cli',
+    command,
+    ...(timeoutMs ? { timeoutMs } : {}),
+  });
+
+  const explicit = env.MEMORIZE_LLM_BACKEND;
+  if (explicit === 'off') return { kind: 'rule-based' };
+  if (explicit === 'claude-cli') return cli('claude');
+  if (explicit === 'codex-cli') return cli('codex');
+  if (explicit && !warnedUnknownBackend) {
+    warnedUnknownBackend = true;
+    process.stderr.write(
+      `WARN: unknown MEMORIZE_LLM_BACKEND "${explicit}" (expected claude-cli|codex-cli|off); ignoring\n`,
+    );
+  }
+
+  const llmConfig = resolveLlmConfig(env);
+  if (llmConfig) return { kind: 'llm', config: llmConfig };
+  if (isOnPath('claude')) return cli('claude');
+  if (isOnPath('codex')) return cli('codex');
+  return { kind: 'rule-based' };
 }
 
 /**
@@ -346,7 +525,7 @@ export interface ConsolidateResult {
   superseded: number;
   /** Observations processed in this boundary window. */
   observationsProcessed: number;
-  extractor: 'llm' | 'rule-based' | 'custom' | 'none';
+  extractor: 'llm' | 'cli' | 'rule-based' | 'custom' | 'none';
 }
 
 const NOOP_RESULT: ConsolidateResult = {
@@ -430,20 +609,36 @@ export async function consolidate(params: {
         (row) => row.memory,
       );
 
-      const llmConfig = resolveLlmConfig();
-      const consolidator =
-        params.consolidator ??
-        (llmConfig
-          ? new LlmConsolidator({
-              ...llmConfig,
-              ...(params.llmTimeoutMs ? { timeoutMs: params.llmTimeoutMs } : {}),
-            })
-          : new RuleBasedConsolidator());
-      const extractorKind: ConsolidateResult['extractor'] = params.consolidator
-        ? 'custom'
-        : llmConfig
-          ? 'llm'
-          : 'rule-based';
+      let consolidator: Consolidator;
+      let extractorKind: ConsolidateResult['extractor'];
+      if (params.consolidator) {
+        consolidator = params.consolidator;
+        extractorKind = 'custom';
+      } else {
+        const backend = resolveConsolidatorBackend();
+        // The per-boundary llmTimeoutMs override (SessionStart catch-up)
+        // wins over the env timeout for BOTH the HTTP and CLI backends.
+        const timeoutOverride = params.llmTimeoutMs
+          ? { timeoutMs: params.llmTimeoutMs }
+          : {};
+        if (backend.kind === 'llm') {
+          consolidator = new LlmConsolidator({
+            ...backend.config,
+            ...timeoutOverride,
+          });
+          extractorKind = 'llm';
+        } else if (backend.kind === 'cli') {
+          consolidator = new CliConsolidator({
+            command: backend.command,
+            ...(backend.timeoutMs ? { timeoutMs: backend.timeoutMs } : {}),
+            ...timeoutOverride,
+          });
+          extractorKind = 'cli';
+        } else {
+          consolidator = new RuleBasedConsolidator();
+          extractorKind = 'rule-based';
+        }
+      }
 
       // Extractor failure (LLM timeout, HTTP error, unparseable reply)
       // intentionally propagates WITHOUT advancing the watermark — the next
