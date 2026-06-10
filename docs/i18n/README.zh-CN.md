@@ -139,6 +139,12 @@ memory import、hook、projection rebuild、sync 等)都记录在
 
 ## 故障排查
 
+- 安装中途报错 — 把完整错误输出粘贴到 Claude/Codex 会话,并附上
+  [AI_SETUP.md](../../guides/AI_SETUP.md) 链接;其中 "Recovering a
+  failed install" 一节会引导智能体按序排查常见原因(Node 版本、npm
+  全局权限、PATH、WSL 遮蔽)。没有智能体?请用 **Install failure**
+  模板提 issue。
+
 - Claude 会话里看不到 memorize 上下文 — 运行 `memorize doctor`,
   按失败检查项的 `fix:` 处理。通常重跑 `memorize install claude`
   即可解决。

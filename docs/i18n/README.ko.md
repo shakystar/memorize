@@ -151,6 +151,12 @@ install, memory import, hook, projection rebuild, sync 등)은
 
 ## 문제 해결
 
+- 설치가 중간에 에러로 멈춤 — 에러 출력 전체를 Claude/Codex 세션에
+  붙여넣고 [AI_SETUP.md](../../guides/AI_SETUP.md) 링크를 함께 주세요.
+  그 안의 "Recovering a failed install" 섹션이 에이전트에게 일반적인
+  원인(Node 버전, npm 전역 권한, PATH, WSL 가림)을 순서대로 점검시킵니다.
+  에이전트가 없다면 **Install failure** 이슈 템플릿으로 제보해 주세요.
+
 - Claude 세션에 memorize 컨텍스트가 안 보임 — `memorize doctor`를
   실행하고 실패한 체크의 `fix:` 항목을 따르세요. 보통
   `memorize install claude` 재실행으로 해결됩니다.

@@ -162,6 +162,13 @@ archivo que tu IA lee cuando necesita detalle.
 
 ## Solución de problemas
 
+- La instalación falló a medias — pega el error completo en tu sesión de
+  Claude/Codex junto con el enlace a
+  [AI_SETUP.md](../../guides/AI_SETUP.md); su sección "Recovering a
+  failed install" guía al agente por las causas habituales (versión de
+  Node, permisos globales de npm, PATH, solapamiento en WSL). ¿Sin
+  agente a mano? Abre un issue con la plantilla **Install failure**.
+
 - La sesión de Claude no muestra contexto de memorize — ejecuta
   `memorize doctor` y sigue el campo `fix:` de cada check fallido.
   Normalmente basta con repetir `memorize install claude`.

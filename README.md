@@ -159,6 +159,12 @@ file when it needs detail.
 
 ## Troubleshooting
 
+- The install errored midway — paste the full error into your
+  Claude/Codex session together with the
+  [AI_SETUP.md](./guides/AI_SETUP.md) link; its "Recovering a failed
+  install" section walks the agent through the usual causes (Node
+  version, npm global permissions, PATH, WSL shadowing). No agent
+  handy? File an issue with the **Install failure** template.
 - Claude session shows no memorize context — run `memorize doctor` and
   follow the `fix:` field of any failing check. Usually re-running
   `memorize install claude` clears it.

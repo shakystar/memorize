@@ -151,6 +151,13 @@ install、memory import、hook、projection rebuild、sync など)は
 
 ## トラブルシューティング
 
+- インストールが途中でエラーになった — エラー出力全体を Claude/Codex の
+  セッションに貼り、[AI_SETUP.md](../../guides/AI_SETUP.md) のリンクを
+  添えてください。"Recovering a failed install" セクションが、よくある
+  原因(Node バージョン、npm グローバル権限、PATH、WSL の競合)を
+  エージェントに順に確認させます。エージェントがない場合は
+  **Install failure** テンプレートで issue を立ててください。
+
 - Claude セッションに memorize コンテキストが出ない — `memorize doctor`
   を実行し、失敗したチェックの `fix:` に従ってください。たいてい
   `memorize install claude` の再実行で直ります。
