@@ -200,6 +200,34 @@ memory (`obsoleteWhen`, `kindMisfit` + `kindMisfitReason`,
 contradiction detection key on `kind` exactly as before, and a missing
 or malformed field never fails an extraction.
 
+### `memorize session list` / `memorize session activity [--limit N] [--json]`
+
+#83 — the on-demand answer when the user asks **"what are my other
+sessions doing?"**. Reach for THIS, not `task list`: tasks are explicit
+artifacts created with `memorize task create`, so a project can have
+several busy sessions and zero tasks — **sessions ≠ tasks**.
+
+- `session list` — claiming sessions (active/paused within the staleness
+  threshold): id, actor, status, lastSeenAt, claimed task when any. The
+  asking session is marked `self` when resolvable.
+- `session activity` — the same list plus each session's recent captured
+  observations (default 10, `--limit N`). Sessions with no captured
+  activity are shown as "(no captured activity yet)" rather than
+  omitted — plan-mode sessions mostly read, and read-only tools are
+  deliberately not captured.
+- `--json` for the machine-readable form.
+
+Live sibling sharing (mid-session injection) is push-based and stays
+silent on a session's first compose; this command is the pull-based
+complement for answering on demand.
+
+### `memorize version`
+
+Prints the version of the binary that actually ran — `npx` resolves a
+project-local devDependency before the global install, so when behavior
+looks stale, run this both inside and outside the project to detect a
+pinned old version (#82).
+
 ### `memorize memory import --source <label> [--session <id>]`
 
 #69 — the ingestion primitive for **agent-driven absorption** of context
