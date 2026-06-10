@@ -2,9 +2,9 @@
 
 [![npm](https://img.shields.io/npm/v/%40shakystar%2Fmemorize)](https://www.npmjs.com/package/@shakystar/memorize)
 [![CI](https://github.com/shakystar/memorize/actions/workflows/ci.yml/badge.svg)](https://github.com/shakystar/memorize/actions/workflows/ci.yml)
-[![license](https://img.shields.io/badge/license-AGPL--3.0--or--later-blue)](./LICENSE)
+[![license](https://img.shields.io/badge/license-AGPL--3.0--or--later-blue)](../../LICENSE)
 
-[English](./README.md) | [한국어](./README.ko.md) | [日本語](./README.ja.md) | **简体中文** | [Español](./README.es.md)
+[English](../../README.md) | [한국어](./README.ko.md) | [日本語](./README.ja.md) | **简体中文** | [Español](./README.es.md)
 
 > 你、Claude Code 和 Codex 共享同一个持久的项目大脑 — 本地优先、
 > 事件溯源，设计上借鉴了生物记忆的真实运作方式。
@@ -38,7 +38,7 @@
 
 更深入的内容 — 双层 CLS 记忆设计、水位线幂等巩固、检索时遗忘、用
 dogfooding 数据演化 schema 的 lifecycle-evidence 计划 — 见
-**[ARCHITECTURE.md](./ARCHITECTURE.md)**(英文)。
+**[ARCHITECTURE.md](../ARCHITECTURE.md)**(英文)。
 
 ### 会话开始时智能体看到什么
 
@@ -135,7 +135,7 @@ memorize consolidate       # 立即运行一次记忆巩固边界
 
 单独运行 `memorize` 查看用法概览。其余所有命令(setup、install、
 memory import、hook、projection rebuild、sync 等)都记录在
-[AGENT_GUIDE.md](./AGENT_GUIDE.md) — AI 需要细节时读这个文件。
+[AGENT_GUIDE.md](../../AGENT_GUIDE.md) — AI 需要细节时读这个文件。
 
 ## 故障排查
 
@@ -157,10 +157,10 @@ memory import、hook、projection rebuild、sync 等)都记录在
 ## 写给 AI 助手
 
 如果用户让你配置 memorize,请遵循
-[guides/AI_SETUP.md](./guides/AI_SETUP.md) — 幂等的配置步骤、既有
+[guides/AI_SETUP.md](../../guides/AI_SETUP.md) — 幂等的配置步骤、既有
 上下文的吸收流程,以及 ground rule(memorize 是唯一事实来源;不要把
 它的状态复制进你自己的记忆系统)。完整命令行为见
-[AGENT_GUIDE.md](./AGENT_GUIDE.md)。
+[AGENT_GUIDE.md](../../AGENT_GUIDE.md)。
 
 ## 状态
 
@@ -181,7 +181,7 @@ Memorize 处于 `2.x` 线(自 2.0.0 起为 AGPL-3.0-or-later)。
 - 巩固记忆上的仅观察 lifecycle-evidence 字段与 `consolidate --report`
   的输出形态 — 在分类法决定落地前可能调整的埋点。
 
-发布历史见 [CHANGELOG.md](./CHANGELOG.md)。
+发布历史见 [CHANGELOG.md](../../CHANGELOG.md)。
 
 ## 社区
 
@@ -193,8 +193,8 @@ Issue 与 Discussion 对所有人开放 — 欢迎 bug 报告、设计辩论和
 - **[Discussions](https://github.com/shakystar/memorize/discussions)** —
   设计方向与开放式想法(记忆分类法的辩论就在这里)
 
-开发流程见 [CONTRIBUTING.md](./CONTRIBUTING.md)。
+开发流程见 [CONTRIBUTING.md](../../.github/CONTRIBUTING.md)。
 
 ## 许可证
 
-AGPL-3.0-or-later。见 [LICENSE](./LICENSE)。
+AGPL-3.0-or-later。见 [LICENSE](../../LICENSE)。

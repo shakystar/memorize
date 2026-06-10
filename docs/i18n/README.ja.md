@@ -2,9 +2,9 @@
 
 [![npm](https://img.shields.io/npm/v/%40shakystar%2Fmemorize)](https://www.npmjs.com/package/@shakystar/memorize)
 [![CI](https://github.com/shakystar/memorize/actions/workflows/ci.yml/badge.svg)](https://github.com/shakystar/memorize/actions/workflows/ci.yml)
-[![license](https://img.shields.io/badge/license-AGPL--3.0--or--later-blue)](./LICENSE)
+[![license](https://img.shields.io/badge/license-AGPL--3.0--or--later-blue)](../../LICENSE)
 
-[English](./README.md) | [한국어](./README.ko.md) | **日本語** | [简体中文](./README.zh-CN.md) | [Español](./README.es.md)
+[English](../../README.md) | [한국어](./README.ko.md) | **日本語** | [简体中文](./README.zh-CN.md) | [Español](./README.es.md)
 
 > あなたと Claude Code、Codex がひとつの永続的なプロジェクトの脳を共有する —
 > ローカルファースト、イベントソーシング、生物学的な記憶の仕組みに倣った設計。
@@ -41,7 +41,7 @@
 
 より深い話 — 2層 CLS メモリ設計、ウォーターマークによる冪等な統合、
 検索時忘却、dogfooding データでスキーマを進化させる lifecycle-evidence
-プログラム — は **[ARCHITECTURE.md](./ARCHITECTURE.md)**(英語)にあります。
+プログラム — は **[ARCHITECTURE.md](../ARCHITECTURE.md)**(英語)にあります。
 
 ### セッション開始時にエージェントが見るもの
 
@@ -146,7 +146,7 @@ memorize consolidate       # 記憶統合の境界を今すぐ1回実行
 
 `memorize` 単体で使い方の概要が出ます。その他すべてのコマンド(setup、
 install、memory import、hook、projection rebuild、sync など)は
-[AGENT_GUIDE.md](./AGENT_GUIDE.md) に文書化されています — AI が詳細を
+[AGENT_GUIDE.md](../../AGENT_GUIDE.md) に文書化されています — AI が詳細を
 必要とするときに読むファイルです。
 
 ## トラブルシューティング
@@ -172,10 +172,10 @@ install、memory import、hook、projection rebuild、sync など)は
 ## AI アシスタントの方へ
 
 ユーザーに memorize のセットアップを頼まれたら
-[guides/AI_SETUP.md](./guides/AI_SETUP.md) に従ってください — 冪等な
+[guides/AI_SETUP.md](../../guides/AI_SETUP.md) に従ってください — 冪等な
 セットアップ手順、既存コンテキストの吸収フロー、そして ground rule
 (memorize が唯一の真実の源; その状態を自分のメモリに複製しないこと)が
-書かれています。コマンドの詳細は [AGENT_GUIDE.md](./AGENT_GUIDE.md) へ。
+書かれています。コマンドの詳細は [AGENT_GUIDE.md](../../AGENT_GUIDE.md) へ。
 
 ## ステータス
 
@@ -199,7 +199,7 @@ Memorize は `2.x` ライン(2.0.0 から AGPL-3.0-or-later)です。
 - 統合記憶の観測専用 lifecycle-evidence フィールドと
   `consolidate --report` の形式 — 分類体系の決定後に変わり得る計測です。
 
-リリース履歴は [CHANGELOG.md](./CHANGELOG.md) へ。
+リリース履歴は [CHANGELOG.md](../../CHANGELOG.md) へ。
 
 ## コミュニティ
 
@@ -211,8 +211,8 @@ Issue と Discussion は誰でも歓迎です — バグ報告、設計議論、
 - **[Discussions](https://github.com/shakystar/memorize/discussions)** —
   設計の方向性やオープンなアイデア(記憶分類体系の議論はここで)
 
-開発ワークフローは [CONTRIBUTING.md](./CONTRIBUTING.md) へ。
+開発ワークフローは [CONTRIBUTING.md](../../.github/CONTRIBUTING.md) へ。
 
 ## ライセンス
 
-AGPL-3.0-or-later。[LICENSE](./LICENSE) を参照。
+AGPL-3.0-or-later。[LICENSE](../../LICENSE) を参照。

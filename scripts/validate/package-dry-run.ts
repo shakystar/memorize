@@ -30,6 +30,11 @@ const packInfo = JSON.parse(packResult.stdout) as Array<{
   files: Array<{ path: string }>;
 }>;
 
+// docs/ holds LOCAL working notes (plans/, specs/, …) plus a small
+// whitelisted public set — mirror .gitignore's whitelist here so internal
+// notes can never leak into the tarball while public docs ship.
+const PUBLIC_DOCS = new Set(['docs/ARCHITECTURE.md']);
+
 const includedFiles = packInfo[0]?.files.map((file) => file.path) ?? [];
 const forbiddenMatches = includedFiles.filter(
   (entry) =>
@@ -37,7 +42,7 @@ const forbiddenMatches = includedFiles.filter(
     entry.startsWith('dist/scripts/') ||
     entry.startsWith('tests/') ||
     entry.startsWith('scripts/') ||
-    entry.startsWith('docs/'),
+    (entry.startsWith('docs/') && !PUBLIC_DOCS.has(entry)),
 );
 
 const declaredBinPath = packageJson.bin?.memorize;

@@ -36,7 +36,7 @@
     "dist",
     "README.md",
     "AGENT_GUIDE.md",
-    "ARCHITECTURE.md",
+    "docs/ARCHITECTURE.md",
     "guides/AI_SETUP.md",
     "CHANGELOG.md",
     "LICENSE"

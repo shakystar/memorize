@@ -2,9 +2,9 @@
 
 [![npm](https://img.shields.io/npm/v/%40shakystar%2Fmemorize)](https://www.npmjs.com/package/@shakystar/memorize)
 [![CI](https://github.com/shakystar/memorize/actions/workflows/ci.yml/badge.svg)](https://github.com/shakystar/memorize/actions/workflows/ci.yml)
-[![license](https://img.shields.io/badge/license-AGPL--3.0--or--later-blue)](./LICENSE)
+[![license](https://img.shields.io/badge/license-AGPL--3.0--or--later-blue)](../../LICENSE)
 
-[English](./README.md) | **한국어** | [日本語](./README.ja.md) | [简体中文](./README.zh-CN.md) | [Español](./README.es.md)
+[English](../../README.md) | **한국어** | [日本語](./README.ja.md) | [简体中文](./README.zh-CN.md) | [Español](./README.es.md)
 
 > 당신과 Claude Code, Codex가 하나의 영속적인 프로젝트 두뇌를 공유합니다 —
 > 로컬 우선, 이벤트 소싱, 생물학적 기억의 작동 방식을 본뜬 설계.
@@ -41,7 +41,7 @@
 
 더 깊은 이야기 — 2층 CLS 메모리 설계, 워터마크 멱등 통합, 인출 시점
 망각, dogfooding 데이터로 스키마를 진화시키는 수명 증거 프로그램 — 는
-**[ARCHITECTURE.md](./ARCHITECTURE.md)** (영문)에 있습니다.
+**[ARCHITECTURE.md](../ARCHITECTURE.md)** (영문)에 있습니다.
 
 ### 세션 시작 시 에이전트가 보는 것
 
@@ -146,7 +146,7 @@ memorize consolidate       # 기억 통합 경계를 지금 한 번 실행
 
 `memorize`만 치면 사용법 개요가 나옵니다. 나머지 모든 명령(setup,
 install, memory import, hook, projection rebuild, sync 등)은
-[AGENT_GUIDE.md](./AGENT_GUIDE.md)에 문서화돼 있습니다 — AI가 자세한
+[AGENT_GUIDE.md](../../AGENT_GUIDE.md)에 문서화돼 있습니다 — AI가 자세한
 내용이 필요할 때 읽는 파일입니다.
 
 ## 문제 해결
@@ -171,10 +171,10 @@ install, memory import, hook, projection rebuild, sync 등)은
 ## AI 어시스턴트라면
 
 사용자가 memorize 셋업을 요청했다면
-[guides/AI_SETUP.md](./guides/AI_SETUP.md)를 따르세요 — 멱등 셋업 단계,
+[guides/AI_SETUP.md](../../guides/AI_SETUP.md)를 따르세요 — 멱등 셋업 단계,
 기존 컨텍스트 흡수 흐름, 그리고 ground rule(memorize가 단일 진실
 공급원; 그 상태를 자신의 메모리에 중복 저장하지 말 것)이 담겨 있습니다.
-전체 명령 동작은 [AGENT_GUIDE.md](./AGENT_GUIDE.md)를 보세요.
+전체 명령 동작은 [AGENT_GUIDE.md](../../AGENT_GUIDE.md)를 보세요.
 
 ## 상태
 
@@ -197,7 +197,7 @@ Memorize는 `2.x` 라인입니다 (2.0.0부터 AGPL-3.0-or-later). 호환성
 - 통합 기억의 관찰 전용 수명 증거 필드와 `consolidate --report` 형식 —
   분류 체계 결정이 내려지면 바뀔 수 있는 계측입니다.
 
-릴리스 이력은 [CHANGELOG.md](./CHANGELOG.md)를 보세요.
+릴리스 이력은 [CHANGELOG.md](../../CHANGELOG.md)를 보세요.
 
 ## 커뮤니티
 
@@ -209,8 +209,8 @@ Memorize는 `2.x` 라인입니다 (2.0.0부터 AGPL-3.0-or-later). 호환성
 - **[Discussions](https://github.com/shakystar/memorize/discussions)** —
   설계 방향과 열린 아이디어 (기억 분류 체계 논쟁이 여기서 벌어집니다)
 
-개발 워크플로는 [CONTRIBUTING.md](./CONTRIBUTING.md)를 보세요.
+개발 워크플로는 [CONTRIBUTING.md](../../.github/CONTRIBUTING.md)를 보세요.
 
 ## 라이선스
 
-AGPL-3.0-or-later. [LICENSE](./LICENSE) 참조.
+AGPL-3.0-or-later. [LICENSE](../../LICENSE) 참조.
