@@ -5,7 +5,10 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { CURRENT_SCHEMA_VERSION } from '../../src/domain/common.js';
-import { createObservation } from '../../src/domain/entities.js';
+import {
+  createConsolidatedMemory,
+  createObservation,
+} from '../../src/domain/entities.js';
 import { captureObservation } from '../../src/services/capture-service.js';
 import { listOpenConflicts, rebuildProjectProjection } from '../../src/services/projection-store.js';
 import {
@@ -130,6 +133,30 @@ async function appendObservation(
   return event.id;
 }
 
+/** Append a memory.consolidated event directly (as the detached background
+ *  consolidation child would) — for the Part B (#46) live-injection tests. */
+async function appendMemory(
+  sessionId: string,
+  text: string,
+): Promise<void> {
+  const memory = createConsolidatedMemory({
+    projectId,
+    kind: 'progress',
+    text,
+    salience: 5,
+    sessionId,
+  });
+  await appendEvent({
+    type: 'memory.consolidated',
+    projectId,
+    scopeType: 'session',
+    scopeId: sessionId,
+    actor: 'claude',
+    payload: memory,
+  });
+  await rebuildProjectProjection(projectId, { reindexSearch: false });
+}
+
 beforeEach(async () => {
   sandbox = await mkdtemp(join(tmpdir(), 'memorize-rt-'));
   process.env.MEMORIZE_ROOT = sandbox;
@@ -224,6 +251,32 @@ describe('realtime-share — buildLiveUpdate', () => {
     // Watermark covers the WHOLE window (last event), not just the kept slice.
     const events = await readEvents(projectId);
     expect(update.newWatermarkEventId).toBe(events[events.length - 1]!.id);
+  });
+
+  it('includes memory.consolidated from the SELF session (late background consolidation, #46)', async () => {
+    await seedProject();
+    const since = await appendObservation('A', '/repo/seed.ts');
+    await appendObservation('A', '/repo/self.ts');
+    // The detached background child consolidates A's own boundary window
+    // AFTER the boundary — new information for the still-running session A.
+    await appendMemory('A', 'Consolidated decision from my own boundary');
+
+    const update = await buildLiveUpdate({
+      projectId,
+      selfSessionId: 'A',
+      sinceEventId: since,
+      selfRecentFilePaths: new Set(),
+      cwd: sandbox,
+    });
+
+    expect(update.hasContent).toBe(true);
+    expect(update.memories).toHaveLength(1);
+    expect(update.memories[0]!.text).toBe(
+      'Consolidated decision from my own boundary',
+    );
+    expect(update.memories[0]!.sessionId).toBe('A');
+    // Raw self-observations stay filtered — only memories pass through.
+    expect(update.observations).toHaveLength(0);
   });
 
   it('detects a file collision when a sibling touches a self-touched path', async () => {

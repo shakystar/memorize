@@ -130,9 +130,7 @@ export interface LlmConsolidatorConfig {
   endpoint: string;
   apiKey: string;
   model: string;
-  /** HTTP timeout override. Boundaries that block the agent (SessionStart
-   *  catch-up) pass a tight value; fire-and-forget boundaries use the
-   *  default. */
+  /** HTTP timeout override (MEMORIZE_LLM_TIMEOUT_MS; built-in default). */
   timeoutMs?: number;
   /** Test seam; defaults to globalThis.fetch. */
   fetchImpl?: typeof fetch;
@@ -161,8 +159,7 @@ export function resolveLlmConfig(
     endpoint: env.MEMORIZE_LLM_ENDPOINT ?? DEFAULT_LLM_ENDPOINT,
     apiKey,
     model: env.MEMORIZE_LLM_MODEL ?? DEFAULT_LLM_MODEL,
-    // Invalid/non-positive values fall back to the built-in default. An
-    // explicit per-boundary timeoutMs (SessionStart catch-up) still wins.
+    // Invalid/non-positive values fall back to the built-in default.
     ...(timeoutMs ? { timeoutMs } : {}),
   };
 }
@@ -278,7 +275,7 @@ export type SpawnImpl = (
 
 export interface CliConsolidatorConfig {
   command: HostCliCommand;
-  /** Same semantics as the HTTP timeout (boundary override wins). */
+  /** Same semantics as the HTTP timeout. */
   timeoutMs?: number;
   /** Test seam; defaults to cross-spawn. */
   spawnImpl?: SpawnImpl;
@@ -318,9 +315,7 @@ export class CliConsolidator implements Consolidator {
       let stderr = '';
       let timedOut = false;
       // Same contract as the HTTP timeout: kill and THROW (never return [])
-      // so the watermark stays behind and the next boundary retries. The
-      // SessionStart 5s override will usually kill CLI extraction — by
-      // design; the next non-blocking boundary catches up.
+      // so the watermark stays behind and the next boundary retries.
       const timer = setTimeout(() => {
         timedOut = true;
         child.kill();
@@ -561,13 +556,25 @@ function consumedObservationIds(projectId: string): Set<string> {
  * watermark-idempotent, lock-serialized, and a no-op when nothing new was
  * observed.
  */
+/**
+ * Hold/steal horizon for the consolidate lock. withFileLock's 5s default
+ * is sized for sub-second critical sections (session-start), but a
+ * consolidation legitimately holds the lock for a full LLM extraction —
+ * HTTP default 20s, and the #44 host-CLI extractor (cold start, local
+ * models, env-raised MEMORIZE_LLM_TIMEOUT_MS) can run far longer. A flat
+ * generous horizon keeps a concurrent boundary from force-reclaiming the
+ * lock mid-extraction and double-consolidating the same window (LLM
+ * nondeterminism → different texts → dedup won't collapse them), while a
+ * genuinely crashed holder is still reclaimed eventually. Boundaries run
+ * detached in the background (#46), so a contending boundary waiting on
+ * this lock blocks no agent.
+ */
+const CONSOLIDATE_LOCK_HOLD_TIMEOUT_MS = 180_000;
+
 export async function consolidate(params: {
   projectId: string;
   actor: string;
   sessionId?: string;
-  /** LLM HTTP timeout for THIS boundary (SessionStart catch-up passes a
-   *  tight value because Claude blocks startup on the hook's output). */
-  llmTimeoutMs?: number;
   /** Override extractor (tests). Defaults to LLM-if-configured else rules. */
   consolidator?: Consolidator;
 }): Promise<ConsolidateResult> {
@@ -616,22 +623,13 @@ export async function consolidate(params: {
         extractorKind = 'custom';
       } else {
         const backend = resolveConsolidatorBackend();
-        // The per-boundary llmTimeoutMs override (SessionStart catch-up)
-        // wins over the env timeout for BOTH the HTTP and CLI backends.
-        const timeoutOverride = params.llmTimeoutMs
-          ? { timeoutMs: params.llmTimeoutMs }
-          : {};
         if (backend.kind === 'llm') {
-          consolidator = new LlmConsolidator({
-            ...backend.config,
-            ...timeoutOverride,
-          });
+          consolidator = new LlmConsolidator(backend.config);
           extractorKind = 'llm';
         } else if (backend.kind === 'cli') {
           consolidator = new CliConsolidator({
             command: backend.command,
             ...(backend.timeoutMs ? { timeoutMs: backend.timeoutMs } : {}),
-            ...timeoutOverride,
           });
           extractorKind = 'cli';
         } else {
@@ -728,5 +726,6 @@ export async function consolidate(params: {
         extractor: extractorKind,
       };
     },
+    { holdTimeoutMs: CONSOLIDATE_LOCK_HOLD_TIMEOUT_MS },
   );
 }

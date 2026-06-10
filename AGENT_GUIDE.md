@@ -336,6 +336,9 @@ rule-based consolidation. Semantic search stays OFF unless configured
 - `MEMORIZE_LLM_TIMEOUT_MS` — LLM extraction timeout in milliseconds
   (default `20000`), for both the HTTP and host-CLI backends. Raise it
   for local CPU models, which can need minutes per extraction.
+- `MEMORIZE_CONSOLIDATE_INLINE` — set to `1` to run boundary consolidation
+  synchronously inside the hook process instead of the default detached
+  background child (slower boundaries, deterministic ordering).
 - `MEMORIZE_EMBEDDINGS_ENDPOINT` / `MEMORIZE_EMBEDDINGS_API_KEY` /
   `MEMORIZE_EMBEDDINGS_MODEL` — embedding-based semantic search (hybrid
   with FTS5, used in both explicit `search` and startup injection) and the

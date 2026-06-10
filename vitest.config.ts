@@ -10,7 +10,12 @@ export default defineConfig({
       // extractor. Force it off suite-wide so tests (and the hook
       // subprocesses they spawn) never run a real agent CLI; tests that
       // exercise backends inject env/detectors explicitly.
-      MEMORIZE_LLM_BACKEND: 'off'
+      MEMORIZE_LLM_BACKEND: 'off',
+      // #46 detaches boundary consolidation into a background child by
+      // default. Force the old synchronous inline behavior suite-wide so
+      // hook-lifecycle tests keep deterministic boundaries; tests that
+      // exercise the detached path delete this var explicitly.
+      MEMORIZE_CONSOLIDATE_INLINE: '1'
     }
   }
 });

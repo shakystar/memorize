@@ -1,4 +1,6 @@
+import { spawn } from 'node:child_process';
 import fs from 'node:fs/promises';
+import { fileURLToPath } from 'node:url';
 
 import type { AdapterAgent } from '../adapters/index.js';
 import {
@@ -129,16 +131,14 @@ function prepareHookText(
  * retries the same observation window (consolidate is watermark-idempotent).
  */
 async function tryConsolidate(
-  ctx: HookContext,
+  ctx: Pick<HookContext, 'projectId' | 'agent'>,
   sessionId: string | undefined,
-  opts: { llmTimeoutMs?: number } = {},
 ): Promise<void> {
   try {
     await consolidate({
       projectId: ctx.projectId,
       actor: ctx.agent,
       ...(sessionId ? { sessionId } : {}),
-      ...(opts.llmTimeoutMs ? { llmTimeoutMs: opts.llmTimeoutMs } : {}),
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
@@ -148,11 +148,66 @@ async function tryConsolidate(
   }
 }
 
-/** Claude blocks session startup on the SessionStart hook's output, so the
- *  catch-up consolidation must not hang on a slow LLM: bound it tightly. A
- *  timeout here just defers the window to the next (non-blocking) boundary
- *  — the watermark only advances on success. */
-const SESSION_START_LLM_TIMEOUT_MS = 5_000;
+/** Escape hatch (#46): `MEMORIZE_CONSOLIDATE_INLINE=1` restores the old
+ *  synchronous in-process boundary consolidation. Used by the test suite
+ *  (vitest.config.ts) so boundary hooks keep deterministic, awaitable
+ *  semantics, and available to users who prefer blocking boundaries. */
+export const CONSOLIDATE_INLINE_ENV_VAR = 'MEMORIZE_CONSOLIDATE_INLINE';
+
+/** Minimal child surface the detached spawn needs (test-fakeable). */
+export interface DetachedChild {
+  unref(): void;
+}
+
+/** Spawn seam (test-injectable; node:child_process spawn satisfies it). */
+export type DetachedSpawnImpl = (
+  command: string,
+  args: string[],
+  options: { cwd: string; detached: boolean; stdio: 'ignore' },
+) => DetachedChild;
+
+/**
+ * #46 Part A — boundary consolidation as a DETACHED background child.
+ * Hooks must return fast (SessionStart blocks the agent's startup; the
+ * SessionEnd subprocess gets reaped as soon as Claude exits), so instead
+ * of awaiting consolidate() in-process we spawn `memorize consolidate`
+ * detached and return immediately. The child finds the bound project via
+ * its cwd, takes the consolidate file lock, runs the full-length LLM
+ * extraction, and autoPushes its own events. Failures of the child are
+ * covered by the existing contract: the watermark only advances on
+ * success, so the next boundary retries the window.
+ *
+ * The child must NOT get MEMORIZE_SUPPRESS_HOOKS — it is a CLI command,
+ * not a hook, and it must stay free to spawn the #44 host-CLI extractor
+ * (which sets that guard for ITS grandchild). Never throws into the hook.
+ */
+export async function spawnDetachedConsolidate(
+  ctx: Pick<HookContext, 'projectId' | 'agent' | 'cwd'>,
+  sessionId: string | undefined,
+  spawnImpl: DetachedSpawnImpl = spawn,
+): Promise<void> {
+  if (process.env[CONSOLIDATE_INLINE_ENV_VAR] === '1') {
+    await tryConsolidate(ctx, sessionId);
+    return;
+  }
+  try {
+    // dist layout: this module is dist/services/hook-service.js, so the
+    // CLI entry is ../cli/index.js. (Running hooks straight from src via
+    // tsx has no built entry — tests pin MEMORIZE_CONSOLIDATE_INLINE=1.)
+    const cliEntry = fileURLToPath(new URL('../cli/index.js', import.meta.url));
+    const child = spawnImpl(
+      process.execPath,
+      [cliEntry, 'consolidate', ...(sessionId ? ['--session', sessionId] : [])],
+      { cwd: ctx.cwd, detached: true, stdio: 'ignore' },
+    );
+    child.unref();
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    process.stderr.write(
+      `WARN: background consolidation not started (${message}); the next boundary retries the window\n`,
+    );
+  }
+}
 
 const handleSessionStart: HookHandler = async (ctx) => {
   // Opening the DB runs only DDL migrations — a project upgraded from the
@@ -168,12 +223,12 @@ const handleSessionStart: HookHandler = async (ctx) => {
 
   // CLS catch-up: a SessionEnd whose subprocess was reaped (or a codex
   // session, which has no SessionEnd at all) may have left observations
-  // unconsolidated. Run the boundary FIRST so composeStartupContext below
-  // injects memories that include the previous session's window. LLM time
-  // is tightly bounded — this path blocks the agent's startup.
-  await tryConsolidate(ctx, undefined, {
-    llmTimeoutMs: SESSION_START_LLM_TIMEOUT_MS,
-  });
+  // unconsolidated. Runs as a DETACHED background child (#46) so startup
+  // is never blocked on the extractor. Contract: the startup context
+  // composed below may lag one window (the catch-up's memories land
+  // seconds later); the PostToolUse live-update channel injects them
+  // into the running session as soon as they exist.
+  await spawnDetachedConsolidate(ctx, undefined);
 
   // P3-b: pull sibling-machine events BEFORE composing startup context so the
   // injected memories/tasks reflect the latest remote state. No-op + silent
@@ -317,11 +372,12 @@ const handlePostCompact: HookHandler = async (ctx) => {
   });
 
   // Compaction is a CLS boundary: consolidate the observation window that
-  // is about to fall out of the agent's context.
-  await tryConsolidate(ctx, sessionId);
+  // is about to fall out of the agent's context — detached (#46), so the
+  // hook returns immediately. The child autoPushes its own new events.
+  await spawnDetachedConsolidate(ctx, sessionId);
 
-  // P3-b: propagate this boundary's new events to siblings (background, no-op
-  // unless syncTransport is configured; never throws).
+  // P3-b: propagate this boundary's capture events to siblings (background,
+  // no-op unless syncTransport is configured; never throws).
   await autoPush(ctx.projectId);
 
   // PostCompact / PreCompact / Stop must NOT include `hookSpecificOutput`
@@ -383,11 +439,11 @@ const handleSessionEnd: HookHandler = async (ctx) => {
   );
 
   // Session end is a CLS boundary too. Claude exits as soon as the hook
-  // fires, so this subprocess can be reaped mid-consolidation — that is
-  // fine by design: the watermark only advances on success, and the next
-  // SessionStart's catch-up redoes the window (install-service picked the
-  // fast bare command form for exactly this reason).
-  await tryConsolidate(ctx, resolvedSessionId);
+  // fires and reaps this subprocess — the DETACHED child (#46) survives
+  // that reap and finishes the consolidation on its own. If the child
+  // still dies mid-way, the watermark only advances on success and the
+  // next SessionStart's catch-up redoes the window.
+  await spawnDetachedConsolidate(ctx, resolvedSessionId);
 
   // P3-b: final push of the session's events before it exits. The subprocess
   // may be reaped mid-push — fine, push is watermark-idempotent and the next
