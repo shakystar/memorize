@@ -102,6 +102,12 @@ export interface ConsolidatedMemory extends BaseEntity {
   supersedesNote?: string;
   /** 1–3 free-form lowercase tags — the extractor's own vocabulary. */
   tags?: string[];
+  /**
+   * #69 — provenance label when this memory was ingested via
+   * `memorize memory import` (agent-distilled harness memory, docs, …)
+   * instead of boundary consolidation. Absent for consolidated memories.
+   */
+  importSource?: string;
 }
 
 export function clampSalience(value: number): number {
@@ -121,6 +127,7 @@ export function createConsolidatedMemory(input: {
   kindMisfitReason?: string;
   supersedesNote?: string;
   tags?: string[];
+  importSource?: string;
 }): ConsolidatedMemory {
   return {
     ...baseEntity('mem'),
@@ -135,6 +142,7 @@ export function createConsolidatedMemory(input: {
     ...(input.kindMisfitReason ? { kindMisfitReason: input.kindMisfitReason } : {}),
     ...(input.supersedesNote ? { supersedesNote: input.supersedesNote } : {}),
     ...(input.tags && input.tags.length > 0 ? { tags: input.tags } : {}),
+    ...(input.importSource ? { importSource: input.importSource } : {}),
   };
 }
 

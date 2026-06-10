@@ -199,6 +199,40 @@ memory (`obsoleteWhen`, `kindMisfit` + `kindMisfitReason`,
 contradiction detection key on `kind` exactly as before, and a missing
 or malformed field never fails an extraction.
 
+### `memorize memory import --source <label> [--session <id>]`
+
+#69 — the ingestion primitive for **agent-driven absorption** of context
+that predates memorize in a project: your own harness memory (Claude
+Code `MEMORY.md` and linked files), `CLAUDE.local.md` /
+`AGENTS.override.md` content, and user-named doc folders (ADRs, plans,
+postmortems). YOU do the reading and distillation — you have the read
+access, you know where your own memory lives, and you can honor the
+per-self/shared split; memorize only ingests the result and never reads
+outside the project tree.
+
+- stdin: a JSON array of extractor-shaped items —
+  `[{"kind":"decision"|"rationale"|"progress","text":string,`
+  `"salience":1-10,"obsoleteWhen"?:string,"tags"?:string[],...}]`
+  (same shape and sanitizers as boundary consolidation, so the #57
+  lifecycle-evidence fields ride along and malformed evidence degrades
+  to "absent" rather than failing the item).
+- `--source <label>` (single, required) — provenance, e.g.
+  `claude-memory`, `docs/adr`; stored on each memory as `importSource`.
+- `--session <id>` (single) — attribute events to that session's actor.
+- Distillation rules: import **project state only** (decisions,
+  constraints, progress, rationale). User preferences and your own
+  work-style lessons are per-self memory — they STAY in your harness
+  memory. One self-contained sentence per item; salience = how much a
+  future session would regret not knowing it.
+- Idempotent: items whose kind + normalized text already exist as a
+  valid memory are skipped; the result JSON reports
+  `{imported, skippedDuplicates}` — relay both counts to the user.
+- Caps: at most 100 items per invocation. A batch with zero valid items
+  is an error and writes nothing.
+- Imported memories are first-class: searchable, embedded (when
+  configured), contradiction-checked against existing decisions, and
+  ranked for injection exactly like consolidated ones.
+
 ### `memorize project setup`
 
 Idempotent adoption command. Use this for existing projects.

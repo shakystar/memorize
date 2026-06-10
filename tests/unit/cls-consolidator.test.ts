@@ -191,6 +191,18 @@ describe('parseExtractedMemories — #57 observe-only lifecycle evidence', () =>
     expect(parsed[0]!.tags).toEqual(['a', 'b', 'c', 'd', 'e']);
   });
 
+  it('honors the maxItems override (#69 import raises the boundary cap)', () => {
+    const items = Array.from({ length: 30 }, (_, i) => ({
+      kind: 'progress',
+      text: `item ${i}`,
+      salience: 4,
+    }));
+    expect(parseExtractedMemories(JSON.stringify(items))).toHaveLength(12);
+    expect(
+      parseExtractedMemories(JSON.stringify(items), { maxItems: 25 }),
+    ).toHaveLength(25);
+  });
+
   it('an all-junk tags array reads as absent, not empty', () => {
     const parsed = parseExtractedMemories(
       JSON.stringify([

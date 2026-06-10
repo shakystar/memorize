@@ -8,6 +8,7 @@ import { runEventsCommand } from './commands/events.js';
 import { runExportCommand } from './commands/export.js';
 import { runHookCommand } from './commands/hook.js';
 import { runInstallCommand } from './commands/install.js';
+import { runMemoryCommand } from './commands/memory.js';
 import { runMemoryIndexCommand } from './commands/memory-index.js';
 import { runMigrateCommand } from './commands/migrate.js';
 import { runProjectCommand } from './commands/project.js';
@@ -25,6 +26,7 @@ export { renderScaffoldUsage } from './usage.js';
 const handlers: Record<string, CommandHandler> = {
   project: runProjectCommand,
   projection: runProjectionCommand,
+  memory: runMemoryCommand,
   'memory-index': runMemoryIndexCommand,
   events: runEventsCommand,
   migrate: runMigrateCommand,
