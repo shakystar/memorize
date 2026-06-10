@@ -142,10 +142,13 @@ no task lists, no summaries.**
 
 6. **Tell the user** briefly:
 
-   > Memorize is set up. Your project context will persist across
-   > sessions. Create your first task with
-   > `memorize task create "<title>"` or let me do it next time you
-   > describe work.
+   > Memorize is set up. Your project context will now persist across
+   > sessions automatically — just work as usual, and each new session
+   > starts with the project's memory. Ask me "what are my other
+   > sessions doing?" any time (`memorize session activity`).
+
+   Do NOT tell the user to create a task — tasks are an optional
+   explicit-coordination layer, and an empty task list is normal (#85).
 
 ## Recovering a failed install
 

@@ -52,7 +52,7 @@ outputs as a cache that must be re-validated — not as authoritative.
    and rendered per-agent (`claude` vs `codex` formats differ).
 4. **Install hooks** wire your agent runtime:
    - Claude Code: `.claude/settings.local.json` (per-project) — registers
-     `SessionStart`, `PreCompact`, `PostCompact`, `SessionEnd`.
+     `SessionStart`, `PostToolUse` (capture), `PostCompact`, `SessionEnd`.
    - Codex: `~/.codex/hooks.json` (global per-user; the handler no-ops
      when cwd is not a memorize-bound project) — registers
      `SessionStart`, `PostToolUse` (capture), and `PostCompact`
@@ -318,6 +318,18 @@ Event sync with a remote path.
 Running with no flags prints the current sync state and queue
 snapshot as JSON.
 
+## Tasks & handoffs — the OPTIONAL explicit-coordination layer
+
+Everything above this point (memory capture, consolidation, retrieval,
+session visibility) is **ambient**: it works with zero ceremony, just by
+agents doing their work. Tasks, handoffs, and checkpoints are a
+different, **optional** layer: explicit coordination artifacts you
+declare on purpose — claim a piece of work so a parallel agent doesn't
+grab it, hand a baton to the next agent with intent. A project with
+busy sessions and an empty task list is NORMAL, not broken (#85);
+never treat `task list` as the way to see what sessions are doing —
+that is `memorize session activity`.
+
 ### `memorize task create "<title>"`
 
 Appends a `task.created` event. Actor defaults to `user`. Title is
@@ -345,7 +357,11 @@ JSON. This is what an agent reads on `SessionStart`.
 
 ### `memorize task checkpoint --summary "<text>" [flags]`
 
-Records a mid-session snapshot.
+Records a mid-session snapshot. **Mostly superseded**: boundary
+consolidation now captures session state automatically (the old
+PreCompact checkpoint flow is gone, #85) — reach for this only when you
+want to pin an explicit, named snapshot the automatic distillation
+would not preserve verbatim.
 
 | Flag | Shape | Purpose |
 |---|---|---|
@@ -398,9 +414,14 @@ Idempotent. Writes hook entries into `.claude/settings.local.json`
 under the `hooks` map for these events:
 
 - `SessionStart` → injects the startup context as `additionalContext`.
-- `PreCompact` → captures checkpoint data before compaction.
-- `PostCompact` → records a `compactSummary` checkpoint.
-- `Stop` → creates a handoff with `fromActor=claude`.
+- `PostToolUse` → captures observations (CLS short-term memory).
+- `PostCompact` → runs a memory-consolidation boundary.
+- `SessionEnd` → closes the session (+ a final consolidation boundary).
+
+Legacy `Stop` and `PreCompact` entries written by older versions are
+stripped on re-install: Stop fired per-turn (not per-session), and
+PreCompact's checkpoint capture was replaced wholesale by the
+PostCompact consolidation boundary (#85).
 
 Existing user hooks for the same events are preserved — memorize
 appends its own command array entry, it does not overwrite.

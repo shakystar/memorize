@@ -150,12 +150,16 @@ might reach for as a human:
 
 ```sh
 memorize doctor            # diagnose project + integration state
-memorize project show      # print bound project summary (JSON)
-memorize task list         # list tasks (use --status to filter)
-memorize task resume       # load startup context for the current task
-memorize task handoff ...  # record a handoff to the next agent
+memorize session activity  # what are my other sessions doing?
 memorize consolidate       # run one memory-consolidation boundary now
+memorize search <query>    # search project memory
+memorize project show      # print bound project summary (JSON)
+memorize version           # version of the binary that actually ran
 ```
+
+Tasks and handoffs (`memorize task …`) are an optional layer for
+explicit coordination between agents — ambient memory needs none of
+them, and an empty task list is normal.
 
 Run `memorize` on its own for the usage overview. Every other command
 (setup, install, memory import, hook, projection rebuild, sync, etc.) is

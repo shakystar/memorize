@@ -62,11 +62,14 @@ function isMemorizeHookCommandFor(
 // Hook events the β contract registers for Claude. Stop is intentionally
 // absent — see hook-service.ts for the rationale (Stop fires per-turn,
 // not per-session, and lifecycle moved to SessionEnd + reapStaleSessions).
+// PreCompact is gone too (#85): its checkpoint-capture role was replaced
+// wholesale by the PostCompact consolidation boundary, the handler had
+// been a no-op for a while, and real stores show ZERO checkpoint events —
+// registering it only spawned a useless subprocess on every compaction.
 // PostToolUse (CLS capture) carries a tool matcher so the hook subprocess
 // only spawns for tools the decision-signal filter could ever admit.
 const CLAUDE_HOOK_EVENTS = [
   'SessionStart',
-  'PreCompact',
   'PostCompact',
   'SessionEnd',
   'PostToolUse',
@@ -86,7 +89,7 @@ const CLAUDE_HOOK_MATCHERS: Partial<Record<string, string>> = {
 // merged settings on re-install. Keep narrow — only memorize-owned
 // entries; user-added entries for other tools under the same event
 // keys must be untouched.
-const CLAUDE_LEGACY_MEMORIZE_HOOK_EVENTS = ['Stop'] as const;
+const CLAUDE_LEGACY_MEMORIZE_HOOK_EVENTS = ['Stop', 'PreCompact'] as const;
 
 // Claude Code expects each hook event to hold an array of matcher
 // groups, where every group itself carries a `hooks` array of

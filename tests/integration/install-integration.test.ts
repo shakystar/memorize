@@ -58,8 +58,10 @@ describe('install integration', () => {
       'utf8',
     );
     expect(settings).toContain('SessionStart');
-    expect(settings).toContain('PreCompact');
     expect(settings).toContain('PostCompact');
+    // PreCompact left the contract in #85 (no-op handler; replaced by the
+    // PostCompact consolidation boundary) — a fresh install must not write it.
+    expect(settings).not.toContain('PreCompact');
     expect(settings).toContain('npx @shakystar/memorize hook claude SessionStart');
   });
 
@@ -454,7 +456,7 @@ describe('install integration', () => {
       >;
     };
 
-    for (const event of ['SessionStart', 'PreCompact', 'PostCompact', 'SessionEnd']) {
+    for (const event of ['SessionStart', 'PostCompact', 'SessionEnd']) {
       const groups = settings.hooks[event] ?? [];
       const cmds = groups.flatMap((g) => g.hooks.map((h) => h.command));
       const memorizeCmd = cmds.find((c) => /memorize\s+hook\s+claude/.test(c));
