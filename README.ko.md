@@ -4,7 +4,7 @@
 [![CI](https://github.com/shakystar/memorize/actions/workflows/ci.yml/badge.svg)](https://github.com/shakystar/memorize/actions/workflows/ci.yml)
 [![license](https://img.shields.io/badge/license-AGPL--3.0--or--later-blue)](./LICENSE)
 
-[English](./README.md) | **한국어**
+[English](./README.md) | **한국어** | [日本語](./README.ja.md) | [简体中文](./README.zh-CN.md) | [Español](./README.es.md)
 
 > 당신과 Claude Code, Codex가 하나의 영속적인 프로젝트 두뇌를 공유합니다 —
 > 로컬 우선, 이벤트 소싱, 생물학적 기억의 작동 방식을 본뜬 설계.

@@ -4,7 +4,7 @@
 [![CI](https://github.com/shakystar/memorize/actions/workflows/ci.yml/badge.svg)](https://github.com/shakystar/memorize/actions/workflows/ci.yml)
 [![license](https://img.shields.io/badge/license-AGPL--3.0--or--later-blue)](./LICENSE)
 
-**English** | [한국어](./README.ko.md)
+**English** | [한국어](./README.ko.md) | [日本語](./README.ja.md) | [简体中文](./README.zh-CN.md) | [Español](./README.es.md)
 
 > One persistent project brain shared between you, Claude Code, and
 > Codex — local-first, event-sourced, modeled on how biological memory
