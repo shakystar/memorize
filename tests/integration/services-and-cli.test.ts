@@ -16,6 +16,7 @@ import type { ProjectSyncState } from '../../src/domain/entities.js';
 
 let sandbox: string;
 let memorizeRoot: string;
+let previousMemorizeRoot: string | undefined;
 const repoRoot = process.cwd();
 const tsxCliPath = join(repoRoot, 'node_modules', 'tsx', 'dist', 'cli.mjs');
 const cliEntryPath = join(repoRoot, 'src', 'cli', 'index.ts');
@@ -38,9 +39,16 @@ beforeEach(async () => {
   // so the two views must agree or `requireBoundProjectId` misses.
   sandbox = await realpath(await mkdtemp(join(tmpdir(), 'memorize-phase2-')));
   memorizeRoot = join(sandbox, '.memorize-home');
+  // In-process service calls resolve MEMORIZE_ROOT from process.env
+  // (falling back to the real ~/.memorize), so plant the sandbox root
+  // for every test — not just the CLI subprocesses spawned via runCli.
+  previousMemorizeRoot = process.env.MEMORIZE_ROOT;
+  process.env.MEMORIZE_ROOT = memorizeRoot;
 });
 
 afterEach(async () => {
+  if (previousMemorizeRoot === undefined) delete process.env.MEMORIZE_ROOT;
+  else process.env.MEMORIZE_ROOT = previousMemorizeRoot;
   closeAll();
   await rm(sandbox, { recursive: true, force: true });
 });
