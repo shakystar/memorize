@@ -17,7 +17,11 @@ import { getProjectRoot } from '../storage/path-resolver.js';
 import path from 'node:path';
 import { autoPull, autoPush } from './auto-sync-service.js';
 import { captureObservation } from './capture-service.js';
-import { SUPPRESS_HOOKS_ENV_VAR, consolidate } from './consolidate-service.js';
+import {
+  type ConsolidateBoundary,
+  SUPPRESS_HOOKS_ENV_VAR,
+  consolidate,
+} from './consolidate-service.js';
 import { composeLiveUpdate } from './realtime-share-service.js';
 import { composeStartupContext } from './startup-context-service.js';
 import {
@@ -133,11 +137,13 @@ function prepareHookText(
 async function tryConsolidate(
   ctx: Pick<HookContext, 'projectId' | 'agent'>,
   sessionId: string | undefined,
+  boundary: ConsolidateBoundary,
 ): Promise<void> {
   try {
     await consolidate({
       projectId: ctx.projectId,
       actor: ctx.agent,
+      boundary,
       ...(sessionId ? { sessionId } : {}),
     });
   } catch (error) {
@@ -184,10 +190,11 @@ export type DetachedSpawnImpl = (
 export async function spawnDetachedConsolidate(
   ctx: Pick<HookContext, 'projectId' | 'agent' | 'cwd'>,
   sessionId: string | undefined,
+  boundary: ConsolidateBoundary,
   spawnImpl: DetachedSpawnImpl = spawn,
 ): Promise<void> {
   if (process.env[CONSOLIDATE_INLINE_ENV_VAR] === '1') {
-    await tryConsolidate(ctx, sessionId);
+    await tryConsolidate(ctx, sessionId, boundary);
     return;
   }
   try {
@@ -197,7 +204,15 @@ export async function spawnDetachedConsolidate(
     const cliEntry = fileURLToPath(new URL('../cli/index.js', import.meta.url));
     const child = spawnImpl(
       process.execPath,
-      [cliEntry, 'consolidate', ...(sessionId ? ['--session', sessionId] : [])],
+      [
+        cliEntry,
+        'consolidate',
+        ...(sessionId ? ['--session', sessionId] : []),
+        // #51: tells the child which boundary spawned it, so the recorded
+        // attempt is attributable. Telemetry only — never changes behavior.
+        '--boundary',
+        boundary,
+      ],
       { cwd: ctx.cwd, detached: true, stdio: 'ignore' },
     );
     child.unref();
@@ -228,7 +243,7 @@ const handleSessionStart: HookHandler = async (ctx) => {
   // composed below may lag one window (the catch-up's memories land
   // seconds later); the PostToolUse live-update channel injects them
   // into the running session as soon as they exist.
-  await spawnDetachedConsolidate(ctx, undefined);
+  await spawnDetachedConsolidate(ctx, undefined, 'session-start');
 
   // P3-b: pull sibling-machine events BEFORE composing startup context so the
   // injected memories/tasks reflect the latest remote state. No-op + silent
@@ -374,7 +389,7 @@ const handlePostCompact: HookHandler = async (ctx) => {
   // Compaction is a CLS boundary: consolidate the observation window that
   // is about to fall out of the agent's context — detached (#46), so the
   // hook returns immediately. The child autoPushes its own new events.
-  await spawnDetachedConsolidate(ctx, sessionId);
+  await spawnDetachedConsolidate(ctx, sessionId, 'post-compact');
 
   // P3-b: propagate this boundary's capture events to siblings (background,
   // no-op unless syncTransport is configured; never throws).
@@ -443,7 +458,7 @@ const handleSessionEnd: HookHandler = async (ctx) => {
   // that reap and finishes the consolidation on its own. If the child
   // still dies mid-way, the watermark only advances on success and the
   // next SessionStart's catch-up redoes the window.
-  await spawnDetachedConsolidate(ctx, resolvedSessionId);
+  await spawnDetachedConsolidate(ctx, resolvedSessionId, 'session-end');
 
   // P3-b: final push of the session's events before it exits. The subprocess
   // may be reaped mid-push — fine, push is watermark-idempotent and the next

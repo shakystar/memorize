@@ -159,8 +159,10 @@ Human-readable by default; `--json` emits a stable shape:
 }
 ```
 
-Common checks: project binding, required directories, git redaction
-risk (`.memorize/` in `.gitignore`), install state.
+Common checks: project binding, required directories, consolidation
+health (observations pending consolidation plus when/where/how the
+last consolidation attempt ended — warns when a backlog is stuck),
+git redaction risk (`.memorize/` in `.gitignore`), install state.
 
 Exit code: `1` when status is not `ok`. Use `--json` for scripting.
 

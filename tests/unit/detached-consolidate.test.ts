@@ -110,20 +110,27 @@ describe('spawnDetachedConsolidate — detached mode (#46 Part A)', () => {
     delete process.env[CONSOLIDATE_INLINE_ENV_VAR];
   });
 
-  it('spawns the CLI consolidate command detached with --session and unrefs', async () => {
+  it('spawns the CLI consolidate command detached with --session/--boundary and unrefs', async () => {
     const { spawnImpl, calls } = fakeSpawn();
     await spawnDetachedConsolidate(
       { projectId, agent: 'claude', cwd: sandbox },
       'sess_abc',
+      'post-compact',
       spawnImpl,
     );
 
     expect(calls).toHaveLength(1);
     const call = calls[0]!;
     expect(call.command).toBe(process.execPath);
-    // argv: <cli entry> consolidate --session sess_abc
+    // argv: <cli entry> consolidate --session sess_abc --boundary post-compact
     expect(call.args[0]).toContain(`${sep}cli${sep}index.js`);
-    expect(call.args.slice(1)).toEqual(['consolidate', '--session', 'sess_abc']);
+    expect(call.args.slice(1)).toEqual([
+      'consolidate',
+      '--session',
+      'sess_abc',
+      '--boundary',
+      'post-compact',
+    ]);
     expect(call.options.cwd).toBe(sandbox);
     expect(call.options.detached).toBe(true);
     expect(call.options.stdio).toBe('ignore');
@@ -135,10 +142,15 @@ describe('spawnDetachedConsolidate — detached mode (#46 Part A)', () => {
     await spawnDetachedConsolidate(
       { projectId, agent: 'claude', cwd: sandbox },
       undefined,
+      'session-start',
       spawnImpl,
     );
     expect(calls).toHaveLength(1);
-    expect(calls[0]!.args.slice(1)).toEqual(['consolidate']);
+    expect(calls[0]!.args.slice(1)).toEqual([
+      'consolidate',
+      '--boundary',
+      'session-start',
+    ]);
   });
 
   it('does not consolidate in-process (the child owns the work)', async () => {
@@ -148,6 +160,7 @@ describe('spawnDetachedConsolidate — detached mode (#46 Part A)', () => {
     await spawnDetachedConsolidate(
       { projectId, agent: 'claude', cwd: sandbox },
       undefined,
+      'session-start',
       spawnImpl,
     );
     const types = (await readEvents(projectId)).map((e) => e.type);
@@ -162,6 +175,7 @@ describe('spawnDetachedConsolidate — detached mode (#46 Part A)', () => {
       spawnDetachedConsolidate(
         { projectId, agent: 'claude', cwd: sandbox },
         undefined,
+        'session-start',
         failingSpawn,
       ),
     ).resolves.toBeUndefined();
@@ -180,6 +194,7 @@ describe('spawnDetachedConsolidate — inline escape hatch (MEMORIZE_CONSOLIDATE
     await spawnDetachedConsolidate(
       { projectId, agent: 'claude', cwd: sandbox },
       undefined,
+      'session-end',
       spawnImpl,
     );
     expect(calls).toHaveLength(0);

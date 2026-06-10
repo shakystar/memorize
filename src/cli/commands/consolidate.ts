@@ -1,13 +1,18 @@
 import { ACTOR_SYSTEM } from '../../domain/common.js';
 import { autoPush } from '../../services/auto-sync-service.js';
-import { consolidate } from '../../services/consolidate-service.js';
+import {
+  CONSOLIDATE_BOUNDARIES,
+  type ConsolidateBoundary,
+  consolidate,
+} from '../../services/consolidate-service.js';
 import { requireBoundProjectId } from '../../services/project-service.js';
 import { getSession } from '../../services/projection-store.js';
 import type { CliContext } from '../context.js';
 
 /**
- * `memorize consolidate [--session <id>]` — run one memory-consolidation
- * boundary for the project bound to cwd. This is what the boundary hooks
+ * `memorize consolidate [--session <id>] [--boundary <label>]` — run one
+ * memory-consolidation boundary for the project bound to cwd. This is what
+ * the boundary hooks
  * (SessionStart catch-up / PostCompact / SessionEnd) spawn as a detached
  * background child (#46) so consolidation never blocks the agent; it is
  * equally valid to run by hand.
@@ -23,6 +28,16 @@ export async function runConsolidateCommand(
     throw new Error('Usage: memorize consolidate [--session <id>]');
   }
 
+  // #51: boundary label for the recorded attempt. Whitelisted; a missing or
+  // junk value reads as 'manual' — a bad label must never fail the boundary.
+  const boundaryFlag = args.indexOf('--boundary');
+  const rawBoundary = boundaryFlag !== -1 ? args[boundaryFlag + 1] : undefined;
+  const boundary: ConsolidateBoundary = (
+    CONSOLIDATE_BOUNDARIES as readonly string[]
+  ).includes(rawBoundary ?? '')
+    ? (rawBoundary as ConsolidateBoundary)
+    : 'manual';
+
   const projectId = await requireBoundProjectId(ctx.cwd);
   // Attribute the consolidated events to the session's agent when known;
   // 'system' otherwise (the memory payload itself carries the sessionId).
@@ -33,6 +48,7 @@ export async function runConsolidateCommand(
   const result = await consolidate({
     projectId,
     actor,
+    boundary,
     ...(sessionId ? { sessionId } : {}),
   });
   // Background propagation parity with the old inline boundary path: push

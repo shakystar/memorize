@@ -6,6 +6,10 @@ import { getDb } from '../storage/db.js';
 import { readEventsWithIntegrity } from '../storage/event-store.js';
 import { isEnoent } from '../storage/fs-utils.js';
 import { getProjectRoot } from '../storage/path-resolver.js';
+import {
+  type ConsolidateAttempt,
+  getConsolidationStatus,
+} from './consolidate-service.js';
 import { hasUnmigratedNdjson } from './migrate-service.js';
 import { getMemoryIndex, rebuildProjectProjection } from './projection-store.js';
 import { getBoundProjectId, readProject, requireBoundProjectId } from './project-service.js';
@@ -438,6 +442,64 @@ async function checkNdjsonMigrated(
   };
 }
 
+/**
+ * #51 — consolidation health. A store with observations but no memories must
+ * answer WHY (the emis case: 190 observations, 0 memories, no trace).
+ * Warn policy:
+ *   - observations are pending AND the last recorded attempt failed, or
+ *   - many observations are pending and NO attempt was ever recorded
+ *     (boundaries are likely not firing at all — the threshold keeps a
+ *     fresh mid-session store from warning before its first boundary).
+ * Everything else (idle, healthy, or merely a few pending) is ok; the
+ * message always carries the pending count + last-attempt summary so
+ * `doctor --json` exposes the full picture either way.
+ */
+const PENDING_WITHOUT_ATTEMPT_WARN_THRESHOLD = 25;
+
+function describeAttempt(attempt: ConsolidateAttempt): string {
+  return (
+    `last attempt ${attempt.at} at ${attempt.boundary} via ${attempt.backend} ` +
+    `→ ${attempt.outcome}${attempt.error ? ` (${attempt.error})` : ''}`
+  );
+}
+
+function checkConsolidationHealth(projectId: string): DoctorCheck {
+  const status = getConsolidationStatus(projectId);
+  const pendingPart =
+    status.pendingObservations > 0
+      ? `${status.pendingObservations} observation(s) pending since watermark` +
+        (status.oldestPendingAt ? ` (oldest ${status.oldestPendingAt})` : '')
+      : 'no observations pending';
+  const attemptPart = status.lastAttempt
+    ? describeAttempt(status.lastAttempt)
+    : 'no consolidation attempt recorded';
+  const message = `${pendingPart}; ${attemptPart}`;
+
+  const lastAttemptFailed =
+    status.lastAttempt !== undefined &&
+    status.lastAttempt.outcome !== 'ok' &&
+    status.lastAttempt.outcome !== 'noop';
+  const neverAttemptedWithBacklog =
+    status.lastAttempt === undefined &&
+    status.pendingObservations > PENDING_WITHOUT_ATTEMPT_WARN_THRESHOLD;
+
+  if ((status.pendingObservations > 0 && lastAttemptFailed) || neverAttemptedWithBacklog) {
+    return {
+      id: 'consolidation.health',
+      label: 'Memory consolidation health',
+      status: 'warn',
+      message,
+      fix: 'memorize consolidate',
+    };
+  }
+  return {
+    id: 'consolidation.health',
+    label: 'Memory consolidation health',
+    status: 'ok',
+    message,
+  };
+}
+
 export async function doctor(cwd: string): Promise<DoctorReport> {
   const checks: DoctorCheck[] = [];
   let projectId: string | undefined;
@@ -502,6 +564,7 @@ export async function doctor(cwd: string): Promise<DoctorReport> {
 
     checks.push(checkProjectIdentity(projectId));
     checks.push(checkProjectionBuilt(projectId));
+    checks.push(checkConsolidationHealth(projectId));
 
     const ndjsonCheck = await checkNdjsonMigrated(projectId);
     if (ndjsonCheck) checks.push(ndjsonCheck);

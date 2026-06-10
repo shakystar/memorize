@@ -11,6 +11,7 @@ import { captureObservation } from '../../src/services/capture-service.js';
 import {
   type Consolidator,
   consolidate,
+  readLastConsolidateAttempt,
 } from '../../src/services/consolidate-service.js';
 import {
   reinforceInjectedMemories,
@@ -389,6 +390,10 @@ describe('CLS hook lifecycle (spawned, end-to-end)', () => {
       expect(
         types.filter((t) => t === 'memory.consolidated').length,
       ).toBeGreaterThan(0);
+      // #51: the PostCompact boundary recorded its attempt with its label.
+      const attempt = readLastConsolidateAttempt(projectDirs[0]!);
+      expect(attempt?.boundary).toBe('post-compact');
+      expect(attempt?.outcome).toBe('ok');
       closeAll();
 
       // The NEXT session sees the consolidated memory in its startup
