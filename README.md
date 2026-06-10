@@ -4,6 +4,8 @@
 [![CI](https://github.com/shakystar/memorize/actions/workflows/ci.yml/badge.svg)](https://github.com/shakystar/memorize/actions/workflows/ci.yml)
 [![license](https://img.shields.io/badge/license-AGPL--3.0--or--later-blue)](./LICENSE)
 
+**English** | [한국어](./README.ko.md)
+
 > One persistent project brain shared between you, Claude Code, and
 > Codex — local-first, event-sourced, modeled on how biological memory
 > actually works.
@@ -48,6 +50,31 @@ consolidation, retrieval-time forgetting, the lifecycle-evidence program
 that evolves the schema from dogfooding data — is in
 **[ARCHITECTURE.md](./ARCHITECTURE.md)**.
 
+### What your agent sees at session start
+
+```text
+# Memorize context
+
+Ground rule: memorize is the single source of truth for project state …
+
+Project: Realtime whiteboard MVP
+Task: Fix cursor jitter on remote drag
+Latest handoff: from codex — "Repro narrowed to the throttle in
+  useRemoteCursor; failing test added in cursor-sync.test.ts"
+Consolidated memories:
+- [decision/s9] WebSocket transport chosen over WebRTC for v1 — simpler
+  infra, revisit only if >200ms RTT becomes common
+- [rationale/s7] Cursor positions are sent unthrottled on purpose; the
+  jitter came from double-throttling, not bandwidth
+- [progress/s5] LAN sync verified; jitter reproduces only above 80ms RTT
+Recent work signals (prior session tail):
+- [write-tool/Edit] src/hooks/useRemoteCursor.ts
+- [decision-keyword/Bash] git commit -m "remove inner throttle"
+```
+
+No re-explaining. The next agent — any agent, any machine — picks up
+exactly here.
+
 ## Install
 
 Two ways in. **Most people should use the first** — memorize is built to
@@ -69,8 +96,11 @@ automatically at session start.
 Verify any time with:
 
 ```sh
-npx memorize doctor
+npx @shakystar/memorize doctor
 ```
+
+(Always use the scoped name with npx — the unscoped `memorize` on npm is
+an unrelated package.)
 
 ### Manual — put `memorize` on your PATH yourself
 
