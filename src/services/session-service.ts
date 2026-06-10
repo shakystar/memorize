@@ -27,6 +27,7 @@ import {
 import { resolveSessionContext } from './session-context.js';
 import {
   getSession,
+  listRecentObservations,
   listSessions,
   rebuildProjectProjection,
 } from './projection-store.js';
@@ -508,6 +509,60 @@ export async function getCurrentSessionActor(
 ): Promise<string | undefined> {
   const pointer = await findCwdSession(cwd);
   return pointer?.startedBy;
+}
+
+/**
+ * #83 — on-demand sibling visibility ("what are my other sessions doing?").
+ * One entry per claiming session (active/paused within the staleness
+ * threshold), each with its most recent captured observations. Sessions
+ * with no captured activity are INCLUDED with an empty list — a plan-mode
+ * session that only reads produces few observations by design, and showing
+ * "no captured activity yet" is honest where omitting the session would
+ * read as "no such session".
+ */
+export interface SessionOverviewEntry {
+  id: string;
+  actor: string;
+  status: Session['status'];
+  startedAt: string;
+  lastSeenAt: string;
+  taskId?: string;
+  /** True when this is the asking session (resolved from the cwd/env pointer). */
+  self: boolean;
+  observations: Array<{
+    signal: string;
+    toolName?: string;
+    summary?: string;
+    createdAt: string;
+  }>;
+}
+
+export async function buildSessionOverview(
+  projectId: string,
+  opts: { selfSessionId?: string; observationsPerSession?: number } = {},
+): Promise<SessionOverviewEntry[]> {
+  const perSession = opts.observationsPerSession ?? 10;
+  const sessions = await readActiveSessions(projectId);
+  return sessions
+    .sort((a, b) => (a.lastSeenAt < b.lastSeenAt ? 1 : -1))
+    .map((session) => ({
+      id: session.id,
+      actor: session.actor,
+      status: session.status,
+      startedAt: session.startedAt,
+      lastSeenAt: session.lastSeenAt,
+      ...(session.taskId ? { taskId: session.taskId } : {}),
+      self: session.id === opts.selfSessionId,
+      observations: listRecentObservations(projectId, {
+        sessionId: session.id,
+        limit: perSession,
+      }).map((observation) => ({
+        signal: observation.signal,
+        ...(observation.toolName ? { toolName: observation.toolName } : {}),
+        ...(observation.summary ? { summary: observation.summary } : {}),
+        createdAt: observation.createdAt,
+      })),
+    }));
 }
 
 export async function readActiveSessions(projectId: string): Promise<Session[]> {

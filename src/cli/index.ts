@@ -63,6 +63,18 @@ async function main(): Promise<void> {
   const [, , command, ...args] = process.argv;
   const ctx: CliContext = { cwd: process.cwd() };
 
+  // #82 — version confusion (stale devDependency vs global install) was half
+  // of the first external bug report. Resolve from the package's own
+  // package.json so the answer is about THIS binary, wherever it came from.
+  if (command === 'version' || command === '--version' || command === '-v') {
+    const { createRequire } = await import('node:module');
+    const pkg = createRequire(import.meta.url)('../../package.json') as {
+      version: string;
+    };
+    console.log(pkg.version);
+    return;
+  }
+
   const handler = command ? handlers[command] : undefined;
   if (!handler) {
     console.log(renderScaffoldUsage());
