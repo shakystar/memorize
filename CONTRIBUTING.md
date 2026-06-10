@@ -1,39 +1,74 @@
 # Contributing to Memorize
 
-Thanks for your interest in Memorize. This project is in a structured prototype phase, so contributions are welcome but expect rapid iteration on design and APIs.
+Thanks for your interest! Issues, discussions, and PRs are all welcome.
+The project iterates quickly, so expect design and APIs to move.
 
-## Quick start
+## Where things go
+
+- **Bug reports / concrete feature requests** →
+  [Issues](https://github.com/shakystar/memorize/issues)
+- **Design debates, open-ended ideas, questions** →
+  [Discussions](https://github.com/shakystar/memorize/discussions) —
+  bigger design directions (memory taxonomy, sync semantics) are
+  deliberately discussed there before becoming issues.
+
+When in doubt, open a discussion first; it gets promoted to an issue
+once it has acceptance criteria.
+
+## Development workflow
 
 ```bash
 pnpm install
-pnpm dev -- project show   # sanity check the CLI
+pnpm dev -- project show   # sanity check the CLI from source
+pnpm build                 # produce dist/ for the `memorize` bin
 pnpm qa:quick              # typecheck + lint + unit + smoke
 ```
 
 Before opening a PR, please run:
 
 ```bash
-pnpm qa:full
+pnpm qa:full               # + integration + golden (CI runs this on 3 OSes)
 ```
+
+Integration tests isolate state via `MEMORIZE_ROOT` in a temp dir —
+never run them against your real `~/.memorize`.
 
 ## Development conventions
 
-- Follow the existing module boundaries in `src/` (`adapters`, `domain`, `projections`, `services`, `workflows`, `storage`).
+- Follow the existing module boundaries in `src/` (`adapters`,
+  `domain`, `projections`, `services`, `storage`).
+- **The event log is append-only** and projections are derived — PRs
+  must never mutate or delete past events.
+- Architectural complexity is evidence-gated: if you propose a retry
+  layer, a clock, or a cache, link the observed problem it solves.
 - Keep changes scoped; prefer small, reviewable PRs.
-- Add or update tests under `tests/unit`, `tests/integration`, or `tests/golden` as appropriate.
+- New behavior needs tests (`tests/unit`, `tests/integration`,
+  `tests/golden`); bug fixes need a regression test.
+- Conventional-commit style messages (`feat(scope): …`, `fix(scope): …`).
 
 ## License and relicensing
 
-Memorize is currently released under the [MIT License](./LICENSE).
+Memorize is released under
+[AGPL-3.0-or-later](./LICENSE).
 
-By submitting a contribution (pull request, patch, issue with code, or any other form) to this repository, you agree that:
+By submitting a contribution (pull request, patch, issue with code, or
+any other form) to this repository, you agree that:
 
-1. You have the right to submit the contribution under the MIT License.
-2. Your contribution is licensed to the project and its users under the MIT License.
-3. You grant the project maintainer (shakystar) the right to **relicense the project, including your contribution, under a different license in the future** (for example, a source-available license such as FSL-1.1-MIT or BUSL-1.1). This relicensing right applies only to future releases; any release already published under MIT remains available under MIT.
+1. You have the right to submit the contribution under
+   AGPL-3.0-or-later.
+2. Your contribution is licensed to the project and its users under
+   AGPL-3.0-or-later.
+3. You grant the project maintainer (shakystar) the right to
+   **relicense the project, including your contribution, under a
+   different license in the future** (for example, a more permissive
+   license, or dual-licensing for commercial use). This relicensing
+   right applies only to future releases; any release already published
+   under a given license remains available under that license.
 
 If you do not agree to these terms, please do not submit contributions.
 
 ## Reporting issues
 
-Use GitHub Issues on the [memorize-client repository](https://github.com/shakystar/memorize-client/issues). Include reproduction steps, expected vs actual behavior, and the output of `pnpm dev -- project show` when relevant.
+Use [GitHub Issues](https://github.com/shakystar/memorize/issues).
+Include reproduction steps, expected vs actual behavior, and the output
+of `memorize doctor --json` when relevant.

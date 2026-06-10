@@ -6,7 +6,7 @@
     "access": "public"
   },
   "author": "shakystar",
-  "description": "Local-first shared context system for human and AI collaboration.",
+  "description": "Shared, persistent memory for AI coding agents — Claude Code & Codex share one local-first, event-sourced project brain that survives sessions and syncs across machines.",
   "homepage": "https://github.com/shakystar/memorize#readme",
   "repository": {
     "type": "git",
@@ -17,12 +17,18 @@
   },
   "keywords": [
     "memorize",
-    "cli",
-    "local-first",
-    "ai",
+    "ai-agents",
+    "agent-memory",
+    "ai-memory",
+    "llm-memory",
+    "claude-code",
     "claude",
     "codex",
-    "context",
+    "context-engineering",
+    "event-sourcing",
+    "local-first",
+    "shared-memory",
+    "cli",
     "collaboration"
   ],
   "type": "module",
@@ -30,6 +36,7 @@
     "dist",
     "README.md",
     "AGENT_GUIDE.md",
+    "ARCHITECTURE.md",
     "guides/AI_SETUP.md",
     "CHANGELOG.md",
     "LICENSE"

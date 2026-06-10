@@ -15,7 +15,12 @@ if (-not (Get-Command npm -ErrorAction SilentlyContinue)) {
   exit 1
 }
 
-$nodeMajor = [int](node -p 'process.versions.node.split(".")[0]')
+# Parse `node -v` in PowerShell instead of `node -p '…split(".")…'`:
+# Windows PowerShell 5.1 mangles the nested double quotes when passing the
+# argument to node (native-arg quoting), so the -p form crashed and the
+# check read 0 — the installer aborted on EVERY 5.1 shell despite a valid
+# Node being present.
+$nodeMajor = [int]((((node -v) -replace '^v', '') -split '\.')[0])
 if ($nodeMajor -lt 22) {
   Write-Error "memorize requires Node.js >= 22 (found $(node -v)). Upgrade from https://nodejs.org then re-run."
   exit 1

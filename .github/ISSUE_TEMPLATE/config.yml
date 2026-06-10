@@ -1,0 +1,8 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Design discussion / open-ended idea
+    url: https://github.com/shakystar/memorize/discussions
+    about: Memory-taxonomy debates, sync semantics, and other design directions start here.
+  - name: Question
+    url: https://github.com/shakystar/memorize/discussions/categories/q-a
+    about: "How do I…" questions — fastest answer here.
