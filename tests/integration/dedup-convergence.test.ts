@@ -105,13 +105,16 @@ describe('cross-machine memory dedup — convergence (P3-a)', () => {
     useMachine(homeB);
     await cloneProject(join(sandbox, 'b'), projectA.id, transport);
 
-    // RACE: A and B each consolidate the SAME obs window before syncing.
+    // RACE: A and B each consolidate the SAME obs window before syncing,
+    // producing the same distilled text (modulo trim/case — the dedup key
+    // normalizes both). Same window + same kind + different text would be
+    // distinct memories and intentionally NOT collapse (#49).
     useMachine(homeA);
-    const memA = await appendMemory(projectA.id, tsEarly, [obs.id], 'A view');
+    const memA = await appendMemory(projectA.id, tsEarly, [obs.id], 'Shared view');
     await pushProject(projectA.id, transport);
 
     useMachine(homeB);
-    const memB = await appendMemory(projectA.id, tsLate, [obs.id], 'B view');
+    const memB = await appendMemory(projectA.id, tsLate, [obs.id], ' shared VIEW ');
     await pushProject(projectA.id, transport);
     await pullProject(projectA.id, transport); // B gets memA
 
@@ -155,6 +158,22 @@ describe('cross-machine memory dedup — convergence (P3-a)', () => {
       .prepare('SELECT deduped_by FROM memories WHERE id = ?')
       .get(memory.id) as { deduped_by: string | null };
     expect(row.deduped_by).toBeNull();
+  });
+
+  it('same-batch multi-memory extraction survives a projection rebuild intact (#49)', async () => {
+    // One consolidate() batch stamps the SAME window on every memory it
+    // extracts. Rebuild (replace-all from the event log) must keep all of
+    // them valid — this is also the recovery path for projections that were
+    // wrongly collapsed by the pre-#49 source-only dedup key.
+    useMachine(join(sandbox, 'home-a'));
+    const project = await createProject({ title: 'A', rootPath: join(sandbox, 'a') });
+    const obs = await appendObservation(project.id, '/repo/x.ts');
+    await appendMemory(project.id, tsEarly, [obs.id], 'decided sqlite');
+    await appendMemory(project.id, tsEarly, [obs.id], 'refactored projector');
+    await appendMemory(project.id, tsEarly, [obs.id], 'added dedup tests');
+    await rebuildProjectProjection(project.id);
+
+    expect(listValidMemories(project.id)).toHaveLength(3);
   });
 
   it('memories with empty sourceObservationIds are never grouped', async () => {

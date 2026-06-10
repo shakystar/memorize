@@ -113,11 +113,12 @@ function mem(
   createdAt: string,
   sourceObservationIds: string[],
   text = 'distilled',
+  kind: 'decision' | 'rationale' | 'progress' = 'progress',
 ) {
   return {
     ...createConsolidatedMemory({
       projectId,
-      kind: 'progress',
+      kind,
       text,
       salience: 5,
       sourceObservationIds,
@@ -128,10 +129,11 @@ function mem(
 }
 
 describe('projector — cross-machine duplicate dedup (P3-a)', () => {
-  it('collapses memories with the same sourceObservationIds to one (createdAt,id) winner', () => {
-    const winner = mem('mem_aaa', ts, ['obs_x', 'obs_y'], 'A');
-    // Same source set, different order + later createdAt → loser.
-    const loser = mem('mem_bbb', tsLater, ['obs_y', 'obs_x'], 'B');
+  it('collapses memories with the same window + kind + text to one (createdAt,id) winner', () => {
+    const winner = mem('mem_aaa', ts, ['obs_x', 'obs_y'], 'Use sqlite');
+    // Same source set (different order), same kind, same text modulo
+    // trim/case, later createdAt → loser.
+    const loser = mem('mem_bbb', tsLater, ['obs_y', 'obs_x'], '  use SQLite ');
 
     const state = reduceProjectState([
       evt({ id: 'evt_m1', type: 'memory.consolidated', payload: winner }),
@@ -142,6 +144,42 @@ describe('projector — cross-machine duplicate dedup (P3-a)', () => {
     expect(state.memories[winner.id]!.dedupedBy).toBeUndefined();
     expect(state.memories[loser.id]!.invalidAt).toBe(winner.createdAt);
     expect(state.memories[loser.id]!.dedupedBy).toBe(winner.id);
+  });
+
+  it('same-batch extractions sharing one window but with distinct texts all stay valid (#49)', () => {
+    // One consolidate() batch attaches the SAME boundary window to every
+    // extracted memory — they are distinct memories, not duplicates.
+    const batch = [
+      mem('mem_b1', ts, ['obs_x', 'obs_y'], 'Decided to use sqlite'),
+      mem('mem_b2', ts, ['obs_x', 'obs_y'], 'Projector reducer refactored'),
+      mem('mem_b3', ts, ['obs_x', 'obs_y'], 'Watermark advances on success'),
+    ];
+
+    const state = reduceProjectState(
+      batch.map((m, i) =>
+        evt({ id: `evt_m${i}`, type: 'memory.consolidated', payload: m }),
+      ),
+    );
+
+    for (const m of batch) {
+      expect(state.memories[m.id]!.invalidAt).toBeUndefined();
+      expect(state.memories[m.id]!.dedupedBy).toBeUndefined();
+    }
+  });
+
+  it('same window + same text but different kind both survive', () => {
+    const decision = mem('mem_k1', ts, ['obs_x'], 'sqlite it is', 'decision');
+    const rationale = mem('mem_k2', tsLater, ['obs_x'], 'sqlite it is', 'rationale');
+
+    const state = reduceProjectState([
+      evt({ id: 'evt_m1', type: 'memory.consolidated', payload: decision }),
+      evt({ id: 'evt_m2', type: 'memory.consolidated', payload: rationale }),
+    ]);
+
+    expect(state.memories[decision.id]!.invalidAt).toBeUndefined();
+    expect(state.memories[decision.id]!.dedupedBy).toBeUndefined();
+    expect(state.memories[rationale.id]!.invalidAt).toBeUndefined();
+    expect(state.memories[rationale.id]!.dedupedBy).toBeUndefined();
   });
 
   it('does NOT group memories with empty/absent sourceObservationIds', () => {
