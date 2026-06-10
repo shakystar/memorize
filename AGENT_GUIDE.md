@@ -54,8 +54,9 @@ outputs as a cache that must be re-validated — not as authoritative.
    - Claude Code: `.claude/settings.local.json` (per-project) — registers
      `SessionStart`, `PreCompact`, `PostCompact`, `SessionEnd`.
    - Codex: `~/.codex/hooks.json` (global per-user; the handler no-ops
-     when cwd is not a memorize-bound project) — registers `SessionStart`
-     only. Codex has no SessionEnd / Shutdown hook.
+     when cwd is not a memorize-bound project) — registers
+     `SessionStart`, `PostToolUse` (capture), and `PostCompact`
+     (consolidation boundary). Codex has no SessionEnd / Shutdown hook.
 
    In both cases the SessionStart hook calls `memorize hook <agent>
    SessionStart` and the output is injected as
@@ -441,7 +442,10 @@ Idempotent. Writes to `~/.codex/hooks.json`, and plants the
 **ground-rule block** (#68) in the project's `AGENTS.md` (same managed
 markers and uninstall reversal as the Claude variant above).
 
-- Adds memorize's `SessionStart` and `Stop` hook entries.
+- Adds memorize's `SessionStart`, `PostToolUse`, and `PostCompact` hook
+  entries (legacy `Stop` entries from older versions are stripped on
+  re-install — Stop fires per-turn, not per-session, so the old
+  auto-handoff path was removed).
 - Memorize entries are **prepended** before any existing third-party
   entries (OMX, etc.) so memorize context is established first.
 - Legacy `{command}`-only entries (if any) are migrated to the
