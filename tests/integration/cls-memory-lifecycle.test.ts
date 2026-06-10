@@ -148,6 +148,49 @@ describe('CLS capture → consolidate → retrieve (in-process)', () => {
     }
   });
 
+  it('extractor failure does NOT advance the watermark; the next boundary retries the window (#43)', async () => {
+    await seedProject();
+    await captureWrite('/repo/src/a.ts');
+
+    const failing: Consolidator = {
+      async extract(): Promise<never> {
+        throw new Error('unparseable LLM reply');
+      },
+    };
+    await expect(
+      consolidate({ projectId, actor: 'test', consolidator: failing }),
+    ).rejects.toThrow('unparseable LLM reply');
+    expect(listValidMemories(projectId)).toHaveLength(0);
+
+    // Watermark untouched — the same observations are re-consolidated.
+    const retry = await consolidate({ projectId, actor: 'test' });
+    expect(retry.observationsProcessed).toBe(1);
+    expect(retry.consolidated).toBeGreaterThan(0);
+  });
+
+  it('a genuinely empty extraction advances the watermark (observations consumed)', async () => {
+    await seedProject();
+    await captureWrite('/repo/src/a.ts');
+
+    const empty: Consolidator = {
+      async extract() {
+        return [];
+      },
+    };
+    const first = await consolidate({
+      projectId,
+      actor: 'test',
+      consolidator: empty,
+    });
+    expect(first.observationsProcessed).toBe(1);
+    expect(first.consolidated).toBe(0);
+
+    // Clean empty result consumed the window — the next boundary is a no-op.
+    const second = await consolidate({ projectId, actor: 'test' });
+    expect(second.observationsProcessed).toBe(0);
+    expect(second.consolidated).toBe(0);
+  });
+
   it('watermark loss does NOT duplicate memories (sourceObservationIds dedup guard)', async () => {
     // Events survive export/sync/migrate but the per-project meta table
     // (and thus the watermark) does not. Simulate that loss and prove the

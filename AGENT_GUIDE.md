@@ -327,6 +327,9 @@ or a local Ollama) to enable richer features:
   — LLM memory consolidation at boundaries, plus the semantic-contradiction
   judge. `MEMORIZE_LLM_API_KEY` must be set to enable it (use any dummy
   value, e.g. `ollama`, for a keyless local server).
+- `MEMORIZE_LLM_TIMEOUT_MS` — LLM HTTP timeout in milliseconds (default
+  `20000`). Raise it for local CPU models, which can need minutes per
+  extraction.
 - `MEMORIZE_EMBEDDINGS_ENDPOINT` / `MEMORIZE_EMBEDDINGS_API_KEY` /
   `MEMORIZE_EMBEDDINGS_MODEL` — embedding-based semantic search (hybrid
   with FTS5, used in both explicit `search` and startup injection) and the

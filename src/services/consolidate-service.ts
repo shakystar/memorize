@@ -137,6 +137,7 @@ export interface LlmConsolidatorConfig {
 
 export const DEFAULT_LLM_ENDPOINT = 'https://api.anthropic.com/v1';
 export const DEFAULT_LLM_MODEL = 'claude-haiku-4-5';
+/** Default; override via MEMORIZE_LLM_TIMEOUT_MS (local CPU models can need minutes). */
 const LLM_TIMEOUT_MS = 20_000;
 
 /**
@@ -152,10 +153,14 @@ export function resolveLlmConfig(
 ): LlmConsolidatorConfig | undefined {
   const apiKey = env.MEMORIZE_LLM_API_KEY;
   if (!apiKey) return undefined;
+  const timeoutMs = Number.parseInt(env.MEMORIZE_LLM_TIMEOUT_MS ?? '', 10);
   return {
     endpoint: env.MEMORIZE_LLM_ENDPOINT ?? DEFAULT_LLM_ENDPOINT,
     apiKey,
     model: env.MEMORIZE_LLM_MODEL ?? DEFAULT_LLM_MODEL,
+    // Invalid/non-positive values fall back to the built-in default. An
+    // explicit per-boundary timeoutMs (SessionStart catch-up) still wins.
+    ...(Number.isFinite(timeoutMs) && timeoutMs > 0 ? { timeoutMs } : {}),
   };
 }
 
@@ -224,22 +229,35 @@ export class LlmConsolidator implements Consolidator {
 }
 
 /**
+ * Extractor FAILURE: the model replied 200 OK but with no parseable JSON
+ * array (weak local models emitting junk). Distinct from a genuine empty
+ * `[]` — it propagates like an HTTP error or timeout, so the watermark
+ * does not advance and the next boundary retries the same window.
+ */
+export class ExtractionParseError extends Error {}
+
+/**
  * Defensive parse of the model's reply: locate the first JSON array, drop
- * malformed entries, clamp salience, cap count. A reply with no parseable
- * array yields [] (the boundary then simply consolidates nothing — the
- * watermark still advances because the observations WERE processed).
+ * malformed entries, clamp salience, cap count. A reply with NO parseable
+ * array is an extractor failure and throws ExtractionParseError — only a
+ * cleanly parsed result (including an empty array) lets the boundary
+ * advance the watermark and consume the observations.
  */
 export function parseExtractedMemories(content: string): ExtractedMemory[] {
   const start = content.indexOf('[');
   const end = content.lastIndexOf(']');
-  if (start === -1 || end <= start) return [];
+  if (start === -1 || end <= start) {
+    throw new ExtractionParseError('LLM reply contains no JSON array');
+  }
   let parsed: unknown;
   try {
     parsed = JSON.parse(content.slice(start, end + 1));
   } catch {
-    return [];
+    throw new ExtractionParseError('LLM reply array is not valid JSON');
   }
-  if (!Array.isArray(parsed)) return [];
+  if (!Array.isArray(parsed)) {
+    throw new ExtractionParseError('LLM reply JSON is not an array');
+  }
   const kinds: ConsolidatedMemoryKind[] = ['decision', 'rationale', 'progress'];
   return parsed
     .filter(
@@ -427,9 +445,10 @@ export async function consolidate(params: {
           ? 'llm'
           : 'rule-based';
 
-      // Extractor failure (LLM timeout, HTTP error) intentionally propagates
-      // WITHOUT advancing the watermark — the next boundary retries the same
-      // window. Callers at hook boundaries catch and degrade.
+      // Extractor failure (LLM timeout, HTTP error, unparseable reply)
+      // intentionally propagates WITHOUT advancing the watermark — the next
+      // boundary retries the same window. Callers at hook boundaries catch
+      // and degrade.
       const extracted = await consolidator.extract({
         observations,
         ...(transcriptTail ? { transcriptTail } : {}),

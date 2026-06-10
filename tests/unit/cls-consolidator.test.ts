@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import { createObservation } from '../../src/domain/entities.js';
 import {
+  ExtractionParseError,
   RuleBasedConsolidator,
   parseExtractedMemories,
   resolveLlmConfig,
@@ -101,9 +102,18 @@ describe('parseExtractedMemories (defensive LLM reply parsing)', () => {
     expect(parsed[0]!.salience).toBe(10);
   });
 
-  it('returns [] for unparseable content', () => {
-    expect(parseExtractedMemories('no array here')).toEqual([]);
-    expect(parseExtractedMemories('[{broken json')).toEqual([]);
+  it('throws ExtractionParseError for unparseable content (extractor FAILURE, not an empty result)', () => {
+    expect(() => parseExtractedMemories('no array here')).toThrow(
+      ExtractionParseError,
+    );
+    expect(() => parseExtractedMemories('[{broken json')).toThrow(
+      ExtractionParseError,
+    );
+  });
+
+  it('returns [] for a genuinely empty array reply (clean result)', () => {
+    expect(parseExtractedMemories('[]')).toEqual([]);
+    expect(parseExtractedMemories('Nothing durable here.\n[]')).toEqual([]);
   });
 
   it('keeps supersede fields when present', () => {
@@ -145,5 +155,23 @@ describe('resolveLlmConfig (key-optional — decision ①)', () => {
       apiKey: 'ollama',
       model: 'qwen3:8b',
     });
+  });
+
+  it('reads MEMORIZE_LLM_TIMEOUT_MS into timeoutMs (local CPU models need >20s)', () => {
+    const config = resolveLlmConfig({
+      MEMORIZE_LLM_API_KEY: 'sk-test',
+      MEMORIZE_LLM_TIMEOUT_MS: '120000',
+    });
+    expect(config?.timeoutMs).toBe(120_000);
+  });
+
+  it('ignores invalid or non-positive MEMORIZE_LLM_TIMEOUT_MS values', () => {
+    for (const value of ['abc', '0', '-5', '']) {
+      const config = resolveLlmConfig({
+        MEMORIZE_LLM_API_KEY: 'sk-test',
+        MEMORIZE_LLM_TIMEOUT_MS: value,
+      });
+      expect(config?.timeoutMs).toBeUndefined();
+    }
   });
 });
