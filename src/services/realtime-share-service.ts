@@ -212,8 +212,10 @@ function recentSelfFilePaths(
 // --- delta build ------------------------------------------------------------
 
 /**
- * Build the live-update delta for one session: events SIBLING sessions
- * appended since `sinceEventId`, self-filtered, ranked, and capped. Reads the
+ * Build the live-update delta for one session: events appended since
+ * `sinceEventId`, ranked, and capped. Raw observations are self-filtered
+ * (sibling-only); consolidated memories include the session's own late
+ * boundary memories (#46 Part B — see the memory branch). Reads the
  * raw event log (not the observations projection) because the watermark is an
  * event id and `readEventsSince` is exactly id/seq-keyed — and it picks up
  * `memory.consolidated` in the same scan.
@@ -262,7 +264,13 @@ export async function buildLiveUpdate(params: {
       });
     } else if (event.type === 'memory.consolidated') {
       const memory = event.payload as ConsolidatedMemory;
-      if (memory.sessionId === params.selfSessionId) continue; // self-filter
+      // NO self-filter here (#46 Part B), deliberately asymmetric with the
+      // observation branch above: with detached background consolidation,
+      // the session's OWN boundary memories land seconds after the boundary
+      // and were never in its context in consolidated form (SessionStart's
+      // catch-up no longer blocks startup; PostCompact's window just fell
+      // out of context) — they are new information to the running session.
+      // The per-session share watermark already prevents re-injection.
       memories.push({
         kind: memory.kind,
         text: memory.text,

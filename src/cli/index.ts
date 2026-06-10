@@ -2,6 +2,7 @@ import process from 'node:process';
 
 import { bumpHeartbeat } from '../services/session-service.js';
 import { runConflictCommand } from './commands/conflict.js';
+import { runConsolidateCommand } from './commands/consolidate.js';
 import { runDoctorCommand } from './commands/doctor.js';
 import { runEventsCommand } from './commands/events.js';
 import { runExportCommand } from './commands/export.js';
@@ -35,6 +36,7 @@ const handlers: Record<string, CommandHandler> = {
   hook: runHookCommand,
   task: runTaskCommand,
   conflict: runConflictCommand,
+  consolidate: runConsolidateCommand,
   session: runSessionCommand,
   setup: runSetupCommand,
 };
@@ -43,12 +45,16 @@ const handlers: Record<string, CommandHandler> = {
 // heartbeat for these so we never double-fire the event. `session reap`
 // is included because firing a heartbeat on the just-reaped session
 // would resurrect it as 'active' the moment after we abandoned it.
+// `consolidate` is included because it runs as a detached background
+// child of boundary hooks (#46) — a heartbeat from it would falsely
+// signal agent liveness on a session that may just have ended.
 const SESSION_MANAGING_COMMANDS = new Set([
   'hook',
   'install',
   'uninstall',
   'session',
   'setup',
+  'consolidate',
 ]);
 
 async function main(): Promise<void> {
