@@ -15,7 +15,7 @@ import { getProjectRoot } from '../storage/path-resolver.js';
 import path from 'node:path';
 import { autoPull, autoPush } from './auto-sync-service.js';
 import { captureObservation } from './capture-service.js';
-import { consolidate } from './consolidate-service.js';
+import { SUPPRESS_HOOKS_ENV_VAR, consolidate } from './consolidate-service.js';
 import { composeLiveUpdate } from './realtime-share-service.js';
 import { composeStartupContext } from './startup-context-service.js';
 import {
@@ -477,6 +477,13 @@ export async function runClaudeHook(params: {
   cwd: string;
   stdinPayload?: string;
 }): Promise<string> {
+  // Recursion guard (#44): the boundary consolidator can spawn the host CLI
+  // (claude -p / codex exec) as its extractor, and that child session fires
+  // these very hooks. The extractor sets MEMORIZE_SUPPRESS_HOOKS in the
+  // child env so its own invocation is never captured/consolidated
+  // (consolidate → claude -p → SessionStart hook → consolidate → ...).
+  if (process.env[SUPPRESS_HOOKS_ENV_VAR]) return EMPTY_HOOK_RESULT;
+
   const projectId = await ensureBoundProjectId(params.cwd);
   const handler = claudeHookHandlers[params.eventName];
   if (!handler) return EMPTY_HOOK_RESULT;
@@ -493,6 +500,9 @@ export async function runCodexHook(params: {
   cwd: string;
   stdinPayload?: string;
 }): Promise<string> {
+  // Recursion guard (#44) — see runClaudeHook.
+  if (process.env[SUPPRESS_HOOKS_ENV_VAR]) return EMPTY_HOOK_RESULT;
+
   // Codex hooks live globally in ~/.codex/hooks.json so every codex
   // session fires them. Bail fast when cwd is not bound to memorize.
   // Unlike runClaudeHook we use getBoundProjectId — never auto-create

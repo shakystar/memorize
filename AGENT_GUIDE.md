@@ -318,18 +318,24 @@ NOT removed — uninstall undoes the editor integration, not the data.
 
 ### Optional: LLM extraction & semantic search (env)
 
-All optional and OFF by default. Unset, memorize uses rule-based
-consolidation and FTS5 lexical search only — identical to pre-1.1
-behavior. Point these at any OpenAI-compatible endpoint (a cloud provider
-or a local Ollama) to enable richer features:
+All optional. With nothing configured, memory consolidation auto-detects
+your agent CLI (`claude`, then `codex`) on PATH and extracts through its
+existing login — no API key needed; with no CLI either, it falls back to
+rule-based consolidation. Semantic search stays OFF unless configured
+(FTS5 lexical search only). Point these at any OpenAI-compatible endpoint
+(a cloud provider or a local Ollama) to enable richer features:
 
+- `MEMORIZE_LLM_BACKEND` — `claude-cli` | `codex-cli` | `off`. Forces the
+  host-CLI extractor (`claude -p` / `codex exec`, the user's existing
+  subscription auth) or disables LLM extraction entirely (`off` =
+  rule-based). Unset: an API key below wins, else CLI auto-detect.
 - `MEMORIZE_LLM_ENDPOINT` / `MEMORIZE_LLM_API_KEY` / `MEMORIZE_LLM_MODEL`
   — LLM memory consolidation at boundaries, plus the semantic-contradiction
   judge. `MEMORIZE_LLM_API_KEY` must be set to enable it (use any dummy
   value, e.g. `ollama`, for a keyless local server).
-- `MEMORIZE_LLM_TIMEOUT_MS` — LLM HTTP timeout in milliseconds (default
-  `20000`). Raise it for local CPU models, which can need minutes per
-  extraction.
+- `MEMORIZE_LLM_TIMEOUT_MS` — LLM extraction timeout in milliseconds
+  (default `20000`), for both the HTTP and host-CLI backends. Raise it
+  for local CPU models, which can need minutes per extraction.
 - `MEMORIZE_EMBEDDINGS_ENDPOINT` / `MEMORIZE_EMBEDDINGS_API_KEY` /
   `MEMORIZE_EMBEDDINGS_MODEL` — embedding-based semantic search (hybrid
   with FTS5, used in both explicit `search` and startup injection) and the
