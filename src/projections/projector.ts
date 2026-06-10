@@ -55,12 +55,17 @@ export interface ProjectState {
 
 /**
  * Collapse duplicate consolidated memories in place. Groups still-valid
- * memories by their EXACT `sourceObservationIds` set (sorted), and for any
- * group with >1 member keeps the deterministic winner — `(createdAt, id)`
- * ascending — marking the rest as dedup losers (`invalidAt` = winner.createdAt,
- * `dedupedBy` = winner.id). Empty/absent source sets never group (each stands
- * alone). Already-superseded memories are skipped so a genuine contradiction
- * stays invalid and is never chosen. Pure + content-keyed → identical result on
+ * memories by their EXACT `sourceObservationIds` set (sorted) PLUS `kind` PLUS
+ * normalized text (trim + lowercase), and for any group with >1 member keeps
+ * the deterministic winner — `(createdAt, id)` ascending — marking the rest as
+ * dedup losers (`invalidAt` = winner.createdAt, `dedupedBy` = winner.id).
+ * Kind + text are part of the key because one consolidate() batch attaches the
+ * SAME boundary window to every memory it extracts (#49) — same window with
+ * different text is N distinct memories, not duplicates; only same window +
+ * same kind + same text (cross-machine re-consolidation, event replay) is a
+ * true duplicate. Empty/absent source sets never group (each stands alone).
+ * Already-superseded memories are skipped so a genuine contradiction stays
+ * invalid and is never chosen. Pure + content-keyed → identical result on
  * every replica regardless of sync order.
  */
 function dedupeMemoriesBySource(memories: Record<string, MemoryRecord>): void {
@@ -69,7 +74,9 @@ function dedupeMemoriesBySource(memories: Record<string, MemoryRecord>): void {
     if (memory.invalidAt) continue;
     const ids = memory.sourceObservationIds ?? [];
     if (ids.length === 0) continue;
-    const key = [...ids].sort().join(',');
+    // '\n' separator cannot appear in observation ids or `kind`, so the three
+    // key parts can never collide across positions.
+    const key = `${[...ids].sort().join(',')}\n${memory.kind}\n${memory.text.trim().toLowerCase()}`;
     const bucket = groups.get(key);
     if (bucket) bucket.push(memory);
     else groups.set(key, [memory]);
