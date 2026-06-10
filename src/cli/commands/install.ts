@@ -12,11 +12,17 @@ export async function runInstallCommand(
   if (target === 'claude') {
     await installClaudeIntegration(ctx.cwd);
     console.log('Installed Claude integration');
+    console.log(
+      'Added a memorize ground-rule block to CLAUDE.md (removed by `memorize uninstall claude`).',
+    );
     return;
   }
   if (target === 'codex') {
     await installCodexIntegration(ctx.cwd);
     console.log('Installed Codex integration');
+    console.log(
+      'Added a memorize ground-rule block to AGENTS.md (removed by `memorize uninstall codex`).',
+    );
     // Codex treats hooks written by external tools as untrusted and
     // SILENTLY skips them (no error, no log) until the user approves
     // them once. Verified live against codex v0.137.0 (2026-06-08):

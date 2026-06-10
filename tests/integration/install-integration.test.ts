@@ -287,14 +287,44 @@ describe('install integration', () => {
     expect(agents).not.toContain('Old body');
   });
 
-  it('install codex keeps unrelated AGENTS.md content untouched when no memorize block exists', async () => {
+  it('install codex preserves unrelated AGENTS.md content and appends the managed ground-rule block (#68)', async () => {
     const content = '# DuoPane\n\n- spec line 1\n- spec line 2\n';
     await writeFile(join(sandbox, 'AGENTS.md'), content, 'utf8');
 
     runCli(['install', 'codex']);
 
     const agents = await readFile(join(sandbox, 'AGENTS.md'), 'utf8');
-    expect(agents).toBe(content);
+    expect(agents.startsWith(content.trimEnd())).toBe(true);
+    expect(agents).toContain('<!-- memorize:ground-rule v=1 start -->');
+    expect(agents).toContain('single source of truth');
+    expect(agents).toContain('<!-- memorize:ground-rule v=1 end -->');
+
+    // Uninstall strips exactly the block; the user's content survives.
+    runCli(['uninstall', 'codex']);
+    const stripped = await readFile(join(sandbox, 'AGENTS.md'), 'utf8');
+    expect(stripped).not.toContain('memorize:ground-rule');
+    expect(stripped.trimEnd()).toBe(content.trimEnd());
+  });
+
+  it('install claude plants the ground-rule block in CLAUDE.md idempotently; uninstall strips it (#68)', async () => {
+    // No CLAUDE.md yet — install creates it with just the block.
+    const install = runCli(['install', 'claude']);
+    expect(install.status).toBe(0);
+    expect(install.stdout).toContain('ground-rule block to CLAUDE.md');
+    const created = await readFile(join(sandbox, 'CLAUDE.md'), 'utf8');
+    expect(created).toContain('<!-- memorize:ground-rule v=1 start -->');
+
+    // Idempotent: re-install leaves exactly one block.
+    runCli(['install', 'claude']);
+    const again = await readFile(join(sandbox, 'CLAUDE.md'), 'utf8');
+    expect(again.match(/memorize:ground-rule v=1 start/g)).toHaveLength(1);
+
+    // User edits around the block survive uninstall; block does not.
+    await writeFile(join(sandbox, 'CLAUDE.md'), `# My notes\n\n${again}`, 'utf8');
+    runCli(['uninstall', 'claude']);
+    const stripped = await readFile(join(sandbox, 'CLAUDE.md'), 'utf8');
+    expect(stripped).toContain('# My notes');
+    expect(stripped).not.toContain('memorize:ground-rule');
   });
 
   it('install codex keeps unrelated AGENTS.override.md content untouched when no memorize block exists', async () => {

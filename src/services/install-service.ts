@@ -258,7 +258,99 @@ export async function installClaudeIntegration(cwd: string): Promise<string> {
   };
 
   await writeJson(settingsPath, merged);
+  // #68 — plant the single-source-of-truth contract where every Claude
+  // session reads it. Default-on; the install command announces it.
+  await upsertGroundRuleBlock(path.join(cwd, 'CLAUDE.md'));
   return settingsPath;
+}
+
+// --- #68 ground-rule block ----------------------------------------------------
+
+const GROUND_RULE_START_MARKER = '<!-- memorize:ground-rule v=1 start -->';
+const GROUND_RULE_END_MARKER = '<!-- memorize:ground-rule v=1 end -->';
+
+/**
+ * #68 — the single-source-of-truth contract, planted in the agent's standing
+ * instruction file (CLAUDE.md / AGENTS.md) so it reaches sessions that never
+ * read AGENT_GUIDE. A behavioral contract, NOT context — deliberately unlike
+ * the removed pre-v0.2 bootstrap block, which duplicated hook-injected
+ * context. Managed: re-install replaces it in place, uninstall strips it.
+ */
+const GROUND_RULE_BLOCK = [
+  GROUND_RULE_START_MARKER,
+  '## Memorize ground rule',
+  '',
+  'Memorize is the single source of truth for project state. Do not store',
+  'project ids, task lists, decisions, handoffs, or summaries of them in',
+  'your own memory system — they go stale silently. Query memorize at',
+  'session start instead (`memorize task resume`, `memorize project show`).',
+  'Your own memory is for per-self content only: user preferences and your',
+  'own working-style lessons. To absorb pre-existing notes into memorize,',
+  'see `memorize memory import` in AGENT_GUIDE.md.',
+  GROUND_RULE_END_MARKER,
+].join('\n');
+
+/**
+ * Insert or refresh the ground-rule block in a user-owned instruction file.
+ * Creates the file when absent; otherwise replaces an existing block in
+ * place (any older content between the markers is upgraded) or appends the
+ * block after the user's content. Returns the path it wrote.
+ */
+async function upsertGroundRuleBlock(filePath: string): Promise<string> {
+  let existing: string | undefined;
+  try {
+    existing = await fs.readFile(filePath, 'utf8');
+  } catch (error) {
+    if (!isEnoent(error)) throw error;
+  }
+  if (existing === undefined) {
+    await fs.writeFile(filePath, `${GROUND_RULE_BLOCK}\n`, 'utf8');
+    return filePath;
+  }
+  const bounds = locateBlock(
+    existing,
+    GROUND_RULE_START_MARKER,
+    GROUND_RULE_END_MARKER,
+  );
+  const next = bounds
+    ? existing.slice(0, bounds.startIndex) +
+      GROUND_RULE_BLOCK +
+      existing.slice(bounds.afterEndIndex)
+    : `${existing.trimEnd()}\n\n${GROUND_RULE_BLOCK}\n`;
+  if (next !== existing) {
+    await fs.writeFile(filePath, next, 'utf8');
+  }
+  return filePath;
+}
+
+/**
+ * Strip the ground-rule block, byte-preserving everything else. NEVER
+ * deletes the file — CLAUDE.md / AGENTS.md are user-owned, even when the
+ * block was their only content (we may have created the file, but by now
+ * the user may consider it theirs).
+ */
+async function stripGroundRuleBlock(filePath: string): Promise<void> {
+  let existing: string;
+  try {
+    existing = await fs.readFile(filePath, 'utf8');
+  } catch (error) {
+    if (isEnoent(error)) return;
+    throw error;
+  }
+  const bounds = locateBlock(
+    existing,
+    GROUND_RULE_START_MARKER,
+    GROUND_RULE_END_MARKER,
+  );
+  if (!bounds) return;
+  const before = existing.slice(0, bounds.startIndex);
+  const after = existing.slice(bounds.afterEndIndex);
+  // Collapse the blank line the append path introduced, byte-preserving the
+  // user's own content on both sides otherwise.
+  const cleaned =
+    before.replace(/\n+$/, (m) => (after.startsWith('\n') ? m.slice(0, -1) : m)) +
+    after.replace(/^\n/, '');
+  await fs.writeFile(filePath, cleaned, 'utf8');
 }
 
 const CODEX_START_MARKER = '<!-- memorize:bootstrap v=1 start -->';
@@ -477,6 +569,9 @@ function stripAllMemorizeHooks(
  */
 export async function uninstallClaudeIntegration(cwd: string): Promise<string> {
   const settingsPath = path.join(cwd, '.claude', 'settings.local.json');
+  // Strip the #68 block first — it must come out even when the settings
+  // file is already gone (manually deleted, partial uninstall).
+  await stripGroundRuleBlock(path.join(cwd, 'CLAUDE.md'));
   let settings: { hooks?: Record<string, unknown> } = {};
   try {
     settings = JSON.parse(await fs.readFile(settingsPath, 'utf8')) as {
@@ -540,6 +635,8 @@ export async function uninstallCodexIntegration(cwd: string): Promise<string> {
   await stripMemorizeFromFile(path.join(cwd, 'AGENTS.md'), {
     deleteIfEmpty: false,
   });
+  // #68 — reverse the ground-rule block; the file itself stays (user-owned).
+  await stripGroundRuleBlock(path.join(cwd, 'AGENTS.md'));
   return hooksPath;
 }
 
@@ -559,6 +656,9 @@ export async function installCodexIntegration(cwd: string): Promise<string> {
   await stripMemorizeFromFile(path.join(cwd, 'AGENTS.md'), {
     deleteIfEmpty: false,
   });
+  // #68 — plant the single-source-of-truth contract where every codex
+  // session reads it (AFTER the legacy strip so it survives the cleanup).
+  await upsertGroundRuleBlock(path.join(cwd, 'AGENTS.md'));
 
   return hooksPath;
 }
