@@ -122,7 +122,10 @@ async function checkClaudeInstall(
       fix: 'memorize install claude',
     };
   }
-  const events = ['SessionStart', 'PreCompact', 'PostCompact', 'SessionEnd'];
+  // PreCompact left the contract in #85 (no-op handler; its role was
+  // replaced by the PostCompact consolidation boundary) — doctor checks
+  // the live set only, so a lingering legacy entry never warns.
+  const events = ['SessionStart', 'PostCompact', 'SessionEnd'];
   const hooks = settings.hooks ?? {};
 
   const hasLegacyShape = events.some((event) => {
