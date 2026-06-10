@@ -181,6 +181,12 @@ describe('CliConsolidator (host-CLI extractor — #44)', () => {
     expect(child.stdinData).toContain('memory consolidator');
     expect(child.stdinData).toContain('## Observations');
     expect(child.stdinData).toContain('Decided to use sqlite');
+    // #57 — the shared system prompt asks for the lifecycle-evidence fields
+    // (one prompt feeds both backends, so this covers HTTP too).
+    expect(child.stdinData).toContain('obsoleteWhen');
+    expect(child.stdinData).toContain('kindMisfit');
+    expect(child.stdinData).toContain('supersedesNote');
+    expect(child.stdinData).toContain('tags');
   });
 
   it('uses codex exec with stdin marker for the codex backend', async () => {

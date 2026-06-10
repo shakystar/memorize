@@ -86,6 +86,22 @@ export interface ConsolidatedMemory extends BaseEntity {
   sessionId?: EntityId;
   /** Observations this memory was distilled from (provenance). */
   sourceObservationIds: EntityId[];
+  /**
+   * #57 observe-only lifecycle evidence (discussion #61). Emitted by the
+   * extractor, persisted, and read by NO consumer — injection, dedup, and
+   * contradiction detection keep keying on `kind`. Pure instrumentation to
+   * decide later whether the kind enum should become named lifecycle
+   * policies. All optional; absence is the common case.
+   */
+  /** Free-form condition after which this memory stops being true. */
+  obsoleteWhen?: string;
+  /** Extractor judged that none of the three kinds fits this item. */
+  kindMisfit?: boolean;
+  kindMisfitReason?: string;
+  /** Free-form replacement note when no listed memory id could be pinned. */
+  supersedesNote?: string;
+  /** 1–3 free-form lowercase tags — the extractor's own vocabulary. */
+  tags?: string[];
 }
 
 export function clampSalience(value: number): number {
@@ -100,6 +116,11 @@ export function createConsolidatedMemory(input: {
   salience: number;
   sessionId?: string;
   sourceObservationIds?: string[];
+  obsoleteWhen?: string;
+  kindMisfit?: boolean;
+  kindMisfitReason?: string;
+  supersedesNote?: string;
+  tags?: string[];
 }): ConsolidatedMemory {
   return {
     ...baseEntity('mem'),
@@ -109,6 +130,11 @@ export function createConsolidatedMemory(input: {
     salience: clampSalience(input.salience),
     ...(input.sessionId ? { sessionId: input.sessionId } : {}),
     sourceObservationIds: input.sourceObservationIds ?? [],
+    ...(input.obsoleteWhen ? { obsoleteWhen: input.obsoleteWhen } : {}),
+    ...(input.kindMisfit ? { kindMisfit: true } : {}),
+    ...(input.kindMisfitReason ? { kindMisfitReason: input.kindMisfitReason } : {}),
+    ...(input.supersedesNote ? { supersedesNote: input.supersedesNote } : {}),
+    ...(input.tags && input.tags.length > 0 ? { tags: input.tags } : {}),
   };
 }
 

@@ -3,6 +3,7 @@ import { autoPush } from '../../services/auto-sync-service.js';
 import {
   CONSOLIDATE_BOUNDARIES,
   type ConsolidateBoundary,
+  buildLifecycleEvidenceReport,
   consolidate,
 } from '../../services/consolidate-service.js';
 import { requireBoundProjectId } from '../../services/project-service.js';
@@ -16,11 +17,23 @@ import type { CliContext } from '../context.js';
  * (SessionStart catch-up / PostCompact / SessionEnd) spawn as a detached
  * background child (#46) so consolidation never blocks the agent; it is
  * equally valid to run by hand.
+ *
+ * `memorize consolidate --report` — #57: print the observed
+ * lifecycle-evidence distribution (obsolete_when presence x kind, kind-misfit
+ * rate + reasons, tag x kind) as JSON instead of running a boundary.
  */
 export async function runConsolidateCommand(
   args: string[],
   ctx: CliContext,
 ): Promise<void> {
+  if (args.includes('--report')) {
+    const projectId = await requireBoundProjectId(ctx.cwd);
+    console.log(
+      JSON.stringify(buildLifecycleEvidenceReport(projectId), null, 2),
+    );
+    return;
+  }
+
   const sessionFlag = args.indexOf('--session');
   const sessionId =
     sessionFlag !== -1 ? args[sessionFlag + 1] : undefined;

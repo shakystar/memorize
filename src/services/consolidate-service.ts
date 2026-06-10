@@ -68,6 +68,16 @@ export interface ExtractedMemory {
   /** Id of an existing valid memory this one contradicts/replaces. */
   supersedesMemoryId?: string;
   supersedeReason?: string;
+  /**
+   * #57 observe-only lifecycle evidence — persisted on the memory, read by
+   * no consumer. Missing or malformed values are silently dropped by the
+   * parser; they must never make an extraction fail (#43 watermark path).
+   */
+  obsoleteWhen?: string;
+  kindMisfit?: boolean;
+  kindMisfitReason?: string;
+  supersedesNote?: string;
+  tags?: string[];
 }
 
 export interface ConsolidationInput {
@@ -187,11 +197,21 @@ const EXTRACTION_SYSTEM_PROMPT = [
   'From the raw observations and transcript tail, extract the durable',
   'semantic units a future session must know. Return ONLY a JSON array of:',
   '{"kind":"decision"|"rationale"|"progress","text":string,',
-  '"salience":1-10,"supersedesMemoryId"?:string,"supersedeReason"?:string}',
+  '"salience":1-10,"supersedesMemoryId"?:string,"supersedeReason"?:string,',
+  '"obsoleteWhen"?:string,"kindMisfit"?:boolean,"kindMisfitReason"?:string,',
+  '"supersedesNote"?:string,"tags"?:string[]}',
   'Rules: text is one self-contained sentence; salience reflects how much a',
   'future session would regret not knowing it; set supersedesMemoryId ONLY',
   'when an existing memory (listed with its id) is contradicted by the new',
   'state. Extract nothing speculative. Empty array if nothing durable.',
+  'Optional lifecycle fields, per item: obsoleteWhen = the concrete future',
+  'condition after which the item stops being true (e.g. "when PR 12',
+  'merges", "until the convention is amended"); omit it when the item is',
+  'persistent or naturally fades. kindMisfit=true plus a one-line',
+  'kindMisfitReason when none of the three kinds fits the item naturally.',
+  'supersedesNote = free-form note when the item replaces prior knowledge',
+  'you cannot pin to a listed memory id. tags = 1-3 lowercase free-form',
+  'tags in your own words for what sort of memory this is.',
 ].join(' ');
 
 /** Prompt body shared verbatim by the HTTP and host-CLI extractors. */
@@ -430,6 +450,37 @@ export function resolveConsolidatorBackend(
  */
 export class ExtractionParseError extends Error {}
 
+// --- #57 lifecycle-evidence sanitizers ----------------------------------------
+
+/** Caps on observe-only evidence fields — instrumentation, not content. */
+const MAX_EVIDENCE_CHARS = 300;
+const MAX_TAGS = 5;
+
+/**
+ * #57 tolerance contract: evidence fields are best-effort. A wrong type, an
+ * empty string, or junk inside an array degrades to "field absent" — it
+ * never invalidates the entry and never throws (the watermark must behave
+ * exactly as it did before these fields existed).
+ */
+function sanitizeEvidenceText(value: unknown): string | undefined {
+  if (typeof value !== 'string') return undefined;
+  const trimmed = value.trim().slice(0, MAX_EVIDENCE_CHARS);
+  return trimmed.length > 0 ? trimmed : undefined;
+}
+
+function sanitizeEvidenceTags(value: unknown): string[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  const tags = [
+    ...new Set(
+      value
+        .filter((tag): tag is string => typeof tag === 'string')
+        .map((tag) => tag.trim().toLowerCase().slice(0, MAX_EVIDENCE_CHARS))
+        .filter((tag) => tag.length > 0),
+    ),
+  ].slice(0, MAX_TAGS);
+  return tags.length > 0 ? tags : undefined;
+}
+
 /**
  * Defensive parse of the model's reply: locate the first JSON array, drop
  * malformed entries, clamp salience, cap count. A reply with NO parseable
@@ -465,6 +516,15 @@ export function parseExtractedMemories(content: string): ExtractedMemory[] {
       if (typeof kind !== 'string' || !kinds.includes(kind as ConsolidatedMemoryKind)) {
         return undefined;
       }
+      const obsoleteWhen = sanitizeEvidenceText(item.obsoleteWhen);
+      const kindMisfit = item.kindMisfit === true;
+      // Reason without the flag is dropped: misfit RATE is the signal, and a
+      // stray reason on a non-misfit item would skew it.
+      const kindMisfitReason = kindMisfit
+        ? sanitizeEvidenceText(item.kindMisfitReason)
+        : undefined;
+      const supersedesNote = sanitizeEvidenceText(item.supersedesNote);
+      const tags = sanitizeEvidenceTags(item.tags);
       return {
         kind: kind as ConsolidatedMemoryKind,
         text: text.trim(),
@@ -477,6 +537,11 @@ export function parseExtractedMemories(content: string): ExtractedMemory[] {
         ...(typeof item.supersedeReason === 'string'
           ? { supersedeReason: item.supersedeReason }
           : {}),
+        ...(obsoleteWhen ? { obsoleteWhen } : {}),
+        ...(kindMisfit ? { kindMisfit: true } : {}),
+        ...(kindMisfitReason ? { kindMisfitReason } : {}),
+        ...(supersedesNote ? { supersedesNote } : {}),
+        ...(tags ? { tags } : {}),
       };
     })
     .filter((item): item is ExtractedMemory => item !== undefined)
@@ -614,6 +679,74 @@ export function getConsolidationStatus(projectId: string): ConsolidationStatus {
     ...(pending.oldest ? { oldestPendingAt: pending.oldest } : {}),
     ...(lastAttempt ? { lastAttempt } : {}),
   };
+}
+
+// --- #57 lifecycle-evidence report ---------------------------------------------
+
+export interface LifecycleEvidenceKindReport {
+  count: number;
+  withObsoleteWhen: number;
+  kindMisfit: number;
+  /** tag → occurrence count within this kind. */
+  tags: Record<string, number>;
+}
+
+export interface LifecycleEvidenceReport {
+  /** ALL memory rows (valid + superseded + deduped) — evidence wants history. */
+  memories: number;
+  byKind: Record<string, LifecycleEvidenceKindReport>;
+  /** The free-form expiry conditions verbatim — their SHAPE is the evidence. */
+  obsoleteWhen: Array<{ kind: string; condition: string }>;
+  kindMisfitReasons: Array<{ kind: string; reason?: string; text: string }>;
+}
+
+/**
+ * #57 — dump the observed lifecycle-evidence distribution for a project so
+ * the "extend the enum?" decision can be made from data. Read-only over the
+ * projection's memories table; includes invalidated rows because the
+ * decision criteria are about how memories LIVED, not what is valid now.
+ */
+export function buildLifecycleEvidenceReport(
+  projectId: string,
+): LifecycleEvidenceReport {
+  const rows = getDb(projectId)
+    .prepare('SELECT data FROM memories ORDER BY created_at')
+    .all() as Array<{ data: string }>;
+  const report: LifecycleEvidenceReport = {
+    memories: rows.length,
+    byKind: {},
+    obsoleteWhen: [],
+    kindMisfitReasons: [],
+  };
+  for (const row of rows) {
+    const memory = JSON.parse(row.data) as ConsolidatedMemory;
+    const bucket = (report.byKind[memory.kind] ??= {
+      count: 0,
+      withObsoleteWhen: 0,
+      kindMisfit: 0,
+      tags: {},
+    });
+    bucket.count += 1;
+    if (memory.obsoleteWhen) {
+      bucket.withObsoleteWhen += 1;
+      report.obsoleteWhen.push({
+        kind: memory.kind,
+        condition: memory.obsoleteWhen,
+      });
+    }
+    if (memory.kindMisfit) {
+      bucket.kindMisfit += 1;
+      report.kindMisfitReasons.push({
+        kind: memory.kind,
+        ...(memory.kindMisfitReason ? { reason: memory.kindMisfitReason } : {}),
+        text: memory.text,
+      });
+    }
+    for (const tag of memory.tags ?? []) {
+      bucket.tags[tag] = (bucket.tags[tag] ?? 0) + 1;
+    }
+  }
+  return report;
 }
 
 // --- transcript tail ---------------------------------------------------------
@@ -836,6 +969,14 @@ export async function consolidate(params: {
           salience: item.salience,
           ...(params.sessionId ? { sessionId: params.sessionId } : {}),
           sourceObservationIds,
+          // #57 observe-only lifecycle evidence — stored, never consumed.
+          ...(item.obsoleteWhen ? { obsoleteWhen: item.obsoleteWhen } : {}),
+          ...(item.kindMisfit ? { kindMisfit: true } : {}),
+          ...(item.kindMisfitReason
+            ? { kindMisfitReason: item.kindMisfitReason }
+            : {}),
+          ...(item.supersedesNote ? { supersedesNote: item.supersedesNote } : {}),
+          ...(item.tags ? { tags: item.tags } : {}),
         });
         inputs.push({
           type: 'memory.consolidated',

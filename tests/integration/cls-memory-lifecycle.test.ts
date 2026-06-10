@@ -10,6 +10,7 @@ import { CURRENT_SCHEMA_VERSION } from '../../src/domain/common.js';
 import { captureObservation } from '../../src/services/capture-service.js';
 import {
   type Consolidator,
+  buildLifecycleEvidenceReport,
   consolidate,
   readLastConsolidateAttempt,
 } from '../../src/services/consolidate-service.js';
@@ -147,6 +148,64 @@ describe('CLS capture → consolidate → retrieve (in-process)', () => {
       expect(after[index]!.id).toBe(prior.id);
       expect(JSON.stringify(after[index]!)).toBe(prior.json);
     }
+  });
+
+  it('persists #57 lifecycle evidence through consolidate → projection rebuild, and reports it', async () => {
+    await seedProject();
+    await captureWrite('/repo/src/evidence.ts');
+
+    const evidence: Consolidator = {
+      async extract() {
+        return [
+          {
+            kind: 'progress' as const,
+            text: 'Gate: run verify:full before merge',
+            salience: 9,
+            obsoleteWhen: 'when the merge happens',
+            kindMisfit: true,
+            kindMisfitReason: 'standing constraint, not progress',
+            supersedesNote: 'replaces the earlier informal gate note',
+            tags: ['constraint', 'gate'],
+          },
+        ];
+      },
+    };
+    await consolidate({ projectId, actor: 'test', consolidator: evidence });
+
+    const assertEvidence = () => {
+      const memory = listValidMemories(projectId)[0]!.memory;
+      expect(memory.obsoleteWhen).toBe('when the merge happens');
+      expect(memory.kindMisfit).toBe(true);
+      expect(memory.kindMisfitReason).toBe('standing constraint, not progress');
+      expect(memory.supersedesNote).toBe(
+        'replaces the earlier informal gate note',
+      );
+      expect(memory.tags).toEqual(['constraint', 'gate']);
+    };
+    assertEvidence();
+    // The fields live in the memory.consolidated event payload, so a full
+    // replay (the same path sync/import takes) must reproduce them.
+    await rebuildProjectProjection(projectId);
+    assertEvidence();
+
+    const report = buildLifecycleEvidenceReport(projectId);
+    expect(report.memories).toBe(1);
+    expect(report.byKind.progress).toEqual({
+      count: 1,
+      withObsoleteWhen: 1,
+      kindMisfit: 1,
+      tags: { constraint: 1, gate: 1 },
+    });
+    expect(report.obsoleteWhen).toEqual([
+      { kind: 'progress', condition: 'when the merge happens' },
+    ]);
+    expect(report.kindMisfitReasons).toEqual([
+      {
+        kind: 'progress',
+        reason: 'standing constraint, not progress',
+        text: 'Gate: run verify:full before merge',
+      },
+    ]);
   });
 
   it('extractor failure does NOT advance the watermark; the next boundary retries the window (#43)', async () => {
