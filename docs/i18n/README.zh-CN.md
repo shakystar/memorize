@@ -6,6 +6,11 @@
 
 [English](../../README.md) | [한국어](./README.ko.md) | [日本語](./README.ja.md) | **简体中文** | [Español](./README.es.md)
 
+<p align="center">
+  <img src="../../.github/assets/social-preview.png" alt="memorize — shared memory for AI coding agents" width="720">
+</p>
+
+
 > 你、Claude Code 和 Codex 共享同一个持久的项目大脑 — 本地优先、
 > 事件溯源，设计上借鉴了生物记忆的真实运作方式。
 
