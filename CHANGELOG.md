@@ -25,6 +25,13 @@ and no good answer. Additive and backward-compatible.
   of the binary that actually ran. `npx` resolves a project
   devDependency before the global install, so this is the tool for
   catching the pinned-old-version trap from #82.
+- **Docs-consistency check in CI** — a validator pins every docs-drift
+  class real users hit (unscoped `npx memorize`, stale hook-contract
+  claims, CLI commands advertised-but-missing or shipped-but-
+  undocumented, i18n READMEs lagging the English day-to-day block).
+  Its first run immediately caught a lingering unscoped-npx warning
+  context and three undocumented commands (`search`, `export`,
+  `migrate` — now documented in AGENT_GUIDE).
 
 ### Changed
 
