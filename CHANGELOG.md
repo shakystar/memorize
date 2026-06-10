@@ -7,6 +7,45 @@ loosely. The project adheres to [Semantic Versioning](https://semver.org/);
 major-version bumps are reserved for breaking changes to the on-disk event
 log layout or the public CLI surface.
 
+## [2.2.0] — 2026-06-10
+
+Additive, backward-compatible. Theme: making memorize the project's
+single source of truth in practice — absorb the context that predates it,
+and keep new state from leaking back into per-agent memory silos.
+
+### Added
+
+- **`memorize memory import --source <label>`** (#69, PR #70) — the
+  ingestion primitive for agent-driven absorption. The agent reads and
+  distills pre-existing context (its own harness memory, override files,
+  user-named doc folders) into extractor-shaped JSON and pipes it in;
+  memorize never reads outside the project tree. Same sanitizers as
+  boundary consolidation (#57 lifecycle fields ride along), provenance
+  label on every memory, kind+text idempotency guard with
+  `skippedDuplicates` reporting, contradiction-checked, ≤100 items per
+  call. guides/AI_SETUP.md gains the offer → distill → import → report
+  adoption step.
+- **Ground-rule planting** (#68, PR #71) — `install claude` / `install
+  codex` plant the single-source-of-truth contract as a marker-managed
+  block in `CLAUDE.md` / `AGENTS.md` (created when absent, replaced in
+  place on re-install, stripped exactly by `uninstall`, file never
+  deleted), plus a one-line reminder in every startup injection as a
+  fallback for sessions that never read the file.
+- **ARCHITECTURE.md** — the technical story (CLS two-layer memory,
+  watermark-idempotent consolidation, retrieval-time forgetting, live
+  share, cross-machine convergence, the lifecycle-evidence program),
+  shipped in the npm tarball. README rewritten around it; issue
+  templates + CONTRIBUTING refresh (stale MIT wording → AGPL).
+
+### Fixed
+
+- **Windows one-line installer** (`irm … install.ps1 | iex`) aborted on
+  every Windows PowerShell 5.1 shell: nested quotes in the
+  `node -p` version probe were mangled by 5.1's native-argument quoting,
+  so the check always read 0 and the installer refused valid Node
+  installs. It now parses `node -v` in PowerShell itself. (Verified
+  end-to-end on 5.1.)
+
 ## [2.1.0] — 2026-06-10
 
 Additive, backward-compatible. Centerpiece: the lifecycle-evidence
