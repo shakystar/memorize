@@ -88,7 +88,9 @@ export async function writeJson(filePath: string, value: unknown): Promise<void>
 export async function readJson<T>(filePath: string): Promise<T | undefined> {
   try {
     const raw = await fs.readFile(filePath, 'utf8');
-    return JSON.parse(raw) as T;
+    // Tolerate a leading UTF-8 BOM: Windows editors and PowerShell 5.1
+    // (ConvertTo-Json | Out-File) prepend one; memorize itself never writes it.
+    return JSON.parse(raw.charCodeAt(0) === 0xfeff ? raw.slice(1) : raw) as T;
   } catch (error) {
     if (isEnoent(error)) {
       return undefined;
