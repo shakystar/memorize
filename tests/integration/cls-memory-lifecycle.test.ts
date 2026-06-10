@@ -14,11 +14,17 @@ import {
   consolidate,
   readLastConsolidateAttempt,
 } from '../../src/services/consolidate-service.js';
+import { SEMANTIC_CONTRADICTION_REASON_PREFIX } from '../../src/services/contradiction-service.js';
 import {
   reinforceInjectedMemories,
   retrieveMemoryContext,
 } from '../../src/services/memory-retrieval-service.js';
 import {
+  buildMemoryBehaviorReport,
+  listMemoryLifecycle,
+} from '../../src/services/memory-telemetry-service.js';
+import {
+  bumpMemoryInjections,
   listRecentObservations,
   listValidMemories,
   rebuildProjectProjection,
@@ -323,6 +329,65 @@ describe('CLS capture → consolidate → retrieve (in-process)', () => {
     expect(types.filter((t) => t === 'memory.superseded')).toHaveLength(1);
   });
 
+  it('#62 — per-memory lifecycle rows and the kind x behavior report', async () => {
+    await seedProject();
+    await captureWrite('/repo/src/a.ts');
+    const seedDecision: Consolidator = {
+      async extract() {
+        return [{ kind: 'decision' as const, text: 'Use sqlite', salience: 8 }];
+      },
+    };
+    await consolidate({ projectId, actor: 'test', consolidator: seedDecision });
+    const oldMemory = listValidMemories(projectId)[0]!.memory;
+
+    // Supersede it with a contradiction-marked reason (what the semantic
+    // detector writes) so the telemetry classifies it as contradicted.
+    await captureWrite('/repo/src/b.ts');
+    const contradicting: Consolidator = {
+      async extract() {
+        return [
+          {
+            kind: 'decision' as const,
+            text: 'Use postgres',
+            salience: 8,
+            supersedesMemoryId: oldMemory.id,
+            supersedeReason: `${SEMANTIC_CONTRADICTION_REASON_PREFIX}database engine`,
+          },
+        ];
+      },
+    };
+    await consolidate({ projectId, actor: 'test', consolidator: contradicting });
+    const newMemory = listValidMemories(projectId)[0]!.memory;
+
+    // Mid-session live-share injection: counter only, NO reinforcement stamp
+    // (telemetry must not change retrieval ranking).
+    bumpMemoryInjections(projectId, [newMemory.id]);
+
+    const rows = await listMemoryLifecycle(projectId);
+    const oldRow = rows.find((row) => row.id === oldMemory.id)!;
+    expect(oldRow.supersededBy).toBe(newMemory.id);
+    expect(oldRow.contradicted).toBe(true);
+    expect(oldRow.supersededAt).toBeTruthy();
+    expect(oldRow.ageAtInvalidationDays).toBeGreaterThanOrEqual(0);
+    const newRow = rows.find((row) => row.id === newMemory.id)!;
+    expect(newRow.injectionCount).toBe(1);
+    expect(newRow.lastAccessedAt).toBeUndefined();
+    expect(newRow.contradicted).toBe(false);
+    expect(newRow.invalidAt).toBeUndefined();
+
+    const report = await buildMemoryBehaviorReport(projectId);
+    expect(report.memories).toBe(2);
+    expect(report.byKind.decision).toMatchObject({
+      count: 2,
+      injectedMemories: 1,
+      totalInjections: 1,
+      superseded: 1,
+      contradicted: 1,
+      deduped: 0,
+    });
+    expect(report.byKind.decision!.ageAtInvalidationDays).toHaveLength(1);
+  });
+
   it('retrieves ranked memories + observation tail, reinforces, and carry-over survives rebuild', async () => {
     await seedProject();
     await captureWrite('/repo/src/a.ts');
@@ -332,21 +397,27 @@ describe('CLS capture → consolidate → retrieve (in-process)', () => {
     expect(retrieved.memories.length).toBeGreaterThan(0);
     expect(retrieved.observations.length).toBeGreaterThan(0);
 
-    // Reinforcement stamps last_accessed_at on the projection only.
+    // Reinforcement stamps last_accessed_at on the projection only — and
+    // counts the injection (#62 telemetry rides the same statement).
     reinforceInjectedMemories(projectId, retrieved.memories);
     const memoryId = retrieved.memories[0]!.memory.id;
-    const stamped = () =>
-      (
-        getDb(projectId)
-          .prepare('SELECT last_accessed_at FROM memories WHERE id = ?')
-          .get(memoryId) as { last_accessed_at: string | null }
-      ).last_accessed_at;
-    expect(stamped()).toBeTruthy();
-    const stampBefore = stamped();
+    const accessState = () =>
+      getDb(projectId)
+        .prepare(
+          'SELECT last_accessed_at, injection_count FROM memories WHERE id = ?',
+        )
+        .get(memoryId) as {
+        last_accessed_at: string | null;
+        injection_count: number;
+      };
+    expect(accessState().last_accessed_at).toBeTruthy();
+    expect(accessState().injection_count).toBe(1);
+    const stateBefore = accessState();
 
-    // Routine rebuild (the every-write path) must NOT lose the stamp (⑤).
+    // Routine rebuild (the every-write path) must NOT lose the stamp (⑤)
+    // nor the injection counter (#62).
     await rebuildProjectProjection(projectId);
-    expect(stamped()).toBe(stampBefore);
+    expect(accessState()).toEqual(stateBefore);
 
     // The renderer surfaces the long-term layer.
     const rendered = renderClaudeStartupContext({

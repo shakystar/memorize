@@ -14,6 +14,7 @@ import {
 import { getDb } from '../storage/db.js';
 import { appendEvent, readEventsSince } from '../storage/event-store.js';
 import {
+  bumpMemoryInjections,
   getSession,
   listOpenConflicts,
   listRecentObservations,
@@ -272,6 +273,7 @@ export async function buildLiveUpdate(params: {
       // out of context) — they are new information to the running session.
       // The per-session share watermark already prevents re-injection.
       memories.push({
+        id: memory.id,
         kind: memory.kind,
         text: memory.text,
         salience: memory.salience,
@@ -445,5 +447,19 @@ export async function composeLiveUpdate(params: {
     update.conflicts,
   );
 
-  return channel.deliver(update, { agent: params.agent });
+  const rendered = channel.deliver(update, { agent: params.agent });
+  // #62 — count delivered memories as injections. After deliver so an
+  // undelivered update (custom channel declining) is not counted; best-effort
+  // and swallowed like everything else on this never-throw path.
+  if (rendered !== undefined && update.memories.length > 0) {
+    try {
+      bumpMemoryInjections(
+        params.projectId,
+        update.memories.map((memory) => memory.id),
+      );
+    } catch {
+      // Telemetry only — never disturb the hook.
+    }
+  }
+  return rendered;
 }
