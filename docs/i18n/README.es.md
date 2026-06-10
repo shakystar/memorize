@@ -2,9 +2,9 @@
 
 [![npm](https://img.shields.io/npm/v/%40shakystar%2Fmemorize)](https://www.npmjs.com/package/@shakystar/memorize)
 [![CI](https://github.com/shakystar/memorize/actions/workflows/ci.yml/badge.svg)](https://github.com/shakystar/memorize/actions/workflows/ci.yml)
-[![license](https://img.shields.io/badge/license-AGPL--3.0--or--later-blue)](./LICENSE)
+[![license](https://img.shields.io/badge/license-AGPL--3.0--or--later-blue)](../../LICENSE)
 
-[English](./README.md) | [한국어](./README.ko.md) | [日本語](./README.ja.md) | [简体中文](./README.zh-CN.md) | **Español**
+[English](../../README.md) | [한국어](./README.ko.md) | [日本語](./README.ja.md) | [简体中文](./README.zh-CN.md) | **Español**
 
 > Un cerebro de proyecto persistente compartido entre tú, Claude Code y
 > Codex — local-first, event-sourced, inspirado en cómo funciona
@@ -50,7 +50,7 @@ La historia completa — el diseño de memoria CLS de dos capas, la
 consolidación idempotente por watermark, el olvido en tiempo de
 recuperación, el programa de lifecycle-evidence que evoluciona el
 esquema con datos de dogfooding — está en
-**[ARCHITECTURE.md](./ARCHITECTURE.md)** (en inglés).
+**[ARCHITECTURE.md](../ARCHITECTURE.md)** (en inglés).
 
 ### Lo que tu agente ve al iniciar sesión
 
@@ -157,7 +157,7 @@ memorize consolidate       # ejecuta una consolidación de memoria ahora
 
 Ejecuta `memorize` a secas para ver el resumen de uso. El resto de
 comandos (setup, install, memory import, hook, projection rebuild, sync,
-etc.) están documentados en [AGENT_GUIDE.md](./AGENT_GUIDE.md) — el
+etc.) están documentados en [AGENT_GUIDE.md](../../AGENT_GUIDE.md) — el
 archivo que tu IA lee cuando necesita detalle.
 
 ## Solución de problemas
@@ -185,11 +185,11 @@ archivo que tu IA lee cuando necesita detalle.
 ## Para asistentes de IA
 
 Si eres un asistente de código IA y el usuario te pidió configurar
-memorize, sigue [guides/AI_SETUP.md](./guides/AI_SETUP.md) — los pasos
+memorize, sigue [guides/AI_SETUP.md](../../guides/AI_SETUP.md) — los pasos
 idempotentes, el flujo de absorción de contexto preexistente y la regla
 de oro (memorize es la única fuente de verdad; no dupliques su estado en
 tu propio sistema de memoria). Para el comportamiento completo de los
-comandos, ve [AGENT_GUIDE.md](./AGENT_GUIDE.md).
+comandos, ve [AGENT_GUIDE.md](../../AGENT_GUIDE.md).
 
 ## Estado
 
@@ -215,7 +215,7 @@ dentro de una versión mayor no requiere migración manual de datos.
   `consolidate --report` — instrumentación que puede cambiar cuando se
   decida la taxonomía.
 
-Historial de versiones en [CHANGELOG.md](./CHANGELOG.md).
+Historial de versiones en [CHANGELOG.md](../../CHANGELOG.md).
 
 ## Comunidad
 
@@ -228,8 +228,8 @@ debates de diseño y preguntas de "cómo se hace…" son bienvenidos:
   para direcciones de diseño e ideas abiertas (los debates sobre la
   taxonomía de memoria viven ahí).
 
-Ve [CONTRIBUTING.md](./CONTRIBUTING.md) para el flujo de desarrollo.
+Ve [CONTRIBUTING.md](../../.github/CONTRIBUTING.md) para el flujo de desarrollo.
 
 ## Licencia
 
-AGPL-3.0-or-later. Ver [LICENSE](./LICENSE).
+AGPL-3.0-or-later. Ver [LICENSE](../../LICENSE).

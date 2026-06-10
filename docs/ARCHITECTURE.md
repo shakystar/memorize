@@ -4,8 +4,8 @@ How memorize gives N coding agents (Claude Code, Codex, …) one shared,
 persistent project brain — locally, with no server, modeled loosely on
 how biological memory actually works.
 
-This is the technical companion to the [README](./README.md). For
-command-level reference, see [AGENT_GUIDE.md](./AGENT_GUIDE.md).
+This is the technical companion to the [README](../README.md). For
+command-level reference, see [AGENT_GUIDE.md](../AGENT_GUIDE.md).
 
 ---
 

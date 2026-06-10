@@ -4,7 +4,7 @@
 [![CI](https://github.com/shakystar/memorize/actions/workflows/ci.yml/badge.svg)](https://github.com/shakystar/memorize/actions/workflows/ci.yml)
 [![license](https://img.shields.io/badge/license-AGPL--3.0--or--later-blue)](./LICENSE)
 
-**English** | [한국어](./README.ko.md) | [日本語](./README.ja.md) | [简体中文](./README.zh-CN.md) | [Español](./README.es.md)
+**English** | [한국어](./docs/i18n/README.ko.md) | [日本語](./docs/i18n/README.ja.md) | [简体中文](./docs/i18n/README.zh-CN.md) | [Español](./docs/i18n/README.es.md)
 
 > One persistent project brain shared between you, Claude Code, and
 > Codex — local-first, event-sourced, modeled on how biological memory
@@ -48,7 +48,7 @@ required.
 The deeper story — the two-layer CLS memory design, watermark-idempotent
 consolidation, retrieval-time forgetting, the lifecycle-evidence program
 that evolves the schema from dogfooding data — is in
-**[ARCHITECTURE.md](./ARCHITECTURE.md)**.
+**[ARCHITECTURE.md](./docs/ARCHITECTURE.md)**.
 
 ### What your agent sees at session start
 
@@ -225,7 +225,7 @@ debates, and "how do I…" questions are all welcome:
   for design directions and open-ended ideas (the memory-taxonomy
   debates live there).
 
-See [CONTRIBUTING.md](./CONTRIBUTING.md) for the developer workflow.
+See [CONTRIBUTING.md](./.github/CONTRIBUTING.md) for the developer workflow.
 
 ## License
 

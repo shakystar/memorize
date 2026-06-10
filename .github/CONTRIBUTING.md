@@ -49,7 +49,7 @@ never run them against your real `~/.memorize`.
 ## License and relicensing
 
 Memorize is released under
-[AGPL-3.0-or-later](./LICENSE).
+[AGPL-3.0-or-later](../LICENSE).
 
 By submitting a contribution (pull request, patch, issue with code, or
 any other form) to this repository, you agree that:

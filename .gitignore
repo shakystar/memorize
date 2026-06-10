@@ -7,8 +7,11 @@
 # OMC runtime/state
 .omc/
 
-# Internal design and planning docs (kept local only)
-/docs/
+# Local working docs (plans, specs, superpowers, ...) stay untracked by default;
+# only the explicitly whitelisted public docs below are committed.
+/docs/*
+!/docs/ARCHITECTURE.md
+!/docs/i18n/
 
 # Git worktrees (subagent workspaces)
 /.worktrees/
