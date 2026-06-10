@@ -7,6 +7,51 @@ loosely. The project adheres to [Semantic Versioning](https://semver.org/);
 major-version bumps are reserved for breaking changes to the on-disk event
 log layout or the public CLI surface.
 
+## [2.1.0] — 2026-06-10
+
+Additive, backward-compatible. Centerpiece: the lifecycle-evidence
+instrumentation agreed in discussion #61 — collect data first, decide the
+memory-taxonomy schema later. Nothing here changes injection, dedup, or
+contradiction behavior.
+
+### Added
+
+- **Observe-only lifecycle evidence on extracted memories** (#57, PR #64).
+  The consolidation extractor (HTTP and host-CLI backends, one shared
+  prompt) may attach `obsoleteWhen` (free-form expiry condition),
+  `kindMisfit` + `kindMisfitReason`, `supersedesNote`, and `tags` to each
+  memory. Persisted on the `memory.consolidated` event payload (round-trips
+  through projection rebuild and sync with no schema change); read by NO
+  consumer. A missing or malformed field degrades to "absent" — never an
+  extraction failure, and the consolidation watermark behaves exactly as
+  before.
+- **Behavioral lifecycle telemetry** (#62, PR #65). New
+  `memories.injection_count` projection column (migration v9, observe-only,
+  carried across routine rebuilds like `last_accessed_at`): startup
+  injection counts via the existing reinforcement stamp; mid-session
+  live-share delivery counts WITHOUT touching `last_accessed_at` (telemetry
+  must not change retrieval ranking). New `memory-telemetry-service` exposes
+  per-memory lifecycle rows (superseded/contradicted timestamps + reasons)
+  and a kind × behavior aggregation.
+- **`memorize consolidate --report`** — dumps both evidence halves as JSON:
+  extraction-side (#57: obsolete_when presence × kind, kind-misfit rate +
+  reasons, tag × kind) and behavioral (#62: injections, superseded,
+  contradicted, deduped, age-at-invalidation distribution per kind).
+
+### Changed
+
+- **doctor: codex trust gap is now inferred, not just described** (#37,
+  PR #66). When memorize hooks are registered in `~/.codex/hooks.json` and
+  the bound project has sessions from other agents but none from codex,
+  `install.codex` raises a `warn` with the one-time interactive approval as
+  the fix (codex silently skips externally-written hooks until approved;
+  upstream non-interactive trust grant tracked in openai/codex#21615).
+  Fresh installs (no sessions at all) are not flagged.
+- AGENT_GUIDE: new `memorize consolidate` section (the command existed
+  since 2.0.0 but was undocumented); `install codex` gains an ACTION
+  REQUIRED block about hook approval. guides/AI_SETUP.md instructs the
+  installing agent to relay the approval step to the user.
+
 ## [2.0.0] — 2026-06-10
 
 The first AGPL release. Supersedes 1.1.0 (published briefly under MIT, then

@@ -134,7 +134,7 @@ behaviour, flags, and on-disk layout, see
 
 ## Status
 
-Memorize is at `1.0.0-rc.0` — first release candidate. The 1.0
+Memorize is on the `2.x` line (AGPL-3.0-or-later since 2.0.0). The
 compatibility promise covers:
 
 - The on-disk event log layout (`<MEMORIZE_ROOT>/projects/<pid>/...`)
@@ -142,18 +142,21 @@ compatibility promise covers:
 - The day-to-day CLI surface listed above.
 - The hook contracts written by `install claude` and `install codex`.
 
-Within the 1.x line we will not break those. The event log is versioned
+Within a major line we will not break those. The event log is versioned
 and projections are regenerable, so upgrades within a major version do
 not require manual data migration.
 
-**Experimental** (subject to change in a 1.x minor release):
+**Experimental** (subject to change in a minor release):
 
-- `memorize project sync [--push|--pull|--bind|--remote-path]`. The file
-  transport works and is roundtrip-tested, but real cross-machine
-  dogfooding is post-1.0. Use it for local experimentation; do not
-  depend on the wire format yet.
+- `memorize project sync [--push|--pull|--bind|--remote-path]` — the file
+  transport works and is roundtrip-tested; the HTTP relay client ships
+  but needs a separate relay server (forthcoming). Do not depend on the
+  wire format yet.
+- The observe-only lifecycle-evidence fields on consolidated memories
+  and the `consolidate --report` shape (#57/#62) — instrumentation that
+  may change as the taxonomy decision lands.
 
-See [CHANGELOG.md](./CHANGELOG.md) for what landed in this RC.
+See [CHANGELOG.md](./CHANGELOG.md) for release history.
 
 ## Contributing
 
