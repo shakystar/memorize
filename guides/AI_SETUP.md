@@ -95,6 +95,14 @@ no task lists, no summaries.**
      even when other orchestration layers (OMX, etc.) are installed.
      The codex hook is a no-op in directories that are not bound to a
      memorize project.
+   - **Codex only — tell the user to approve the hooks once.** Codex
+     silently skips externally-written hooks (no error, no log) until
+     the user approves them in an interactive codex session. After
+     `install codex`, instruct the user: "start `codex` interactively
+     once and accept the hook approval prompt — until then memorize
+     records nothing from codex sessions." `memorize doctor` warns
+     when registered hooks have apparently never fired. (Upstream
+     fix tracked in openai/codex#21615.)
 
 4. **Verify**:
 

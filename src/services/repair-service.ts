@@ -11,7 +11,11 @@ import {
   getConsolidationStatus,
 } from './consolidate-service.js';
 import { hasUnmigratedNdjson } from './migrate-service.js';
-import { getMemoryIndex, rebuildProjectProjection } from './projection-store.js';
+import {
+  getMemoryIndex,
+  listSessions,
+  rebuildProjectProjection,
+} from './projection-store.js';
 import { getBoundProjectId, readProject, requireBoundProjectId } from './project-service.js';
 
 export async function inspectProject(cwd: string): Promise<string> {
@@ -173,6 +177,7 @@ async function checkClaudeInstall(
 
 async function checkCodexInstall(
   _cwd: string,
+  projectId?: string,
 ): Promise<DoctorCheck | undefined> {
   const hooksPath = path.join(os.homedir(), '.codex', 'hooks.json');
   let raw: string;
@@ -235,12 +240,36 @@ async function checkCodexInstall(
       fix: 'memorize install codex',
     };
   }
-  // Registration is the most doctor can verify: codex keeps its hook
-  // trust state internal and SILENTLY skips externally-written hooks
-  // until the user approves them once in an interactive session
-  // (verified live against codex v0.137.0, 2026-06-08). Carry that
-  // caveat in the ok message so "doctor says ok but codex records
-  // nothing" has a visible explanation.
+  // Registration is the most doctor can verify DIRECTLY: codex keeps its
+  // hook trust state internal and SILENTLY skips externally-written hooks
+  // until the user approves them once in an interactive session (verified
+  // live against codex v0.137.0, 2026-06-08; upstream fix tracked in
+  // openai/codex#21615). #37 — INFER the trust gap from the bound project:
+  // hooks registered + other agents recorded sessions + codex never did →
+  // the hooks have likely never fired. The other-agents guard keeps a
+  // fresh install (no sessions at all) from being flagged.
+  if (projectId) {
+    try {
+      const sessions = listSessions(projectId);
+      const codexSeen = sessions.some((session) => session.actor === 'codex');
+      const othersSeen = sessions.some((session) => session.actor !== 'codex');
+      if (!codexSeen && othersSeen) {
+        return {
+          id: 'install.codex',
+          label: 'Codex integration',
+          status: 'warn',
+          message:
+            'memorize hooks are registered in ~/.codex/hooks.json, but no codex session has ever been ' +
+            'recorded in this project (other agents have) — codex silently skips externally-written ' +
+            'hooks until they are approved once in an interactive session.',
+          fix: 'Run codex interactively once and approve the memorize hooks when prompted',
+        };
+      }
+    } catch {
+      // Heuristic only — a projection read failure must not fail doctor;
+      // fall through to the registration-level ok below.
+    }
+  }
   return {
     id: 'install.codex',
     label: 'Codex integration',
@@ -573,7 +602,7 @@ export async function doctor(cwd: string): Promise<DoctorReport> {
   const claudeCheck = await checkClaudeInstall(cwd);
   if (claudeCheck) checks.push(claudeCheck);
 
-  const codexCheck = await checkCodexInstall(cwd);
+  const codexCheck = await checkCodexInstall(cwd, projectId);
   if (codexCheck) checks.push(codexCheck);
 
   const gitCheck = await checkGitRedactionRisk(cwd);
