@@ -545,6 +545,30 @@ directly. See `src/services/hook-service.ts` for the stdin contract.
 
 Lists all open conflicts for the bound project as JSON.
 
+### `memorize search "<query>" [--limit N] [--lexical] [--json]`
+
+Searches the bound project's memory (consolidated memories, tasks,
+rules/topics). Hybrid by default: FTS5 lexical always, with semantic
+reranking joining when an embeddings endpoint is configured;
+`--lexical` (boolean) forces pure FTS. `--limit` (single) caps the hit
+count. Query punctuation is treated literally — input is
+injection-proof by construction.
+
+### `memorize export [--out <file>]`
+
+Streams the project's full event log as NDJSON — to `--out <file>`
+(single) when given, else to stdout for piping. This is the
+backup/inspection primitive: the event log is the only source of
+truth, so an export IS a complete project backup.
+
+### `memorize migrate` / `memorize migrate cleanup`
+
+One-time migration of a legacy NDJSON event store (pre-SQLite layouts)
+into `memorize.db`. The original files are kept as an `events.bak/`
+safety net; `migrate cleanup` removes that backup once you trust the
+migrated store. Both are idempotent and safe on already-migrated
+projects (`doctor` tells you if a migration is pending).
+
 ### `memorize events validate`
 
 Reads every event ndjson for the current project and reports corrupt
