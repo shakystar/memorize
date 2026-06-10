@@ -166,6 +166,35 @@ git redaction risk (`.memorize/` in `.gitignore`), install state.
 
 Exit code: `1` when status is not `ok`. Use `--json` for scripting.
 
+### `memorize consolidate [--session <id>] [--boundary <label>] [--report]`
+
+Runs one memory-consolidation boundary for the project bound to cwd:
+collects observations past the watermark, extracts consolidated
+memories through the configured backend (see the LLM env section), and
+appends them as events. This is the same command the boundary hooks
+(SessionStart catch-up / PostCompact / SessionEnd) spawn as a detached
+background child — running it by hand is equally valid and idempotent
+(an already-consumed window is a clean no-op).
+
+- `--session <id>` (single) — attribute the consolidated events to that
+  session and its agent actor.
+- `--boundary <label>` (single) — telemetry label for the recorded
+  attempt (`session-start | post-compact | session-end | manual`); junk
+  or missing values read as `manual` and never fail the run.
+- `--report` (boolean) — do NOT consolidate; print the observed
+  lifecycle-evidence distribution as JSON instead (#57): per kind the
+  memory count, how many carry `obsoleteWhen`, the kind-misfit count and
+  tag counts, plus the verbatim `obsoleteWhen` conditions and misfit
+  reasons. Read-only; includes superseded/deduped rows because the
+  evidence is about how memories lived, not what is currently valid.
+
+The extractor may attach observe-only lifecycle-evidence fields to each
+memory (`obsoleteWhen`, `kindMisfit` + `kindMisfitReason`,
+`supersedesNote`, `tags`). They are persisted and surfaced by
+`--report`, but no consumer reads them — injection, dedup, and
+contradiction detection key on `kind` exactly as before, and a missing
+or malformed field never fails an extraction.
+
 ### `memorize project setup`
 
 Idempotent adoption command. Use this for existing projects.

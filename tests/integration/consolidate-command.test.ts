@@ -129,4 +129,50 @@ describe('memorize consolidate (CLI command — #46 Part A)', () => {
     expect(result.status).toBe(1);
     expect(result.stderr).toContain('No project bound');
   });
+
+  it('--report dumps the #57 lifecycle-evidence distribution without running a boundary', async () => {
+    const start = runCli(['hook', 'claude', 'SessionStart'], {
+      cwd: sandbox,
+      hook_event_name: 'SessionStart',
+      session_id: 'consolidate-cmd-uuid-3',
+    });
+    expect(start.status).toBe(0);
+    const write = runCli(['hook', 'claude', 'PostToolUse'], {
+      cwd: sandbox,
+      hook_event_name: 'PostToolUse',
+      session_id: 'consolidate-cmd-uuid-3',
+      tool_name: 'Write',
+      tool_input: { file_path: join(sandbox, 'feature.ts') },
+    });
+    expect(write.status).toBe(0);
+    expect(runCli(['consolidate']).status).toBe(0);
+
+    const report = runCli(['consolidate', '--report']);
+    expect(report.status).toBe(0);
+    const parsed = JSON.parse(report.stdout) as {
+      memories: number;
+      byKind: Record<
+        string,
+        { count: number; withObsoleteWhen: number; kindMisfit: number }
+      >;
+      obsoleteWhen: unknown[];
+      kindMisfitReasons: unknown[];
+    };
+    // Rule-based extractor emits no evidence fields — presence counters are
+    // all zero, but the shape is complete and counts the real memories.
+    expect(parsed.memories).toBeGreaterThan(0);
+    expect(parsed.byKind.progress!.count).toBeGreaterThan(0);
+    expect(parsed.byKind.progress!.withObsoleteWhen).toBe(0);
+    expect(parsed.obsoleteWhen).toEqual([]);
+    expect(parsed.kindMisfitReasons).toEqual([]);
+
+    // --report is read-only: the recorded last attempt is still the boundary
+    // run above, not a new one.
+    process.env.MEMORIZE_ROOT = memorizeRoot;
+    closeAll();
+    const projectDirs = await readdir(join(memorizeRoot, 'projects'));
+    const attempt = readLastConsolidateAttempt(projectDirs[0]!);
+    expect(attempt?.outcome).toBe('ok');
+    closeAll();
+  });
 });

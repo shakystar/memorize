@@ -133,6 +133,74 @@ describe('parseExtractedMemories (defensive LLM reply parsing)', () => {
   });
 });
 
+describe('parseExtractedMemories — #57 observe-only lifecycle evidence', () => {
+  it('keeps well-formed evidence fields; tags are trimmed, lowercased, deduped', () => {
+    const parsed = parseExtractedMemories(
+      JSON.stringify([
+        {
+          kind: 'progress',
+          text: 'Gate before merge: run verify:full',
+          salience: 9,
+          obsoleteWhen: '  when the merge happens  ',
+          kindMisfit: true,
+          kindMisfitReason: 'standing constraint, not progress',
+          supersedesNote: 'replaces the earlier informal gate note',
+          tags: [' Constraint ', 'GATE', 'constraint'],
+        },
+      ]),
+    );
+    expect(parsed[0]).toMatchObject({
+      obsoleteWhen: 'when the merge happens',
+      kindMisfit: true,
+      kindMisfitReason: 'standing constraint, not progress',
+      supersedesNote: 'replaces the earlier informal gate note',
+      tags: ['constraint', 'gate'],
+    });
+  });
+
+  it('drops malformed evidence WITHOUT failing the entry (#43 tolerance contract)', () => {
+    const parsed = parseExtractedMemories(
+      JSON.stringify([
+        {
+          kind: 'decision',
+          text: 'ok',
+          salience: 5,
+          obsoleteWhen: 42, // wrong type → absent
+          kindMisfit: 'yes', // not boolean true → absent
+          kindMisfitReason: 'reason without the flag', // dropped with the flag
+          supersedesNote: '   ', // blank → absent
+          tags: 'constraint', // not an array → absent
+        },
+      ]),
+    );
+    expect(parsed).toHaveLength(1);
+    expect(parsed[0]).toEqual({ kind: 'decision', text: 'ok', salience: 5 });
+  });
+
+  it('filters junk inside tags and caps the count', () => {
+    const parsed = parseExtractedMemories(
+      JSON.stringify([
+        {
+          kind: 'progress',
+          text: 'ok',
+          salience: 4,
+          tags: [1, null, ' a ', 'b', '', 'c', 'd', 'e', 'f'],
+        },
+      ]),
+    );
+    expect(parsed[0]!.tags).toEqual(['a', 'b', 'c', 'd', 'e']);
+  });
+
+  it('an all-junk tags array reads as absent, not empty', () => {
+    const parsed = parseExtractedMemories(
+      JSON.stringify([
+        { kind: 'progress', text: 'ok', salience: 4, tags: [7, null, '  '] },
+      ]),
+    );
+    expect(parsed[0]!.tags).toBeUndefined();
+  });
+});
+
 describe('resolveLlmConfig (key-optional — decision ①)', () => {
   it('returns undefined without a key (rule-based fallback path)', () => {
     expect(resolveLlmConfig({})).toBeUndefined();
