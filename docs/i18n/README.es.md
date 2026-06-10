@@ -153,12 +153,16 @@ que podrías usar como humano:
 
 ```sh
 memorize doctor            # diagnostica proyecto + integraciones
-memorize project show      # resumen del proyecto vinculado (JSON)
-memorize task list         # lista tareas (--status para filtrar)
-memorize task resume       # carga el contexto inicial de la tarea
-memorize task handoff ...  # registra un traspaso al siguiente agente
+memorize session activity  # ¿qué hacen mis otras sesiones?
 memorize consolidate       # ejecuta una consolidación de memoria ahora
+memorize search <query>    # busca en la memoria del proyecto
+memorize project show      # resumen del proyecto vinculado (JSON)
+memorize version           # versión del binario que se ejecutó
 ```
+
+Las tareas y traspasos (`memorize task …`) son una capa opcional de
+coordinación explícita entre agentes — la memoria ambiental no las
+necesita, y una lista de tareas vacía es normal.
 
 Ejecuta `memorize` a secas para ver el resumen de uso. El resto de
 comandos (setup, install, memory import, hook, projection rebuild, sync,
