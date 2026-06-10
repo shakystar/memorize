@@ -5,6 +5,7 @@ import { spawnSync } from 'node:child_process';
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
+import { readLastConsolidateAttempt } from '../../src/services/consolidate-service.js';
 import { closeAll } from '../../src/storage/db.js';
 import { readEvents } from '../../src/storage/event-store.js';
 
@@ -80,6 +81,47 @@ describe('memorize consolidate (CLI command — #46 Part A)', () => {
     // Watermark advanced → a second run is a clean no-op (exit 0).
     const again = runCli(['consolidate']);
     expect(again.status).toBe(0);
+  });
+
+  it('accepts --boundary and records it; junk values fall back to manual (#51)', async () => {
+    const start = runCli(['hook', 'claude', 'SessionStart'], {
+      cwd: sandbox,
+      hook_event_name: 'SessionStart',
+      session_id: 'consolidate-cmd-uuid-2',
+    });
+    expect(start.status).toBe(0);
+    const write = runCli(['hook', 'claude', 'PostToolUse'], {
+      cwd: sandbox,
+      hook_event_name: 'PostToolUse',
+      session_id: 'consolidate-cmd-uuid-2',
+      tool_name: 'Write',
+      tool_input: { file_path: join(sandbox, 'feature.ts') },
+    });
+    expect(write.status).toBe(0);
+
+    const result = runCli(['consolidate', '--boundary', 'post-compact']);
+    expect(result.status).toBe(0);
+
+    process.env.MEMORIZE_ROOT = memorizeRoot;
+    closeAll();
+    const projectDirs = await readdir(join(memorizeRoot, 'projects'));
+    const attempt = readLastConsolidateAttempt(projectDirs[0]!);
+    expect(attempt?.boundary).toBe('post-compact');
+    expect(attempt?.outcome).toBe('ok');
+    expect(attempt?.backend).toBe('rule-based'); // MEMORIZE_LLM_BACKEND=off
+    closeAll();
+    delete process.env.MEMORIZE_ROOT;
+
+    // Junk boundary value must not fail the run — it reads as 'manual'.
+    const junk = runCli(['consolidate', '--boundary', 'bogus-label']);
+    expect(junk.status).toBe(0);
+
+    process.env.MEMORIZE_ROOT = memorizeRoot;
+    closeAll();
+    const attempt2 = readLastConsolidateAttempt(projectDirs[0]!);
+    expect(attempt2?.boundary).toBe('manual');
+    expect(attempt2?.outcome).toBe('noop'); // watermark already advanced
+    closeAll();
   });
 
   it('fails cleanly when the cwd is not bound to a project', async () => {

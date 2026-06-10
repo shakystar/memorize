@@ -4,6 +4,7 @@ import path from 'node:path';
 import spawn from 'cross-spawn';
 import which from 'which';
 
+import { nowIso } from '../domain/common.js';
 import {
   type ConsolidatedMemory,
   type ConsolidatedMemoryKind,
@@ -42,6 +43,15 @@ import {
  */
 
 const WATERMARK_META_KEY = 'cls_consolidate_watermark';
+
+/**
+ * #51 — outcome of the LAST consolidation attempt (success AND failure),
+ * stored next to the watermark in the per-project meta table. Meta, not an
+ * event: attempts are machine-local operational telemetry, and retries of a
+ * failing boundary must not pollute the append-only log or sync to siblings.
+ * Single overwritten row — it is "last attempt", not a history.
+ */
+export const LAST_ATTEMPT_META_KEY = 'cls_consolidate_last_attempt';
 
 /** Upper bound on memories extracted per boundary (noise guard). */
 const MAX_MEMORIES_PER_BOUNDARY = 12;
@@ -491,6 +501,121 @@ function writeWatermark(projectId: string, eventId: string): void {
     .run(WATERMARK_META_KEY, eventId);
 }
 
+// --- attempt telemetry (#51) -------------------------------------------------
+
+export const CONSOLIDATE_BOUNDARIES = [
+  'session-start',
+  'post-compact',
+  'session-end',
+  'manual',
+] as const;
+
+/** Which boundary triggered an attempt (telemetry label only). */
+export type ConsolidateBoundary = (typeof CONSOLIDATE_BOUNDARIES)[number];
+
+export type ConsolidateAttemptOutcome =
+  | 'ok'
+  | 'noop'
+  | 'timeout'
+  | 'http-error'
+  | 'parse-error'
+  | 'lock-contention'
+  | 'error';
+
+export interface ConsolidateAttempt {
+  /** ISO timestamp of when the attempt finished. */
+  at: string;
+  boundary: ConsolidateBoundary;
+  /** llm | cli:claude | cli:codex | rule-based | custom (injected). */
+  backend: string;
+  outcome: ConsolidateAttemptOutcome;
+  /** observation.captured events past the watermark when the attempt ran;
+   *  -1 when the attempt failed before the count (e.g. lock contention). */
+  pendingObservations: number;
+  durationMs: number;
+  /** memory.consolidated events appended (success only). */
+  consolidated?: number;
+  /** Truncated failure message (failures only). */
+  error?: string;
+}
+
+/** Cap on the recorded error message — telemetry, not a stack archive. */
+const ATTEMPT_ERROR_MAX_CHARS = 300;
+
+/** Map a consolidation failure onto the #51 outcome vocabulary. */
+export function classifyConsolidateError(
+  error: unknown,
+): ConsolidateAttemptOutcome {
+  if (error instanceof ExtractionParseError) return 'parse-error';
+  const message = error instanceof Error ? error.message : String(error);
+  const name = error instanceof Error ? error.name : '';
+  if (message.startsWith('withFileLock')) return 'lock-contention';
+  // CLI extractor: "<command> CLI extractor timed out after Nms";
+  // HTTP extractor: AbortSignal.timeout rejects with name 'TimeoutError'.
+  if (name === 'TimeoutError' || /timed out/i.test(message)) return 'timeout';
+  if (/HTTP \d/.test(message)) return 'http-error';
+  return 'error';
+}
+
+export function readLastConsolidateAttempt(
+  projectId: string,
+): ConsolidateAttempt | undefined {
+  const row = getDb(projectId)
+    .prepare('SELECT value FROM meta WHERE key = ?')
+    .get(LAST_ATTEMPT_META_KEY) as { value: string } | undefined;
+  if (!row) return undefined;
+  try {
+    return JSON.parse(row.value) as ConsolidateAttempt;
+  } catch {
+    return undefined;
+  }
+}
+
+function writeLastConsolidateAttempt(
+  projectId: string,
+  attempt: ConsolidateAttempt,
+): void {
+  getDb(projectId)
+    .prepare(
+      'INSERT INTO meta (key, value) VALUES (?, ?) ' +
+        'ON CONFLICT(key) DO UPDATE SET value = excluded.value',
+    )
+    .run(LAST_ATTEMPT_META_KEY, JSON.stringify(attempt));
+}
+
+export interface ConsolidationStatus {
+  /** observation.captured events past the current watermark. */
+  pendingObservations: number;
+  /** created_at of the oldest pending observation, when any. */
+  oldestPendingAt?: string;
+  lastAttempt?: ConsolidateAttempt;
+}
+
+/** Consolidation health snapshot for `memorize doctor` (#51). */
+export function getConsolidationStatus(projectId: string): ConsolidationStatus {
+  const db = getDb(projectId);
+  const watermark = readWatermark(projectId);
+  let sinceSeq = 0;
+  if (watermark) {
+    const row = db
+      .prepare('SELECT seq FROM events WHERE id = ?')
+      .get(watermark) as { seq: number } | undefined;
+    if (row) sinceSeq = row.seq;
+  }
+  const pending = db
+    .prepare(
+      'SELECT COUNT(*) AS n, MIN(created_at) AS oldest FROM events ' +
+        "WHERE type = 'observation.captured' AND seq > ?",
+    )
+    .get(sinceSeq) as { n: number; oldest: string | null };
+  const lastAttempt = readLastConsolidateAttempt(projectId);
+  return {
+    pendingObservations: pending.n,
+    ...(pending.oldest ? { oldestPendingAt: pending.oldest } : {}),
+    ...(lastAttempt ? { lastAttempt } : {}),
+  };
+}
+
 // --- transcript tail ---------------------------------------------------------
 
 /**
@@ -585,10 +710,71 @@ export async function consolidate(params: {
   projectId: string;
   actor: string;
   sessionId?: string;
+  /** Boundary that triggered this attempt — telemetry label only (#51). */
+  boundary?: ConsolidateBoundary;
   /** Override extractor (tests). Defaults to LLM-if-configured else rules. */
   consolidator?: Consolidator;
 }): Promise<ConsolidateResult> {
-  return withFileLock(
+  const startedAt = Date.now();
+
+  // Backend is resolved BEFORE the lock so even a lock-contention failure
+  // records which extractor would have run (#51). Construction here has no
+  // side effects — nothing runs until extract() is called.
+  let consolidator: Consolidator;
+  let extractorKind: ConsolidateResult['extractor'];
+  let backendLabel: string;
+  if (params.consolidator) {
+    consolidator = params.consolidator;
+    extractorKind = 'custom';
+    backendLabel = 'custom';
+  } else {
+    const backend = resolveConsolidatorBackend();
+    if (backend.kind === 'llm') {
+      consolidator = new LlmConsolidator(backend.config);
+      extractorKind = 'llm';
+      backendLabel = 'llm';
+    } else if (backend.kind === 'cli') {
+      consolidator = new CliConsolidator({
+        command: backend.command,
+        ...(backend.timeoutMs ? { timeoutMs: backend.timeoutMs } : {}),
+      });
+      extractorKind = 'cli';
+      backendLabel = `cli:${backend.command}`;
+    } else {
+      consolidator = new RuleBasedConsolidator();
+      extractorKind = 'rule-based';
+      backendLabel = 'rule-based';
+    }
+  }
+
+  // -1 = the attempt failed before the count was taken (lock contention).
+  let pendingObservations = -1;
+
+  // #51: record how EVERY attempt ended — success AND failure — so a store
+  // with 0 memories can answer "why" instead of looking like "never ran".
+  // Best-effort: a failing telemetry write must never mask the attempt's
+  // own result or error.
+  const recordAttempt = (
+    outcome: ConsolidateAttemptOutcome,
+    extra: { consolidated?: number; error?: string } = {},
+  ): void => {
+    try {
+      writeLastConsolidateAttempt(params.projectId, {
+        at: nowIso(),
+        boundary: params.boundary ?? 'manual',
+        backend: backendLabel,
+        outcome,
+        pendingObservations,
+        durationMs: Date.now() - startedAt,
+        ...extra,
+      });
+    } catch {
+      // Swallow: telemetry only — the original outcome must propagate.
+    }
+  };
+
+  const runLocked = (): Promise<ConsolidateResult> =>
+    withFileLock(
     path.join(getProjectRoot(params.projectId), 'locks'),
     'consolidate',
     async () => {
@@ -597,6 +783,7 @@ export async function consolidate(params: {
       const rawObservationEvents = eventsSince.filter(
         (event) => event.type === 'observation.captured',
       );
+      pendingObservations = rawObservationEvents.length;
       if (rawObservationEvents.length === 0) return NOOP_RESULT;
 
       // Dedup guard for watermark loss (see consumedObservationIds): drop
@@ -625,28 +812,6 @@ export async function consolidate(params: {
       const existing = listValidMemories(params.projectId).map(
         (row) => row.memory,
       );
-
-      let consolidator: Consolidator;
-      let extractorKind: ConsolidateResult['extractor'];
-      if (params.consolidator) {
-        consolidator = params.consolidator;
-        extractorKind = 'custom';
-      } else {
-        const backend = resolveConsolidatorBackend();
-        if (backend.kind === 'llm') {
-          consolidator = new LlmConsolidator(backend.config);
-          extractorKind = 'llm';
-        } else if (backend.kind === 'cli') {
-          consolidator = new CliConsolidator({
-            command: backend.command,
-            ...(backend.timeoutMs ? { timeoutMs: backend.timeoutMs } : {}),
-          });
-          extractorKind = 'cli';
-        } else {
-          consolidator = new RuleBasedConsolidator();
-          extractorKind = 'rule-based';
-        }
-      }
 
       // Extractor failure (LLM timeout, HTTP error, unparseable reply)
       // intentionally propagates WITHOUT advancing the watermark — the next
@@ -737,5 +902,23 @@ export async function consolidate(params: {
       };
     },
     { holdTimeoutMs: CONSOLIDATE_LOCK_HOLD_TIMEOUT_MS },
+    );
+
+  let result: ConsolidateResult;
+  try {
+    result = await runLocked();
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    recordAttempt(classifyConsolidateError(error), {
+      error: message.slice(0, ATTEMPT_ERROR_MAX_CHARS),
+    });
+    throw error;
+  }
+  recordAttempt(
+    result.observationsProcessed > 0 ? 'ok' : 'noop',
+    result.observationsProcessed > 0
+      ? { consolidated: result.consolidated }
+      : {},
   );
+  return result;
 }
