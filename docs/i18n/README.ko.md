@@ -142,12 +142,16 @@ Node.js >= 22가 필요합니다. 설치 스크립트가 확인하고, 없으면
 
 ```sh
 memorize doctor            # 프로젝트 + 통합 상태 진단
-memorize project show      # 바인딩된 프로젝트 요약 출력 (JSON)
-memorize task list         # 태스크 목록 (--status로 필터)
-memorize task resume       # 현재 태스크의 시작 컨텍스트 로드
-memorize task handoff ...  # 다음 에이전트에게 핸드오프 기록
+memorize session activity  # 다른 세션들은 뭘 하고 있지?
 memorize consolidate       # 기억 통합 경계를 지금 한 번 실행
+memorize search <query>    # 프로젝트 기억 검색
+memorize project show      # 바인딩된 프로젝트 요약 출력 (JSON)
+memorize version           # 실제로 실행된 바이너리의 버전
 ```
+
+태스크와 핸드오프(`memorize task …`)는 에이전트 간 명시적 조정을 위한
+선택적 계층입니다 — 자동 기억은 이것들 없이 동작하며, 태스크 목록이
+비어 있는 것은 정상입니다.
 
 `memorize`만 치면 사용법 개요가 나옵니다. 나머지 모든 명령(setup,
 install, memory import, hook, projection rebuild, sync 등)은
