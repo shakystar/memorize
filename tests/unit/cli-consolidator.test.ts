@@ -247,10 +247,36 @@ describe('CliConsolidator (host-CLI extractor — #44)', () => {
       timeoutMs: 20,
       spawnImpl,
     });
+    // Explicit timeoutMs overrides the built-in default.
     await expect(consolidator.extract(sampleInput)).rejects.toThrow(
-      /timed out/,
+      /timed out after 20ms/,
     );
     expect(child.wasKilled).toBe(true);
+  });
+
+  it('defaults to the 90s host-CLI timeout when timeoutMs is unset (#55)', async () => {
+    vi.useFakeTimers();
+    try {
+      const child = new FakeChild();
+      // Child never produces output or exits on its own.
+      const { spawnImpl } = fakeSpawn(child);
+
+      const consolidator = new CliConsolidator({ command: 'claude', spawnImpl });
+      const pending = consolidator.extract(sampleInput);
+      const expectation = expect(pending).rejects.toThrow(
+        /timed out after 90000ms/,
+      );
+
+      // The old shared 20s HTTP default must NOT kill a real `claude -p`
+      // extraction (~31.5s measured) — still alive just before 90s.
+      await vi.advanceTimersByTimeAsync(89_999);
+      expect(child.wasKilled).toBe(false);
+      await vi.advanceTimersByTimeAsync(1);
+      expect(child.wasKilled).toBe(true);
+      await expectation;
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('rejects on spawn error (CLI missing at exec time)', async () => {

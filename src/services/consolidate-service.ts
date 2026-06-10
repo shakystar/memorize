@@ -138,7 +138,8 @@ export interface LlmConsolidatorConfig {
 
 export const DEFAULT_LLM_ENDPOINT = 'https://api.anthropic.com/v1';
 export const DEFAULT_LLM_MODEL = 'claude-haiku-4-5';
-/** Default; override via MEMORIZE_LLM_TIMEOUT_MS (local CPU models can need minutes). */
+/** HTTP default; override via MEMORIZE_LLM_TIMEOUT_MS (local CPU models can
+ *  need minutes). The host-CLI extractor has its own default (CLI_TIMEOUT_MS). */
 const LLM_TIMEOUT_MS = 20_000;
 
 /**
@@ -275,11 +276,20 @@ export type SpawnImpl = (
 
 export interface CliConsolidatorConfig {
   command: HostCliCommand;
-  /** Same semantics as the HTTP timeout. */
+  /** Same precedence as the HTTP timeout; backend-specific default (#55). */
   timeoutMs?: number;
   /** Test seam; defaults to cross-spawn. */
   spawnImpl?: SpawnImpl;
 }
+
+/**
+ * Host-CLI default; override via MEMORIZE_LLM_TIMEOUT_MS. Higher than the
+ * HTTP default: `claude -p` cold-starts in 3–10s and a real extraction takes
+ * tens of seconds (~31.5s measured), so 90s leaves margin. Since boundaries
+ * spawn consolidation detached (#46) this only reaps stuck children — it no
+ * longer protects interactive latency.
+ */
+const CLI_TIMEOUT_MS = 90_000;
 
 const CLI_EXTRACTOR_ARGS: Record<HostCliCommand, string[]> = {
   claude: ['-p', '--output-format', 'text'],
@@ -305,7 +315,7 @@ export class CliConsolidator implements Consolidator {
 
   private runCli(prompt: string): Promise<string> {
     const spawnImpl: SpawnImpl = this.config.spawnImpl ?? spawn;
-    const timeoutMs = this.config.timeoutMs ?? LLM_TIMEOUT_MS;
+    const timeoutMs = this.config.timeoutMs ?? CLI_TIMEOUT_MS;
     const { command } = this.config;
     return new Promise<string>((resolve, reject) => {
       const child = spawnImpl(command, CLI_EXTRACTOR_ARGS[command], {

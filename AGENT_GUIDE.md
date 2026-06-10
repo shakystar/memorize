@@ -333,9 +333,11 @@ rule-based consolidation. Semantic search stays OFF unless configured
   — LLM memory consolidation at boundaries, plus the semantic-contradiction
   judge. `MEMORIZE_LLM_API_KEY` must be set to enable it (use any dummy
   value, e.g. `ollama`, for a keyless local server).
-- `MEMORIZE_LLM_TIMEOUT_MS` — LLM extraction timeout in milliseconds
-  (default `20000`), for both the HTTP and host-CLI backends. Raise it
-  for local CPU models, which can need minutes per extraction.
+- `MEMORIZE_LLM_TIMEOUT_MS` — LLM extraction timeout in milliseconds,
+  for both the HTTP and host-CLI backends. Defaults are backend-specific:
+  `20000` (HTTP) / `90000` (host-CLI — `claude -p` cold start plus a real
+  extraction takes tens of seconds). Raise it for local CPU models, which
+  can need minutes per extraction.
 - `MEMORIZE_CONSOLIDATE_INLINE` — set to `1` to run boundary consolidation
   synchronously inside the hook process instead of the default detached
   background child (slower boundaries, deterministic ordering).
