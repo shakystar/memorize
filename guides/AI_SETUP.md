@@ -147,6 +147,38 @@ no task lists, no summaries.**
    > `memorize task create "<title>"` or let me do it next time you
    > describe work.
 
+## Recovering a failed install
+
+If the user pastes an install error (from the one-line installer or the
+steps above), diagnose in THIS order — each step's failure mode is
+distinct and the order avoids chasing symptoms:
+
+1. **Node present and >= 22?** `node -v`. If missing/old, the user must
+   install from https://nodejs.org — do not work around it.
+2. **Global npm directory writable?** `npm root -g` then check write
+   access. On stock Linux installs it is root-owned and `npm install -g`
+   dies with EACCES. Apply the npm-recommended fix — NEVER sudo:
+   `mkdir -p ~/.npm-global && npm config set prefix ~/.npm-global`, add
+   `export PATH="$HOME/.npm-global/bin:$PATH"` to the shell profile,
+   re-run the installer.
+3. **Binary resolvable?** `command -v memorize` (or `where.exe` on
+   Windows). After a global install the CURRENT shell may not see the
+   new PATH — a new terminal usually fixes it. On Windows, confirm
+   `npm prefix -g` is on PATH.
+4. **WSL shadowing**: inside WSL, `which memorize` returning a
+   `/mnt/c/...` path means the WINDOWS install is leaking through PATH —
+   install inside WSL (steps above) and ensure the Linux npm bin dir
+   precedes `/mnt/c` entries in PATH.
+5. **Everything installed but unhealthy?** Run
+   `npx @shakystar/memorize doctor --json` and apply each issue's `fix`
+   field in order until status is `ok`. Hooks load at session start, so
+   the user must start a NEW agent session to see injected context.
+
+If none of that resolves it, gather `node -v`, `npm -v`,
+`npm prefix -g`, OS/shell, the full error output, and the doctor JSON,
+and file an issue with the "Install failure" template — then tell the
+user you did so.
+
 ## Full command reference
 
 For every command's flags, behaviour, idempotency guarantees, failure
