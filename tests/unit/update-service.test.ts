@@ -1,4 +1,4 @@
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -16,7 +16,7 @@ import {
   type RefreshResult,
   type UpdateDeps,
 } from '../../src/services/update-service.js';
-import { readJson } from '../../src/storage/fs-utils.js';
+import { readJson, writeJson } from '../../src/storage/fs-utils.js';
 
 const EMPTY_REFRESH: RefreshResult = {
   codexRefreshed: false,
@@ -301,5 +301,22 @@ describe('update-check cache', () => {
     const stale = await getUpdateNotice(past);
     expect(stale.shouldCheck).toBe(true);
     expect(stale.notice).toBeUndefined(); // 0.0.1 is older than current
+  });
+
+  it('self-heals a corrupt cache file: reads as missing, shouldCheck true, no throw', async () => {
+    await mkdir(sandbox, { recursive: true });
+    await writeFile(getUpdateCheckFile(), '{not json', 'utf8');
+    const result = await getUpdateNotice();
+    expect(result.notice).toBeUndefined();
+    expect(result.shouldCheck).toBe(true);
+    // recordUpdateCheck must be able to overwrite it (the heal step)
+    await recordUpdateCheck({ npmCapture: async () => '9.9.9\n' });
+    expect((await getUpdateNotice()).shouldCheck).toBe(false);
+  });
+
+  it('treats an invalid checkedAt timestamp as stale (shouldCheck true)', async () => {
+    await mkdir(sandbox, { recursive: true });
+    await writeJson(getUpdateCheckFile(), { checkedAt: 'garbage', latest: '0.0.1' });
+    expect((await getUpdateNotice()).shouldCheck).toBe(true);
   });
 });

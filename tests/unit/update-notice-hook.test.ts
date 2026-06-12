@@ -1,4 +1,4 @@
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, sep } from 'node:path';
 
@@ -9,7 +9,10 @@ import {
   UPDATE_CHECK_DISABLED_ENV_VAR,
   type DetachedSpawnImpl,
 } from '../../src/services/hook-service.js';
-import { recordUpdateCheck } from '../../src/services/update-service.js';
+import {
+  getUpdateCheckFile,
+  recordUpdateCheck,
+} from '../../src/services/update-service.js';
 
 let sandbox: string;
 let savedDisabled: string | undefined;
@@ -83,5 +86,13 @@ describe('maybeNotifyUpdate', () => {
       throw new Error('spawn EPERM');
     };
     await expect(maybeNotifyUpdate(failing)).resolves.toBeUndefined();
+  });
+
+  it('corrupt cache: still spawns the detached check (self-heal)', async () => {
+    await writeFile(getUpdateCheckFile(), '{not json', 'utf8');
+    const { spawnImpl, calls } = fakeSpawn();
+    const notice = await maybeNotifyUpdate(spawnImpl);
+    expect(notice).toBeUndefined();
+    expect(calls).toHaveLength(1); // probe spawned -> next --check overwrites the file
   });
 });

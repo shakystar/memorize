@@ -345,10 +345,18 @@ export interface UpdateNotice {
 export async function getUpdateNotice(
   now: Date = new Date(),
 ): Promise<UpdateNotice> {
-  const cache = await readJson<UpdateCheckCache>(getUpdateCheckFile());
+  let cache: UpdateCheckCache | undefined;
+  try {
+    cache = await readJson<UpdateCheckCache>(getUpdateCheckFile());
+  } catch {
+    // Corrupt/truncated cache reads as missing: shouldCheck stays true, so
+    // the next detached `update --check` overwrites it — self-healing.
+  }
+  const checkedAtMs = cache ? new Date(cache.checkedAt).getTime() : Number.NaN;
   const shouldCheck =
     !cache ||
-    now.getTime() - new Date(cache.checkedAt).getTime() > UPDATE_CHECK_TTL_MS;
+    Number.isNaN(checkedAtMs) ||
+    now.getTime() - checkedAtMs > UPDATE_CHECK_TTL_MS;
   const current = getCurrentVersion();
   const notice =
     cache && isNewerVersion(cache.latest, current)
