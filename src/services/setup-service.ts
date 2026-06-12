@@ -3,6 +3,7 @@ import path from 'node:path';
 
 import type { Project, Rule } from '../domain/entities.js';
 import { createConflict, createRule } from '../domain/entities.js';
+import { nowIso } from '../domain/common.js';
 import { isEnoent } from '../storage/fs-utils.js';
 import { appendEvents } from '../storage/event-store.js';
 import type { AppendEventInput } from '../storage/event-store.js';
@@ -106,7 +107,7 @@ export async function importContextFiles(project: Project): Promise<number> {
       ? {
           ...existing,
           body: file.body,
-          updatedAt: new Date().toISOString(),
+          updatedAt: nowIso(),
           updatedBy: 'system-import',
         }
       : createRule({
