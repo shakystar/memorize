@@ -469,6 +469,11 @@ rule-based consolidation. Semantic search stays OFF unless configured
 - `MEMORIZE_CONSOLIDATE_INLINE` — set to `1` to run boundary consolidation
   synchronously inside the hook process instead of the default detached
   background child (slower boundaries, deterministic ordering).
+- `MEMORIZE_CONSOLIDATE_THRESHOLD` — pending (un-consolidated) observation
+  count that fires an automatic mid-session consolidation, in addition to
+  the lifecycle boundaries (default `20`; `0` disables the mid-session
+  trigger entirely). Debounced: at most one fire per consolidation
+  watermark per 5 minutes.
 - `MEMORIZE_EMBEDDINGS_ENDPOINT` / `MEMORIZE_EMBEDDINGS_API_KEY` /
   `MEMORIZE_EMBEDDINGS_MODEL` — embedding-based semantic search (hybrid
   with FTS5, used in both explicit `search` and startup injection) and the

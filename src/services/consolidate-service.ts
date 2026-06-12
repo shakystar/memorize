@@ -580,6 +580,7 @@ export const CONSOLIDATE_BOUNDARIES = [
   'session-start',
   'post-compact',
   'session-end',
+  'threshold',
   'manual',
 ] as const;
 
@@ -687,6 +688,92 @@ export function getConsolidationStatus(projectId: string): ConsolidationStatus {
     ...(pending.oldest ? { oldestPendingAt: pending.oldest } : {}),
     ...(lastAttempt ? { lastAttempt } : {}),
   };
+}
+
+// --- threshold trigger ---------------------------------------------------------
+
+/** Meta key holding the debounce record of the last threshold fire. */
+const THRESHOLD_TRIGGER_META_KEY = 'cls_consolidate_threshold_trigger';
+
+const DEFAULT_CONSOLIDATE_THRESHOLD = 20;
+
+/** Re-arm window for a fired trigger whose watermark never advanced (the
+ *  detached child died before consolidating) — without it one dead child
+ *  would mute the threshold boundary forever. */
+const THRESHOLD_TRIGGER_TTL_MS = 5 * 60_000;
+
+interface ThresholdTriggerRecord {
+  /** Consolidate watermark at fire time ('' = never consolidated yet). */
+  watermark: string;
+  /** ISO timestamp of the fire. */
+  at: string;
+}
+
+/**
+ * MEMORIZE_CONSOLIDATE_THRESHOLD — pending observations that fire a
+ * mid-session consolidation boundary. 0 disables; anything that is not a
+ * non-negative integer falls back to the default.
+ */
+export function consolidateThreshold(): number {
+  const raw = process.env.MEMORIZE_CONSOLIDATE_THRESHOLD;
+  if (raw === undefined || raw === '') return DEFAULT_CONSOLIDATE_THRESHOLD;
+  const n = Number(raw);
+  if (!Number.isInteger(n) || n < 0) return DEFAULT_CONSOLIDATE_THRESHOLD;
+  return n;
+}
+
+function readThresholdTrigger(
+  projectId: string,
+): ThresholdTriggerRecord | undefined {
+  const row = getDb(projectId)
+    .prepare('SELECT value FROM meta WHERE key = ?')
+    .get(THRESHOLD_TRIGGER_META_KEY) as { value: string } | undefined;
+  if (!row) return undefined;
+  try {
+    return JSON.parse(row.value) as ThresholdTriggerRecord;
+  } catch {
+    return undefined;
+  }
+}
+
+function writeThresholdTrigger(
+  projectId: string,
+  record: ThresholdTriggerRecord,
+): void {
+  getDb(projectId)
+    .prepare(
+      'INSERT INTO meta (key, value) VALUES (?, ?) ' +
+        'ON CONFLICT(key) DO UPDATE SET value = excluded.value',
+    )
+    .run(THRESHOLD_TRIGGER_META_KEY, JSON.stringify(record));
+}
+
+/**
+ * Decide whether the mid-session threshold boundary should fire, and arm
+ * the debounce when it does. Fires when the pending backlog reaches the
+ * threshold, UNLESS a trigger already fired at this same watermark less
+ * than the TTL ago (the spawned child is presumably still extracting — a
+ * successful run advances the watermark, which re-arms naturally).
+ */
+export function shouldTriggerThresholdConsolidate(
+  projectId: string,
+  now: Date = new Date(),
+): boolean {
+  const threshold = consolidateThreshold();
+  if (threshold === 0) return false;
+  if (getConsolidationStatus(projectId).pendingObservations < threshold) {
+    return false;
+  }
+  const watermark = readWatermark(projectId) ?? '';
+  const last = readThresholdTrigger(projectId);
+  if (last && last.watermark === watermark) {
+    const elapsed = now.getTime() - Date.parse(last.at);
+    if (Number.isFinite(elapsed) && elapsed < THRESHOLD_TRIGGER_TTL_MS) {
+      return false;
+    }
+  }
+  writeThresholdTrigger(projectId, { watermark, at: now.toISOString() });
+  return true;
 }
 
 // --- #57 lifecycle-evidence report ---------------------------------------------
