@@ -40,6 +40,7 @@ import {
   startSession,
 } from './session-service.js';
 import { createCheckpoint } from './task-service.js';
+import { getUpdateNotice } from './update-service.js';
 
 interface HookContext {
   projectId: string;
@@ -224,6 +225,37 @@ export async function spawnDetachedConsolidate(
   }
 }
 
+/** Suite-wide off-switch (vitest.config.ts) — mirrors CONSOLIDATE_INLINE. */
+export const UPDATE_CHECK_DISABLED_ENV_VAR = 'MEMORIZE_UPDATE_CHECK_DISABLED';
+
+/**
+ * Session-start update notice (notify-only). Reads the LOCAL cache only;
+ * when the cache is stale it fire-and-forgets a detached
+ * `memorize update --check` to refresh it for a LATER session. Never
+ * blocks, never auto-installs (a hook-timed npm install would race the
+ * very hook files an update rewrites), never throws into the hook.
+ */
+export async function maybeNotifyUpdate(
+  spawnImpl: DetachedSpawnImpl = spawn,
+): Promise<string | undefined> {
+  if (process.env[UPDATE_CHECK_DISABLED_ENV_VAR] === '1') return undefined;
+  try {
+    const { notice, shouldCheck } = await getUpdateNotice();
+    if (shouldCheck) {
+      const cliEntry = fileURLToPath(new URL('../cli/index.js', import.meta.url));
+      const child = spawnImpl(process.execPath, [cliEntry, 'update', '--check'], {
+        cwd: process.cwd(),
+        detached: true,
+        stdio: 'ignore',
+      });
+      child.unref();
+    }
+    return notice;
+  } catch {
+    return undefined; // an update notice must never break session start
+  }
+}
+
 const handleSessionStart: HookHandler = async (ctx) => {
   // Opening the DB runs only DDL migrations — a project upgraded from the
   // NDJSON era reads as an empty store until `memorize migrate` imports its
@@ -352,6 +384,11 @@ const handleSessionStart: HookHandler = async (ctx) => {
       MEMORIZE_PROJECT_ID: ctx.projectId,
       [SESSION_ENV_VAR]: sessionId,
     });
+  }
+
+  const updateNotice = await maybeNotifyUpdate();
+  if (updateNotice) {
+    additionalContext = `${additionalContext}\n\n${updateNotice}`;
   }
 
   return JSON.stringify({
