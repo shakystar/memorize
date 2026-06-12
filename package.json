@@ -73,6 +73,7 @@
     "benchmark:handoff": "tsx scripts/benchmarks/run-handoff-benchmark.ts",
     "benchmark:conflict": "tsx scripts/benchmarks/run-conflict-benchmark.ts",
     "benchmark:all": "pnpm benchmark:import && pnpm benchmark:startup && pnpm benchmark:handoff && pnpm benchmark:conflict",
+    "dogfood:stats": "tsx scripts/dogfood-stats.ts",
     "pack:check": "tsx scripts/validate/package-dry-run.ts"
   },
   "dependencies": {
