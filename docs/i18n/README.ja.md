@@ -142,6 +142,7 @@ Node.js >= 22 が必要です。インストーラが確認し、なければ入
 
 ```sh
 memorize doctor            # プロジェクト + 統合状態の診断
+memorize update            # CLI をアップグレードし、マシン全体の統合を更新
 memorize session activity  # 他のセッションは何をしている?
 memorize consolidate       # 記憶統合の境界を今すぐ1回実行
 memorize search <query>    # プロジェクトの記憶を検索

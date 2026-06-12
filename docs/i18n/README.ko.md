@@ -142,6 +142,7 @@ Node.js >= 22가 필요합니다. 설치 스크립트가 확인하고, 없으면
 
 ```sh
 memorize doctor            # 프로젝트 + 통합 상태 진단
+memorize update            # CLI 업그레이드 + 머신 전체 통합 갱신
 memorize session activity  # 다른 세션들은 뭘 하고 있지?
 memorize consolidate       # 기억 통합 경계를 지금 한 번 실행
 memorize search <query>    # 프로젝트 기억 검색
