@@ -86,6 +86,28 @@ export interface RebuildProjectProjectionOptions {
 }
 
 /**
+ * Historical duplicates: pre-idempotent-import re-runs minted multiple
+ * imported rules for the same context file (same title, different ids).
+ * The event log keeps them all (append-only); derived surfaces show one
+ * topic per title — the freshest. Tie-break on id for determinism.
+ */
+function latestImportedRules(rules: Record<string, Rule>): Rule[] {
+  const byTitle = new Map<string, Rule>();
+  for (const rule of Object.values(rules)) {
+    if (rule.source !== 'imported') continue;
+    const prev = byTitle.get(rule.title);
+    if (
+      !prev ||
+      rule.updatedAt > prev.updatedAt ||
+      (rule.updatedAt === prev.updatedAt && rule.id > prev.id)
+    ) {
+      byTitle.set(rule.title, rule);
+    }
+  }
+  return [...byTitle.values()];
+}
+
+/**
  * Recompute the full projection from the event log and replace every
  * projection table in a SINGLE transaction (replace-all semantics).
  * reduceProjectState is the single reduction authority; this function is only
@@ -103,16 +125,16 @@ export async function rebuildProjectProjection(
   }
   const project = state.project;
 
+  const importedRules = latestImportedRules(state.rules);
+
   const baseMemoryIndex = buildMemoryIndex(state);
   const memoryIndex: PersistedMemoryIndex = {
     ...baseMemoryIndex,
-    mustReadTopics: Object.values(state.rules)
-      .filter((rule) => rule.source === 'imported')
-      .map((rule) => ({
-        id: rule.id,
-        title: rule.title,
-        path: getTopicFile(projectId, rule.id),
-      })),
+    mustReadTopics: importedRules.map((rule) => ({
+      id: rule.id,
+      title: rule.title,
+      path: getTopicFile(projectId, rule.id),
+    })),
   };
 
   // Topic content lives in `.md` files on disk (written below, outside the
@@ -120,9 +142,6 @@ export async function rebuildProjectProjection(
   // synchronous rebuild transaction, so the FTS rows can be inserted inline.
   // A missing file (e.g. first rebuild after an import) is skipped — the rule
   // body is still indexed via the file write at the end of the prior rebuild.
-  const importedRules = Object.values(state.rules).filter(
-    (rule) => rule.source === 'imported',
-  );
   // When reindexSearch is false the FTS rows are left untouched, so the
   // (async, disk-reading) topic content load is skipped entirely.
   const topicSearchRows = reindexSearch
@@ -510,6 +529,18 @@ export function getRule(projectId: string, ruleId: string): Rule | undefined {
     .prepare('SELECT data FROM rules WHERE id = ?')
     .get(ruleId) as { data: string } | undefined;
   return parse<Rule>(row);
+}
+
+/**
+ * Returns ALL imported rules for a project (all historical duplicates
+ * included). The event log / rules table is append-only; this is the raw
+ * view. Use mustReadTopics from getMemoryIndex() for the deduplicated view.
+ */
+export function listImportedRules(projectId: string): Rule[] {
+  const rows = db(projectId)
+    .prepare("SELECT data FROM rules WHERE source = 'imported'")
+    .all() as Array<{ data: string }>;
+  return parseAll<Rule>(rows);
 }
 
 export function listOpenConflicts(projectId: string): Conflict[] {

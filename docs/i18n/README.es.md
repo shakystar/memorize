@@ -153,6 +153,7 @@ que podrías usar como humano:
 
 ```sh
 memorize doctor            # diagnostica proyecto + integraciones
+memorize update            # actualiza la CLI + refresca las integraciones en toda la máquina
 memorize session activity  # ¿qué hacen mis otras sesiones?
 memorize consolidate       # ejecuta una consolidación de memoria ahora
 memorize search <query>    # busca en la memoria del proyecto

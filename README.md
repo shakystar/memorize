@@ -150,6 +150,7 @@ might reach for as a human:
 
 ```sh
 memorize doctor            # diagnose project + integration state
+memorize update            # upgrade the CLI + refresh integrations machine-wide
 memorize session activity  # what are my other sessions doing?
 memorize consolidate       # run one memory-consolidation boundary now
 memorize search <query>    # search project memory

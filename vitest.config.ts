@@ -15,7 +15,12 @@ export default defineConfig({
       // default. Force the old synchronous inline behavior suite-wide so
       // hook-lifecycle tests keep deterministic boundaries; tests that
       // exercise the detached path delete this var explicitly.
-      MEMORIZE_CONSOLIDATE_INLINE: '1'
+      MEMORIZE_CONSOLIDATE_INLINE: '1',
+      // session-start update notice spawns a detached registry probe by
+      // default; force it off suite-wide so hook tests never spawn real
+      // children or touch the network. update-notice tests re-enable it
+      // by deleting this var explicitly.
+      MEMORIZE_UPDATE_CHECK_DISABLED: '1'
     }
   }
 });

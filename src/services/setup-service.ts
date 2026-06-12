@@ -3,11 +3,15 @@ import path from 'node:path';
 
 import type { Project, Rule } from '../domain/entities.js';
 import { createConflict, createRule } from '../domain/entities.js';
+import { nowIso } from '../domain/common.js';
 import { isEnoent } from '../storage/fs-utils.js';
 import { appendEvents } from '../storage/event-store.js';
 import type { AppendEventInput } from '../storage/event-store.js';
 import type { DomainEventPayload } from '../domain/events.js';
-import { rebuildProjectProjection } from './projection-store.js';
+import {
+  listImportedRules,
+  rebuildProjectProjection,
+} from './projection-store.js';
 import {
   createProject,
   getBoundProjectId,
@@ -76,20 +80,44 @@ async function discoverContextFiles(
   return discovered;
 }
 
-async function importContextFiles(project: Project): Promise<number> {
+export async function importContextFiles(project: Project): Promise<number> {
   const files = await discoverContextFiles(project.rootPath);
+
+  // Idempotent re-import: key existing imported rules by title so a re-run
+  // upserts in place instead of minting duplicate rule ids. Historical
+  // duplicates (pre-fix re-runs) — reuse the most recently updated one and
+  // leave the rest untouched (cleanup is out of scope).
+  const existingByTitle = new Map<string, Rule>();
+  for (const rule of listImportedRules(project.id)) {
+    const prev = existingByTitle.get(rule.title);
+    if (!prev || rule.updatedAt > prev.updatedAt) {
+      existingByTitle.set(rule.title, rule);
+    }
+  }
+
   const importedRules: Rule[] = [];
   const events: AppendEventInput<DomainEventPayload>[] = [];
 
   for (const file of files) {
-    const rule: Rule = createRule({
-      scopeType: 'project',
-      scopeId: project.id,
-      title: file.title,
-      body: file.body,
-      updatedBy: 'system-import',
-      source: 'imported',
-    });
+    const existing = existingByTitle.get(file.title);
+    if (existing && existing.body === file.body) {
+      continue; // unchanged — no event, rule stays as-is
+    }
+    const rule: Rule = existing
+      ? {
+          ...existing,
+          body: file.body,
+          updatedAt: nowIso(),
+          updatedBy: 'system-import',
+        }
+      : createRule({
+          scopeType: 'project',
+          scopeId: project.id,
+          title: file.title,
+          body: file.body,
+          updatedBy: 'system-import',
+          source: 'imported',
+        });
 
     events.push({
       type: 'rule.upserted',
@@ -102,7 +130,7 @@ async function importContextFiles(project: Project): Promise<number> {
     importedRules.push(rule);
   }
 
-  if (files.length > 0) {
+  if (importedRules.length > 0) {
     events.push({
       type: 'project.updated',
       projectId: project.id,
@@ -110,7 +138,7 @@ async function importContextFiles(project: Project): Promise<number> {
       scopeId: project.id,
       actor: 'system-import',
       payload: {
-        importedContextCount: files.length,
+        importedContextCount: importedRules.length,
       } satisfies Partial<Project>,
     });
   }
@@ -154,7 +182,7 @@ async function importContextFiles(project: Project): Promise<number> {
     await appendEvents(project.id, events);
   }
   await rebuildProjectProjection(project.id);
-  return files.length;
+  return importedRules.length;
 }
 
 export async function setupProject(rootPath: string): Promise<{

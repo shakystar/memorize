@@ -18,6 +18,7 @@ import { runSessionCommand } from './commands/session.js';
 import { runSetupCommand } from './commands/setup.js';
 import { runTaskCommand } from './commands/task.js';
 import { runUninstallCommand } from './commands/uninstall.js';
+import { runUpdateCommand } from './commands/update.js';
 import type { CliContext, CommandHandler } from './context.js';
 import { renderScaffoldUsage } from './usage.js';
 
@@ -35,6 +36,7 @@ const handlers: Record<string, CommandHandler> = {
   doctor: runDoctorCommand,
   install: runInstallCommand,
   uninstall: runUninstallCommand,
+  update: runUpdateCommand,
   hook: runHookCommand,
   task: runTaskCommand,
   conflict: runConflictCommand,
@@ -57,6 +59,9 @@ const SESSION_MANAGING_COMMANDS = new Set([
   'session',
   'setup',
   'consolidate',
+  // `update` is machine-wide maintenance that may run outside any bound
+  // project (and re-execs itself); a heartbeat from it would be wrong.
+  'update',
 ]);
 
 async function main(): Promise<void> {
