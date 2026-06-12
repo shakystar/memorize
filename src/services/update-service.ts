@@ -321,7 +321,10 @@ export async function recordUpdateCheck(
     const latest = (
       await deps.npmCapture(['view', PACKAGE_NAME, 'version'])
     ).trim();
-    if (!latest) return;
+    // Strict semver shape gate: the cached string is later interpolated
+    // into hook-injected context, so reject anything but a clean version
+    // (a hostile registry response must not become an injection vector).
+    if (!latest || !/^\d+\.\d+\.\d+(?:[-+][\w.]+)*$/.test(latest)) return;
     await writeJson(getUpdateCheckFile(), {
       checkedAt: new Date().toISOString(),
       latest,
