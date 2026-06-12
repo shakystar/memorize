@@ -167,6 +167,50 @@ git redaction risk (`.memorize/` in `.gitignore`), install state.
 
 Exit code: `1` when status is not `ok`. Use `--json` for scripting.
 
+### `memorize update`
+
+Upgrades the global CLI to the latest published version, then refreshes
+every existing integration on this machine with the new binary:
+
+- Re-installs Codex hooks (`~/.codex/hooks.json`) when memorize entries
+  are already present.
+- Re-installs Claude hooks for every known project that already has them
+  (never installs fresh into a project that has not opted in).
+- Re-imports changed context files (`CLAUDE.md`, `AGENTS.md`,
+  `GEMINI.md`, `.cursorrules`, `.cursor/rules`) for every bound project
+  — idempotent: unchanged files emit nothing; changed files upsert the
+  same rule in place.
+
+Already up to date → the npm step is skipped, but the refresh still
+runs. `update` therefore doubles as a repair command when integrations
+drift after a manual change.
+
+Data is never deleted: the event store is append-only. A removed context
+file leaves its previously imported rule intact.
+
+**Internal flags (not for direct use):**
+
+- `--post-only` — refresh-only re-exec entry point called by the
+  upgraded binary after `npm install -g` completes. The parent process
+  exits and the new binary owns the machine-wide refresh.
+- `--check` — detached registry probe spawned by `SessionStart`. Writes
+  the latest available version to `~/.memorize/update-check.json`
+  without installing anything.
+
+**Failure modes:**
+
+- No global install found → prints guidance and exits 1.
+- Registry unreachable → exits 1.
+- `npm install -g` fails → exit code propagated, refresh skipped.
+- Per-project refresh failure → reported at the end with exit 1; the
+  loop continues past individual failures so other projects still run.
+
+**Session-start notice:** when a newer version is cached in
+`update-check.json`, one line is appended to the startup context
+(`memorize vX.Y.Z available — run memorize update`). The background
+check is throttled to once per 24 h, runs detached, and never blocks
+session start or auto-installs anything.
+
 ### `memorize consolidate [--session <id>] [--boundary <label>] [--report]`
 
 Runs one memory-consolidation boundary for the project bound to cwd:
