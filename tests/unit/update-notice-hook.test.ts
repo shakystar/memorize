@@ -20,13 +20,14 @@ let savedDisabled: string | undefined;
 interface SpawnCall {
   command: string;
   args: string[];
+  options: { cwd: string; detached: boolean; stdio: 'ignore'; windowsHide: boolean };
   unrefCalled: boolean;
 }
 
 function fakeSpawn(): { spawnImpl: DetachedSpawnImpl; calls: SpawnCall[] } {
   const calls: SpawnCall[] = [];
-  const spawnImpl: DetachedSpawnImpl = (command, args) => {
-    const call: SpawnCall = { command, args, unrefCalled: false };
+  const spawnImpl: DetachedSpawnImpl = (command, args, options) => {
+    const call: SpawnCall = { command, args, options, unrefCalled: false };
     calls.push(call);
     return {
       unref: () => {
@@ -62,6 +63,7 @@ describe('maybeNotifyUpdate', () => {
     expect(calls[0]!.command).toBe(process.execPath);
     expect(calls[0]!.args[0]).toContain(`${sep}cli${sep}index.js`);
     expect(calls[0]!.args.slice(1)).toEqual(['update', '--check']);
+    expect(calls[0]!.options.windowsHide).toBe(true);
     expect(calls[0]!.unrefCalled).toBe(true);
   });
 

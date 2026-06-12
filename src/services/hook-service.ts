@@ -170,7 +170,7 @@ export interface DetachedChild {
 export type DetachedSpawnImpl = (
   command: string,
   args: string[],
-  options: { cwd: string; detached: boolean; stdio: 'ignore' },
+  options: { cwd: string; detached: boolean; stdio: 'ignore'; windowsHide: boolean },
 ) => DetachedChild;
 
 /**
@@ -214,7 +214,13 @@ export async function spawnDetachedConsolidate(
         '--boundary',
         boundary,
       ],
-      { cwd: ctx.cwd, detached: true, stdio: 'ignore' },
+      {
+        cwd: ctx.cwd,
+        detached: true,
+        stdio: 'ignore',
+        // Windows: hides the console window of the detached consolidate process.
+        windowsHide: true,
+      },
     );
     child.unref();
   } catch (error) {
@@ -247,6 +253,7 @@ export async function maybeNotifyUpdate(
         cwd: process.cwd(),
         detached: true,
         stdio: 'ignore',
+        windowsHide: true,
       });
       child.unref();
     }

@@ -301,7 +301,7 @@ export interface CliExtractorChild {
 export type SpawnImpl = (
   command: string,
   args: string[],
-  options: { env: NodeJS.ProcessEnv },
+  options: { env: NodeJS.ProcessEnv; windowsHide: boolean },
 ) => CliExtractorChild;
 
 export interface CliConsolidatorConfig {
@@ -350,6 +350,10 @@ export class CliConsolidator implements Consolidator {
     return new Promise<string>((resolve, reject) => {
       const child = spawnImpl(command, CLI_EXTRACTOR_ARGS[command], {
         env: { ...process.env, [SUPPRESS_HOOKS_ENV_VAR]: '1' },
+        // Windows: a console child of a console-less parent allocates a
+        // VISIBLE console window without this — users saw black windows
+        // hanging around for the full extraction.
+        windowsHide: true,
       });
       let stdout = '';
       let stderr = '';

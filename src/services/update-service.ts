@@ -77,7 +77,7 @@ export function defaultUpdateDeps(): UpdateDeps {
         execFile(
           'npm',
           args,
-          { timeout: 30_000, shell: WIN },
+          { timeout: 30_000, shell: WIN, windowsHide: true },
           (error, stdout) => {
             if (error) reject(error);
             else resolve(stdout);

@@ -128,6 +128,7 @@ interface SpawnCall {
   command: string;
   args: string[];
   env: NodeJS.ProcessEnv;
+  windowsHide: boolean;
 }
 
 function fakeSpawn(
@@ -136,7 +137,7 @@ function fakeSpawn(
 ): { spawnImpl: SpawnImpl; calls: SpawnCall[] } {
   const calls: SpawnCall[] = [];
   const spawnImpl: SpawnImpl = (command, args, options) => {
-    calls.push({ command, args, env: options.env });
+    calls.push({ command, args, env: options.env, windowsHide: options.windowsHide });
     if (onSpawn) queueMicrotask(onSpawn);
     return child;
   };
@@ -177,6 +178,7 @@ describe('CliConsolidator (host-CLI extractor — #44)', () => {
     expect(calls[0]!.args).toEqual(['-p', '--output-format', 'text']);
     // Recursion guard: the spawned CLI's own memorize hooks must no-op.
     expect(calls[0]!.env[SUPPRESS_HOOKS_ENV_VAR]).toBe('1');
+    expect(calls[0]!.windowsHide).toBe(true);
     // Prompt arrives via stdin (not argv), with system prompt prepended.
     expect(child.stdinData).toContain('memory consolidator');
     expect(child.stdinData).toContain('## Observations');
