@@ -714,10 +714,8 @@ interface ThresholdTriggerRecord {
  * mid-session consolidation boundary. 0 disables; anything that is not a
  * non-negative integer falls back to the default.
  */
-export function consolidateThreshold(
-  env: NodeJS.ProcessEnv = process.env,
-): number {
-  const raw = env.MEMORIZE_CONSOLIDATE_THRESHOLD;
+export function consolidateThreshold(): number {
+  const raw = process.env.MEMORIZE_CONSOLIDATE_THRESHOLD;
   if (raw === undefined || raw === '') return DEFAULT_CONSOLIDATE_THRESHOLD;
   const n = Number(raw);
   if (!Number.isInteger(n) || n < 0) return DEFAULT_CONSOLIDATE_THRESHOLD;
