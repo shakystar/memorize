@@ -21,6 +21,7 @@ import {
   type ConsolidateBoundary,
   SUPPRESS_HOOKS_ENV_VAR,
   consolidate,
+  shouldTriggerThresholdConsolidate,
 } from './consolidate-service.js';
 import { composeLiveUpdate } from './realtime-share-service.js';
 import { composeStartupContext } from './startup-context-service.js';
@@ -482,12 +483,20 @@ const EMPTY_HOOK_RESULT = JSON.stringify({});
 const handlePostToolUse: HookHandler = async (ctx) => {
   // 1. Capture this session's own observation (short-term layer).
   try {
-    await captureObservation({
+    const observation = await captureObservation({
       projectId: ctx.projectId,
       agent: ctx.agent,
       cwd: ctx.cwd,
       rawPayload: ctx.rawPayload,
     });
+    // Threshold boundary: when the un-consolidated backlog reaches
+    // MEMORIZE_CONSOLIDATE_THRESHOLD mid-session, consolidate now instead
+    // of waiting for the next lifecycle boundary (freshness + a bounded
+    // crash-loss window). The should-check debounces per watermark, and
+    // the spawn itself never throws into the hook.
+    if (observation && shouldTriggerThresholdConsolidate(ctx.projectId)) {
+      await spawnDetachedConsolidate(ctx, observation.sessionId, 'threshold');
+    }
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     process.stderr.write(`WARN: observation capture skipped (${message})\n`);

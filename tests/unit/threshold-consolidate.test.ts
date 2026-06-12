@@ -8,8 +8,14 @@ import { CURRENT_SCHEMA_VERSION } from '../../src/domain/common.js';
 import { createObservation } from '../../src/domain/entities.js';
 import {
   consolidateThreshold,
+  readLastConsolidateAttempt,
   shouldTriggerThresholdConsolidate,
 } from '../../src/services/consolidate-service.js';
+import {
+  CONSOLIDATE_INLINE_ENV_VAR,
+  runClaudeHook,
+} from '../../src/services/hook-service.js';
+import { requireBoundProjectId } from '../../src/services/project-service.js';
 import { rebuildProjectProjection } from '../../src/services/projection-store.js';
 import { closeAll, getDb } from '../../src/storage/db.js';
 import { appendEvent, readEvents } from '../../src/storage/event-store.js';
@@ -19,6 +25,7 @@ const ts = '2026-06-12T00:00:00.000Z';
 
 let sandbox: string;
 let savedThreshold: string | undefined;
+let savedInline: string | undefined;
 
 async function seedProject(): Promise<void> {
   await appendEvent({
@@ -85,6 +92,7 @@ beforeEach(async () => {
   sandbox = await mkdtemp(join(tmpdir(), 'memorize-threshold-'));
   process.env.MEMORIZE_ROOT = sandbox;
   savedThreshold = process.env.MEMORIZE_CONSOLIDATE_THRESHOLD;
+  savedInline = process.env[CONSOLIDATE_INLINE_ENV_VAR];
   await seedProject();
 });
 
@@ -95,6 +103,11 @@ afterEach(async () => {
     delete process.env.MEMORIZE_CONSOLIDATE_THRESHOLD;
   } else {
     process.env.MEMORIZE_CONSOLIDATE_THRESHOLD = savedThreshold;
+  }
+  if (savedInline === undefined) {
+    delete process.env[CONSOLIDATE_INLINE_ENV_VAR];
+  } else {
+    process.env[CONSOLIDATE_INLINE_ENV_VAR] = savedInline;
   }
   await rm(sandbox, { recursive: true, force: true });
 });
@@ -170,5 +183,70 @@ describe('shouldTriggerThresholdConsolidate', () => {
     expect(shouldTriggerThresholdConsolidate(projectId, t1)).toBe(false); // 0 < 3
     await appendObservations(3); // a fresh backlog past the NEW watermark
     expect(shouldTriggerThresholdConsolidate(projectId, t1)).toBe(true);
+  });
+});
+
+describe('handlePostToolUse — threshold boundary wiring (inline mode)', () => {
+  function postToolUsePayload(filePath: string): string {
+    return JSON.stringify({
+      session_id: 'agent-uuid-th-1',
+      hook_event_name: 'PostToolUse',
+      tool_name: 'Write',
+      tool_input: { file_path: filePath },
+    });
+  }
+
+  async function fireWrite(i: number): Promise<void> {
+    await runClaudeHook({
+      eventName: 'PostToolUse',
+      cwd: sandbox,
+      stdinPayload: postToolUsePayload(join(sandbox, `f-${i}.ts`)),
+    });
+  }
+
+  beforeEach(() => {
+    process.env[CONSOLIDATE_INLINE_ENV_VAR] = '1'; // sync, no detached child
+    process.env.MEMORIZE_CONSOLIDATE_THRESHOLD = '2';
+  });
+
+  it('consolidates exactly once when the backlog reaches N', async () => {
+    await fireWrite(0); // pending 1 < 2 — no consolidation
+    let hookProjectId = await requireBoundProjectId(sandbox);
+    let types = (await readEvents(hookProjectId)).map((e) => e.type);
+    expect(types.filter((t) => t === 'memory.consolidated')).toHaveLength(0);
+
+    await fireWrite(1); // pending 2 >= 2 — fires inline
+    hookProjectId = await requireBoundProjectId(sandbox);
+    types = (await readEvents(hookProjectId)).map((e) => e.type);
+    const afterSecond = types.filter((t) => t === 'memory.consolidated').length;
+    expect(afterSecond).toBeGreaterThan(0);
+
+    // The attempt is attributed to the 'threshold' boundary (#51).
+    expect(readLastConsolidateAttempt(hookProjectId)?.boundary).toBe(
+      'threshold',
+    );
+
+    await fireWrite(2); // pending 1 past the advanced watermark — quiet
+    types = (await readEvents(hookProjectId)).map((e) => e.type);
+    expect(types.filter((t) => t === 'memory.consolidated')).toHaveLength(
+      afterSecond,
+    );
+  });
+
+  it('a filtered (read-only) tool never runs the threshold check', async () => {
+    await fireWrite(0);
+    await runClaudeHook({
+      eventName: 'PostToolUse',
+      cwd: sandbox,
+      stdinPayload: JSON.stringify({
+        session_id: 'agent-uuid-th-1',
+        hook_event_name: 'PostToolUse',
+        tool_name: 'Read', // filter rejects → capture undefined → no check
+        tool_input: { file_path: join(sandbox, 'f-0.ts') },
+      }),
+    });
+    const hookProjectId = await requireBoundProjectId(sandbox);
+    const types = (await readEvents(hookProjectId)).map((e) => e.type);
+    expect(types.filter((t) => t === 'memory.consolidated')).toHaveLength(0);
   });
 });
