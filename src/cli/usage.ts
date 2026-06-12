@@ -4,6 +4,7 @@ export function renderScaffoldUsage(): string {
     '',
     'Day-to-day:',
     '  memorize doctor              Diagnose project and integration state',
+    '  memorize update              Upgrade the CLI + refresh integrations machine-wide',
     '  memorize session activity    Show active sessions + their recent work',
     '  memorize consolidate         Run one memory-consolidation boundary now',
     '  memorize search <query>      Search project memory',

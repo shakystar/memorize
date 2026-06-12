@@ -7,7 +7,8 @@ import path from 'node:path';
 import which from 'which';
 
 import type { Project } from '../domain/entities.js';
-import { isEnoent } from '../storage/fs-utils.js';
+import { isEnoent, readJson, writeJson } from '../storage/fs-utils.js';
+import { getMemorizeRoot } from '../storage/path-resolver.js';
 import {
   installClaudeIntegration,
   installCodexHooks,
@@ -150,7 +151,11 @@ export async function runSelfUpdate(
   }
 
   if (!isNewerVersion(latest, current)) {
-    log(`Already up to date (v${current}; latest v${latest}). Refreshing integrations.`);
+    log(
+      isNewerVersion(current, latest)
+        ? `Local v${current} is ahead of the registry (v${latest}) — skipping install. Refreshing integrations.`
+        : `Already up to date (v${current}). Refreshing integrations.`,
+    );
     const result = await deps.refresh();
     for (const line of formatRefreshSummary(result)) log(line);
     return result.failures.length > 0 ? 1 : 0;
@@ -288,4 +293,63 @@ export async function runRefresh(
   }
 
   return result;
+}
+
+// --- session-start update notice (notify-only, never blocking) -------------
+
+export interface UpdateCheckCache {
+  checkedAt: string;
+  latest: string;
+}
+
+export function getUpdateCheckFile(): string {
+  return path.join(getMemorizeRoot(), 'update-check.json');
+}
+
+export const UPDATE_CHECK_TTL_MS = 24 * 60 * 60 * 1000;
+
+/**
+ * `update --check` body: one registry lookup → cache write. Spawned
+ * DETACHED by SessionStart, so it must never print, never prompt, and
+ * never fail loudly — on any error the previous cache is left intact and
+ * the next boundary retries.
+ */
+export async function recordUpdateCheck(
+  deps: Pick<UpdateDeps, 'npmCapture'> = defaultUpdateDeps(),
+): Promise<void> {
+  try {
+    const latest = (
+      await deps.npmCapture(['view', PACKAGE_NAME, 'version'])
+    ).trim();
+    if (!latest) return;
+    await writeJson(getUpdateCheckFile(), {
+      checkedAt: new Date().toISOString(),
+      latest,
+    } satisfies UpdateCheckCache);
+  } catch {
+    // offline / registry down — keep the old cache
+  }
+}
+
+export interface UpdateNotice {
+  /** present when the cached latest is newer than this binary */
+  notice?: string;
+  /** true when the cache is missing or older than the TTL */
+  shouldCheck: boolean;
+}
+
+/** Cache-only read — NEVER hits the network (hook + doctor safe). */
+export async function getUpdateNotice(
+  now: Date = new Date(),
+): Promise<UpdateNotice> {
+  const cache = await readJson<UpdateCheckCache>(getUpdateCheckFile());
+  const shouldCheck =
+    !cache ||
+    now.getTime() - new Date(cache.checkedAt).getTime() > UPDATE_CHECK_TTL_MS;
+  const current = getCurrentVersion();
+  const notice =
+    cache && isNewerVersion(cache.latest, current)
+      ? `memorize v${cache.latest} available (current v${current}) — run \`memorize update\``
+      : undefined;
+  return { ...(notice ? { notice } : {}), shouldCheck };
 }

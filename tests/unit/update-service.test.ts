@@ -1,15 +1,22 @@
-import { describe, expect, it } from 'vitest';
+import { mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import type { Project } from '../../src/domain/entities.js';
 import {
   getCurrentVersion,
+  getUpdateCheckFile,
+  getUpdateNotice,
   isNewerVersion,
+  recordUpdateCheck,
   runRefresh,
   runSelfUpdate,
   type RefreshDeps,
   type RefreshResult,
   type UpdateDeps,
 } from '../../src/services/update-service.js';
+import { readJson } from '../../src/storage/fs-utils.js';
 
 const EMPTY_REFRESH: RefreshResult = {
   codexRefreshed: false,
@@ -236,5 +243,54 @@ describe('runRefresh', () => {
     expect(result.failures).toHaveLength(1);
     expect(result.failures[0]!.target).toContain('/repo/a');
     expect(installed).toContain('/repo/b'); // loop continued
+  });
+});
+
+describe('update-check cache', () => {
+  let sandbox: string;
+
+  beforeEach(async () => {
+    sandbox = await mkdtemp(join(tmpdir(), 'memorize-updcheck-'));
+    process.env.MEMORIZE_ROOT = sandbox;
+  });
+
+  afterEach(async () => {
+    delete process.env.MEMORIZE_ROOT;
+    await rm(sandbox, { recursive: true, force: true });
+  });
+
+  it('recordUpdateCheck writes the cache file', async () => {
+    await recordUpdateCheck({ npmCapture: async () => '9.9.9\n' });
+    const cache = await readJson<{ latest: string }>(getUpdateCheckFile());
+    expect(cache?.latest).toBe('9.9.9');
+  });
+
+  it('recordUpdateCheck keeps the previous cache on registry failure', async () => {
+    await recordUpdateCheck({ npmCapture: async () => '9.9.9\n' });
+    await recordUpdateCheck({
+      npmCapture: async () => {
+        throw new Error('offline');
+      },
+    });
+    const cache = await readJson<{ latest: string }>(getUpdateCheckFile());
+    expect(cache?.latest).toBe('9.9.9');
+  });
+
+  it('getUpdateNotice: newer cached version produces a notice; fresh cache suppresses re-check', async () => {
+    await recordUpdateCheck({ npmCapture: async () => '999.0.0\n' });
+    const result = await getUpdateNotice();
+    expect(result.notice).toContain('999.0.0');
+    expect(result.notice).toContain('memorize update');
+    expect(result.shouldCheck).toBe(false);
+  });
+
+  it('getUpdateNotice: missing or stale cache sets shouldCheck', async () => {
+    expect((await getUpdateNotice()).shouldCheck).toBe(true);
+
+    await recordUpdateCheck({ npmCapture: async () => '0.0.1\n' });
+    const past = new Date(Date.now() + 25 * 60 * 60 * 1000);
+    const stale = await getUpdateNotice(past);
+    expect(stale.shouldCheck).toBe(true);
+    expect(stale.notice).toBeUndefined(); // 0.0.1 is older than current
   });
 });
