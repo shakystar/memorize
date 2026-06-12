@@ -1,7 +1,19 @@
 import { execFile, spawn } from 'node:child_process';
+import fs from 'node:fs/promises';
 import { createRequire } from 'node:module';
+import os from 'node:os';
+import path from 'node:path';
 
 import which from 'which';
+
+import type { Project } from '../domain/entities.js';
+import { isEnoent } from '../storage/fs-utils.js';
+import {
+  installClaudeIntegration,
+  installCodexHooks,
+} from './install-service.js';
+import { listProjects } from './project-service.js';
+import { importContextFiles } from './setup-service.js';
 
 export const PACKAGE_NAME = '@shakystar/memorize';
 
@@ -159,6 +171,121 @@ export async function runSelfUpdate(
   return deps.runMemorize(['update', '--post-only']);
 }
 
-export async function runRefresh(): Promise<RefreshResult> {
-  throw new Error('runRefresh: implemented in Task 5');
+/** Matches any memorize hook command form for the given agent. */
+const MEMORIZE_CODEX_HOOK_RE = /(@shakystar\/)?memorize\s+hook\s+codex\s/;
+const MEMORIZE_CLAUDE_HOOK_RE = /(@shakystar\/)?memorize\s+hook\s+claude\s/;
+
+export interface RefreshDeps {
+  listProjects(): Promise<Project[]>;
+  installCodexHooks(): Promise<string>;
+  installClaudeIntegration(cwd: string): Promise<string>;
+  reimportProjectContext(project: Project): Promise<number>;
+  /** undefined on missing file. */
+  readTextFile(filePath: string): Promise<string | undefined>;
+  codexHooksFile(): string;
+}
+
+export function defaultRefreshDeps(): RefreshDeps {
+  return {
+    listProjects,
+    installCodexHooks,
+    installClaudeIntegration,
+    reimportProjectContext: importContextFiles,
+    readTextFile: async (filePath) => {
+      try {
+        return await fs.readFile(filePath, 'utf8');
+      } catch (error) {
+        if (isEnoent(error)) return undefined;
+        throw error;
+      }
+    },
+    codexHooksFile: () => path.join(os.homedir(), '.codex', 'hooks.json'),
+  };
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+/**
+ * Machine-wide integration refresh (`update --post-only`). Idempotent;
+ * refreshes EXISTING installs only (never installs fresh), re-imports
+ * changed context files, and isolates per-project failures so one broken
+ * project cannot block the rest. Data-preservation invariants: every
+ * sub-step is additive — install-service strip-and-rebuild only touches
+ * memorize's own hook entries, and the idempotent import only appends
+ * rule.upserted events for discovered, changed files.
+ */
+export async function runRefresh(
+  deps: RefreshDeps = defaultRefreshDeps(),
+): Promise<RefreshResult> {
+  const result: RefreshResult = {
+    codexRefreshed: false,
+    claudeRefreshed: [],
+    reimported: [],
+    failures: [],
+  };
+
+  try {
+    const codexRaw = await deps.readTextFile(deps.codexHooksFile());
+    if (codexRaw && MEMORIZE_CODEX_HOOK_RE.test(codexRaw)) {
+      await deps.installCodexHooks();
+      result.codexRefreshed = true;
+    }
+  } catch (error) {
+    result.failures.push({ target: 'codex hooks', message: errorMessage(error) });
+  }
+
+  let projects: Project[] = [];
+  try {
+    projects = await deps.listProjects();
+  } catch (error) {
+    result.failures.push({
+      target: 'project list',
+      message: errorMessage(error),
+    });
+  }
+
+  for (const project of projects) {
+    // Use posix join so the path preserves the rootPath's separator style.
+    // Node.js fs accepts forward-slash paths on Windows, and tests pass
+    // POSIX-style roots that path.win32.join would mangle (drop the '/').
+    const settingsFile = path.posix.join(
+      project.rootPath,
+      '.claude',
+      'settings.local.json',
+    );
+    try {
+      const raw = await deps.readTextFile(settingsFile);
+      if (raw && MEMORIZE_CLAUDE_HOOK_RE.test(raw)) {
+        await deps.installClaudeIntegration(project.rootPath);
+        result.claudeRefreshed.push(project.rootPath);
+      }
+    } catch (error) {
+      result.failures.push({
+        target: `claude hooks: ${project.rootPath}`,
+        message: errorMessage(error),
+      });
+    }
+
+    try {
+      // A vanished rootPath discovers zero files and emits nothing — the
+      // existing imported rules are untouched (data-preservation #2).
+      const count = await deps.reimportProjectContext(project);
+      if (count > 0) {
+        result.reimported.push({
+          projectId: project.id,
+          rootPath: project.rootPath,
+          count,
+        });
+      }
+    } catch (error) {
+      result.failures.push({
+        target: `context re-import: ${project.rootPath}`,
+        message: errorMessage(error),
+      });
+    }
+  }
+
+  return result;
 }

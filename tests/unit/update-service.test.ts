@@ -1,9 +1,12 @@
 import { describe, expect, it } from 'vitest';
 
+import type { Project } from '../../src/domain/entities.js';
 import {
   getCurrentVersion,
   isNewerVersion,
+  runRefresh,
   runSelfUpdate,
+  type RefreshDeps,
   type RefreshResult,
   type UpdateDeps,
 } from '../../src/services/update-service.js';
@@ -131,5 +134,107 @@ describe('runSelfUpdate', () => {
     });
     const code = await runSelfUpdate(deps, () => {});
     expect(code).toBe(1);
+  });
+});
+
+function project(id: string, rootPath: string): Project {
+  return { id, rootPath } as Project; // refresh touches only id + rootPath
+}
+
+function fakeRefreshDeps(args: {
+  codexRaw?: string;
+  projects?: Project[];
+  /** rootPath -> settings.local.json raw text */
+  claudeSettings?: Record<string, string>;
+  reimportCounts?: Record<string, number>;
+  failInstallFor?: string;
+}): { deps: RefreshDeps; installed: string[]; reimported: string[] } {
+  const installed: string[] = [];
+  const reimported: string[] = [];
+  const deps: RefreshDeps = {
+    listProjects: async () => args.projects ?? [],
+    installCodexHooks: async () => {
+      installed.push('codex');
+      return '~/.codex/hooks.json';
+    },
+    installClaudeIntegration: async (cwd) => {
+      if (args.failInstallFor === cwd) throw new Error('EACCES');
+      installed.push(cwd);
+      return cwd;
+    },
+    reimportProjectContext: async (p) => {
+      reimported.push(p.id);
+      return args.reimportCounts?.[p.id] ?? 0;
+    },
+    readTextFile: async (filePath) => {
+      if (filePath.endsWith('codex-hooks.json')) return args.codexRaw;
+      for (const [root, raw] of Object.entries(args.claudeSettings ?? {})) {
+        if (filePath.startsWith(root)) return raw;
+      }
+      return undefined;
+    },
+    codexHooksFile: () => '/fake/codex-hooks.json',
+  };
+  return { deps, installed, reimported };
+}
+
+describe('runRefresh', () => {
+  it('refreshes codex only when memorize entries already exist', async () => {
+    const withHooks = fakeRefreshDeps({
+      codexRaw: '{"hooks":{"SessionStart":[{"hooks":[{"command":"memorize hook codex SessionStart"}]}]}}',
+    });
+    const result = await runRefresh(withHooks.deps);
+    expect(result.codexRefreshed).toBe(true);
+    expect(withHooks.installed).toContain('codex');
+
+    const without = fakeRefreshDeps({ codexRaw: '{"hooks":{}}' });
+    expect((await runRefresh(without.deps)).codexRefreshed).toBe(false);
+    expect(without.installed).not.toContain('codex');
+  });
+
+  it('NEVER fresh-installs claude: refreshes only projects with existing memorize hooks', async () => {
+    const a = project('proj_a', '/repo/a');
+    const b = project('proj_b', '/repo/b');
+    const { deps, installed } = fakeRefreshDeps({
+      projects: [a, b],
+      claudeSettings: {
+        '/repo/a': '{"hooks":{"SessionStart":[{"hooks":[{"command":"memorize hook claude SessionStart"}]}]}}',
+        // /repo/b: no settings file at all (readTextFile -> undefined)
+      },
+    });
+    const result = await runRefresh(deps);
+    expect(result.claudeRefreshed).toEqual(['/repo/a']);
+    expect(installed).toEqual(['/repo/a']);
+  });
+
+  it('re-imports context for every project and reports only nonzero counts', async () => {
+    const a = project('proj_a', '/repo/a');
+    const b = project('proj_b', '/repo/b');
+    const { deps, reimported } = fakeRefreshDeps({
+      projects: [a, b],
+      reimportCounts: { proj_a: 2, proj_b: 0 },
+    });
+    const result = await runRefresh(deps);
+    expect(reimported).toEqual(['proj_a', 'proj_b']);
+    expect(result.reimported).toEqual([
+      { projectId: 'proj_a', rootPath: '/repo/a', count: 2 },
+    ]);
+  });
+
+  it('isolates per-project failures: one failure does not stop the loop', async () => {
+    const a = project('proj_a', '/repo/a');
+    const b = project('proj_b', '/repo/b');
+    const { deps, installed } = fakeRefreshDeps({
+      projects: [a, b],
+      claudeSettings: {
+        '/repo/a': '{"hooks":{"x":[{"hooks":[{"command":"memorize hook claude SessionStart"}]}]}}',
+        '/repo/b': '{"hooks":{"x":[{"hooks":[{"command":"memorize hook claude SessionStart"}]}]}}',
+      },
+      failInstallFor: '/repo/a',
+    });
+    const result = await runRefresh(deps);
+    expect(result.failures).toHaveLength(1);
+    expect(result.failures[0]!.target).toContain('/repo/a');
+    expect(installed).toContain('/repo/b'); // loop continued
   });
 });
