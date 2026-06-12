@@ -512,6 +512,13 @@ export function getRule(projectId: string, ruleId: string): Rule | undefined {
   return parse<Rule>(row);
 }
 
+export function listImportedRules(projectId: string): Rule[] {
+  const rows = db(projectId)
+    .prepare("SELECT data FROM rules WHERE source = 'imported'")
+    .all() as Array<{ data: string }>;
+  return parseAll<Rule>(rows);
+}
+
 export function listOpenConflicts(projectId: string): Conflict[] {
   const rows = db(projectId)
     .prepare("SELECT data FROM conflicts WHERE status != 'resolved'")
