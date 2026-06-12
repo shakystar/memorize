@@ -292,9 +292,41 @@ export interface CliExtractorChild {
     on(event: 'data', listener: (chunk: unknown) => void): unknown;
   } | null;
   stdin: { end(data: string): unknown } | null;
+  pid?: number | undefined;
   kill(): boolean;
   on(event: 'error', listener: (error: Error) => void): unknown;
   on(event: 'close', listener: (code: number | null) => void): unknown;
+}
+
+/**
+ * Windows: `claude`/`codex` are .cmd shims, so cross-spawn's direct child is
+ * a cmd.exe wrapper — child.kill() terminates only the wrapper and orphans the
+ * real extractor (observed live as console windows that never close). taskkill
+ * /T takes the whole tree down. POSIX needs no wrapper handling.
+ * Fire-and-forget: the timeout path already rejects regardless.
+ *
+ * Exported for unit-testing with injectable platform + spawn seams.
+ */
+export function killExtractorTree(
+  child: CliExtractorChild,
+  opts?: {
+    platform?: string;
+    taskkillSpawn?: (
+      cmd: string,
+      args: string[],
+      o: { windowsHide: boolean },
+    ) => unknown;
+  },
+): void {
+  const platform = opts?.platform ?? process.platform;
+  if (platform === 'win32' && child.pid != null) {
+    const taskkillSpawn = opts?.taskkillSpawn ?? spawn;
+    taskkillSpawn('taskkill', ['/pid', String(child.pid), '/T', '/F'], {
+      windowsHide: true,
+    });
+    return;
+  }
+  child.kill();
 }
 
 /** Spawn seam (test-injectable; cross-spawn satisfies it). */
@@ -362,7 +394,7 @@ export class CliConsolidator implements Consolidator {
       // so the watermark stays behind and the next boundary retries.
       const timer = setTimeout(() => {
         timedOut = true;
-        child.kill();
+        killExtractorTree(child);
       }, timeoutMs);
       child.stdout?.on('data', (chunk) => {
         stdout += String(chunk);
