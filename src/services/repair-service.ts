@@ -569,7 +569,7 @@ export async function doctor(cwd: string): Promise<DoctorReport> {
   }
 
   if (!projectId) {
-    if (checks.length === 0) {
+    if (!checks.some((check) => check.id === 'project.bound')) {
       checks.push({
         id: 'project.bound',
         label: 'Project bound to current directory',

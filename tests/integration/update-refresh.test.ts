@@ -134,6 +134,16 @@ describe('runRefresh end-to-end (sandboxed)', () => {
 });
 
 describe('doctor update.version line', () => {
+  it('unbound directory still fails doctor (update.version must not mask project.bound)', async () => {
+    const unbound = join(sandbox, 'unbound');
+    await mkdir(unbound, { recursive: true });
+    const report = await doctor(unbound);
+    expect(report.status).toBe('error');
+    expect(
+      report.checks.find((c) => c.id === 'project.bound')?.status,
+    ).toBe('error');
+  });
+
   it('always reports the CLI version as a non-failing check', async () => {
     const report = await doctor(repo);
     const check = report.checks.find((c) => c.id === 'update.version');
