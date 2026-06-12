@@ -1,6 +1,8 @@
+import fs from 'node:fs/promises';
+
 import { appendEvent, ensureProjectDirectories } from '../storage/event-store.js';
 import { bindProject, resolveProjectIdForPath } from '../storage/bindings-store.js';
-import { readJson, writeJson } from '../storage/fs-utils.js';
+import { isEnoent, readJson, writeJson } from '../storage/fs-utils.js';
 import {
   getProjectProjection,
   getWorkstream,
@@ -10,7 +12,7 @@ import { ACTOR_SYSTEM } from '../domain/common.js';
 import type { CreateProjectInput } from '../domain/commands.js';
 import { createProject as createProjectEntity, createWorkstream } from '../domain/entities.js';
 import type { Project, ProjectSyncState, Workstream } from '../domain/entities.js';
-import { getSyncFile } from '../storage/path-resolver.js';
+import { getProjectsRoot, getSyncFile } from '../storage/path-resolver.js';
 
 export async function createProject(input: CreateProjectInput): Promise<Project> {
   const project = createProjectEntity(input);
@@ -112,4 +114,30 @@ export async function readSyncState(
   projectId: string,
 ): Promise<ProjectSyncState | undefined> {
   return readJson<ProjectSyncState>(getSyncFile(projectId));
+}
+
+/**
+ * Enumerate every project known to this machine (machine-wide refresh,
+ * `memorize update`). Reads the projections under ~/.memorize/projects/*;
+ * entries that are not readable projects (stray files, invalid ids, dirs
+ * without a project row) are silently skipped.
+ */
+export async function listProjects(): Promise<Project[]> {
+  let entries: string[];
+  try {
+    entries = await fs.readdir(getProjectsRoot());
+  } catch (error) {
+    if (isEnoent(error)) return [];
+    throw error;
+  }
+  const projects: Project[] = [];
+  for (const id of entries) {
+    try {
+      const project = getProjectProjection(id);
+      if (project) projects.push(project);
+    } catch {
+      // not a project dir — skip
+    }
+  }
+  return projects;
 }
