@@ -17,6 +17,7 @@ import {
   rebuildProjectProjection,
 } from './projection-store.js';
 import { getBoundProjectId, readProject, requireBoundProjectId } from './project-service.js';
+import { getCurrentVersion, getUpdateNotice } from './update-service.js';
 
 export async function inspectProject(cwd: string): Promise<string> {
   const projectId = await requireBoundProjectId(cwd);
@@ -532,8 +533,27 @@ function checkConsolidationHealth(projectId: string): DoctorCheck {
   };
 }
 
+async function buildUpdateVersionCheck(): Promise<DoctorCheck> {
+  const current = getCurrentVersion();
+  let notice: string | undefined;
+  try {
+    ({ notice } = await getUpdateNotice());
+  } catch {
+    // corrupt cache file — version info is best-effort, never fails doctor
+  }
+  return {
+    id: 'update.version',
+    label: 'CLI version',
+    status: 'ok',
+    message: notice ? `v${current} — ${notice}` : `v${current}`,
+  };
+}
+
 export async function doctor(cwd: string): Promise<DoctorReport> {
   const checks: DoctorCheck[] = [];
+  // Cache-only version info (no network in doctor) — status stays 'ok'
+  // because "a newer version exists" must not flip doctor to exit 1.
+  checks.push(await buildUpdateVersionCheck());
   let projectId: string | undefined;
   try {
     projectId = (await getBoundProjectId(cwd)) ?? undefined;

@@ -4,8 +4,10 @@ import { join } from 'node:path';
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
+import { doctor } from '../../src/services/repair-service.js';
 import {
   defaultRefreshDeps,
+  recordUpdateCheck,
   runRefresh,
 } from '../../src/services/update-service.js';
 import { setupProject } from '../../src/services/setup-service.js';
@@ -128,5 +130,23 @@ describe('runRefresh end-to-end (sandboxed)', () => {
       codexHooksFile: () => join(sandbox, 'codex-hooks.json'),
     });
     expect(result.claudeRefreshed).toEqual([]);
+  });
+});
+
+describe('doctor update.version line', () => {
+  it('always reports the CLI version as a non-failing check', async () => {
+    const report = await doctor(repo);
+    const check = report.checks.find((c) => c.id === 'update.version');
+    expect(check).toBeDefined();
+    expect(check!.status).toBe('ok'); // info-only: never flips doctor to exit 1
+  });
+
+  it('mentions the newer cached version when one is known', async () => {
+    await recordUpdateCheck({ npmCapture: async () => '999.0.0\n' });
+    const report = await doctor(repo);
+    const check = report.checks.find((c) => c.id === 'update.version')!;
+    expect(check.message).toContain('999.0.0');
+    expect(check.message).toContain('memorize update');
+    expect(check.status).toBe('ok');
   });
 });
