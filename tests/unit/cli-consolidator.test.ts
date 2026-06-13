@@ -10,6 +10,7 @@ import {
   CliConsolidator,
   ExtractionParseError,
   SUPPRESS_HOOKS_ENV_VAR,
+  killExtractorTree,
   resolveConsolidatorBackend,
   type SpawnImpl,
 } from '../../src/services/consolidate-service.js';
@@ -128,6 +129,7 @@ interface SpawnCall {
   command: string;
   args: string[];
   env: NodeJS.ProcessEnv;
+  windowsHide: boolean;
 }
 
 function fakeSpawn(
@@ -136,7 +138,7 @@ function fakeSpawn(
 ): { spawnImpl: SpawnImpl; calls: SpawnCall[] } {
   const calls: SpawnCall[] = [];
   const spawnImpl: SpawnImpl = (command, args, options) => {
-    calls.push({ command, args, env: options.env });
+    calls.push({ command, args, env: options.env, windowsHide: options.windowsHide });
     if (onSpawn) queueMicrotask(onSpawn);
     return child;
   };
@@ -177,6 +179,7 @@ describe('CliConsolidator (host-CLI extractor — #44)', () => {
     expect(calls[0]!.args).toEqual(['-p', '--output-format', 'text']);
     // Recursion guard: the spawned CLI's own memorize hooks must no-op.
     expect(calls[0]!.env[SUPPRESS_HOOKS_ENV_VAR]).toBe('1');
+    expect(calls[0]!.windowsHide).toBe(true);
     // Prompt arrives via stdin (not argv), with system prompt prepended.
     expect(child.stdinData).toContain('memory consolidator');
     expect(child.stdinData).toContain('## Observations');
@@ -293,6 +296,45 @@ describe('CliConsolidator (host-CLI extractor — #44)', () => {
 
     const consolidator = new CliConsolidator({ command: 'claude', spawnImpl });
     await expect(consolidator.extract(sampleInput)).rejects.toThrow(/ENOENT/);
+  });
+});
+
+// --- killExtractorTree --------------------------------------------------------
+
+describe('killExtractorTree (process-tree helper)', () => {
+  it('win32 + pid present → calls taskkillSpawn with /T /F, does NOT call child.kill', () => {
+    const child = new FakeChild();
+    (child as unknown as { pid: number }).pid = 123;
+    const taskkillCalls: { cmd: string; args: string[]; opts: { windowsHide: boolean } }[] = [];
+    const taskkillSpawn = (
+      cmd: string,
+      args: string[],
+      opts: { windowsHide: boolean },
+    ) => {
+      taskkillCalls.push({ cmd, args, opts });
+    };
+
+    killExtractorTree(child, { platform: 'win32', taskkillSpawn });
+
+    expect(taskkillCalls).toHaveLength(1);
+    expect(taskkillCalls[0]!.cmd).toBe('taskkill');
+    expect(taskkillCalls[0]!.args).toEqual(['/pid', '123', '/T', '/F']);
+    expect(taskkillCalls[0]!.opts.windowsHide).toBe(true);
+    expect(child.wasKilled).toBe(false);
+  });
+
+  it('non-Windows → calls child.kill(), does NOT call taskkillSpawn', () => {
+    const child = new FakeChild();
+    (child as unknown as { pid: number }).pid = 456;
+    const taskkillCalls: unknown[] = [];
+    const taskkillSpawn = (_cmd: string, _args: string[], _opts: unknown) => {
+      taskkillCalls.push(_cmd);
+    };
+
+    killExtractorTree(child, { platform: 'linux', taskkillSpawn });
+
+    expect(child.wasKilled).toBe(true);
+    expect(taskkillCalls).toHaveLength(0);
   });
 });
 

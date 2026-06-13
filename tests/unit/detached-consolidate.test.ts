@@ -24,7 +24,7 @@ let savedInline: string | undefined;
 interface SpawnCall {
   command: string;
   args: string[];
-  options: { cwd: string; detached: boolean; stdio: 'ignore' };
+  options: { cwd: string; detached: boolean; stdio: 'ignore'; windowsHide: boolean };
   unrefCalled: boolean;
 }
 
@@ -134,6 +134,7 @@ describe('spawnDetachedConsolidate — detached mode (#46 Part A)', () => {
     expect(call.options.cwd).toBe(sandbox);
     expect(call.options.detached).toBe(true);
     expect(call.options.stdio).toBe('ignore');
+    expect(call.options.windowsHide).toBe(true);
     expect(call.unrefCalled).toBe(true);
   });
 

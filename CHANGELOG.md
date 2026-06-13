@@ -7,6 +7,26 @@ loosely. The project adheres to [Semantic Versioning](https://semver.org/);
 major-version bumps are reserved for breaking changes to the on-disk event
 log layout or the public CLI surface.
 
+## [2.3.1] — 2026-06-13
+
+Windows-only console-noise patch, cut from the `v2.3.0` tag so it carries
+none of the unreleased `memorize update` / threshold-consolidation work
+(those ship in `2.4.0`). No behavior change off Windows.
+
+### Fixed
+
+- **Background children no longer flash visible console windows on
+  Windows** (#102). Boundary-spawned consolidate children (and their
+  `claude -p` / `codex exec` grandchildren) and the detached consolidate
+  process allocated black, empty console windows that lingered for the
+  full extraction. `windowsHide: true` (CREATE_NO_WINDOW) is now set
+  everywhere a background child is spawned; no-op on POSIX.
+- **The extractor process tree is fully killed on timeout** (Windows).
+  `child.kill()` only terminated cross-spawn's `cmd.exe` shim wrapper,
+  orphaning the real `claude`/`codex` extractor (and its console window)
+  past the 90s timeout. `taskkill /T /F` now takes the whole tree down;
+  POSIX keeps the plain `child.kill()`.
+
 ## [2.3.0] — 2026-06-11
 
 Shaped end-to-end by the first external user's report (#82): three
