@@ -59,3 +59,7 @@ gitPAT.txt
 /.gemini/
 /.qoder/
 /.vscode/
+
+# Private dogfood measurement artifacts — judge labels derived from session
+# transcripts (private project content); local-only, never committed (#99).
+scripts/dogfood/labels/
