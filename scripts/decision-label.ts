@@ -32,7 +32,7 @@ import path from 'node:path';
 import Database from 'better-sqlite3';
 
 const TRANSCRIPT_TAIL_BYTES = 16 * 1024; // mirror consolidate-service (for exposure note)
-const JUDGE_TIMEOUT_MS = 180_000;
+const JUDGE_TIMEOUT_MS = 300_000;
 // Above this much stripped conversational text we'd need chunking; the
 // validation subset stays well under it, so we refuse rather than silently
 // truncate (a truncated denominator would understate the miss rate).
@@ -106,14 +106,17 @@ const JUDGE_PROMPT = `You are labeling a development-session transcript for a ME
 
 TASK: extract every DECISION or STANDING DIRECTIVE that was actually established in this conversation.
 
-Include an item ONLY if it passes one of these operational tests:
-- COMMITMENT — you could later ask "is it done yet?". The team committed to do a specific thing (e.g. "ship the Windows fix as a 2.3.1 patch", "publish after dogfooding").
-- STANDING — you could ask "is it still true until someone changes it?". A standard, preference, fact, or rule set as binding on the project (e.g. "always use the @scoped package name", "dogfood before publish").
+Include an item ONLY if it passes one of these operational tests. The COMMITMENT vs STANDING split is by LIFECYCLE — apply it strictly, it is the most common labeling error:
+- COMMITMENT — a specific thing the team committed to DO, which COMPLETES. Once done you would answer "yes, done" and it stops applying. A one-off instruction to do something before/while working ("document these gaps first", "git init the repo", "ship X as a patch") is a COMMITMENT even when phrased like a rule — the test is whether it is discharged by being done, not whether it sounds general.
+- STANDING — a standard, preference, fact, or rule that PERSISTS and keeps constraining future work indefinitely, until someone explicitly changes it ("always use the @scoped package name", "dogfood before every publish"). If it can be "finished", it is NOT standing.
 
-EXCLUDE strictly: brainstorming, options weighed and dropped, questions, hypotheticals, restated background, and anything the agent merely PROPOSED that the user did not confirm. A decision the agent suggested counts ONLY if the user accepted it.
+EXCLUDE strictly:
+- brainstorming, options weighed and dropped, questions, hypotheticals, restated background;
+- anything the agent merely PROPOSED that the user did not accept — an agent suggestion counts ONLY if the user confirmed it (an explicit "ok / ㅇㅋ / ㅇㅇ / do it" on that point, or the user then acting on it);
+- do NOT double-count: if the user gives one instruction and the agent enumerates the concrete items it covers, count the concrete decisions that carry independent content (e.g. a specific validation rule) — do NOT also emit the umbrella instruction AND a restated general-principle version of it as separate items.
 
 For each item output an object:
-  {"type":"commitment"|"standing","statement":"<one-line paraphrase>","quote":"<short verbatim snippet that establishes it>","by":"user"|"agent","confidence":<0.0-1.0>}
+  {"type":"commitment"|"standing","statement":"<one-line paraphrase>","quote":"<short verbatim snippet that establishes it>","by":"user"|"agent","accepted":"<how the user confirmed it, or 'unilateral-agent' if they did not>","confidence":<0.0-1.0>}
 
 Output ONLY a JSON array of these objects. No prose, no markdown fences. If there are no qualifying decisions, output [].
 
@@ -154,6 +157,7 @@ interface Label {
   statement: string;
   quote: string;
   by: 'user' | 'agent';
+  accepted?: string;
   confidence: number;
 }
 
@@ -258,7 +262,9 @@ async function main(): Promise<void> {
 
   console.log(`\n## Judge-labeled decisions in conversation (denominator): ${labels.length}\n`);
   for (const l of labels) {
-    console.log(`  [${l.type}/${l.by} ${l.confidence}] ${l.statement}`);
+    console.log(
+      `  [${l.type}/${l.by}${l.accepted ? ` accepted:${l.accepted}` : ''} ${l.confidence}] ${l.statement}`,
+    );
     console.log(`      "${l.quote.replace(/\s+/g, ' ').slice(0, 100)}"`);
   }
 
