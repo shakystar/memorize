@@ -61,6 +61,13 @@ export async function runConsolidateCommand(
     ? (rawBoundary as ConsolidateBoundary)
     : 'manual';
 
+  // #99 cat-1: the triggering hook passes its transcript_path so a
+  // conversation-only session (zero observations) still has its conversation
+  // read and consolidated. Optional; absent for the bare manual command.
+  const transcriptFlag = args.indexOf('--transcript');
+  const transcriptPath =
+    transcriptFlag !== -1 ? args[transcriptFlag + 1] : undefined;
+
   const projectId = await requireBoundProjectId(ctx.cwd);
   // Attribute the consolidated events to the session's agent when known;
   // 'system' otherwise (the memory payload itself carries the sessionId).
@@ -73,6 +80,7 @@ export async function runConsolidateCommand(
     actor,
     boundary,
     ...(sessionId ? { sessionId } : {}),
+    ...(transcriptPath ? { transcriptPath } : {}),
   });
   // Background propagation parity with the old inline boundary path: push
   // the new events to configured siblings. No-op without a transport,

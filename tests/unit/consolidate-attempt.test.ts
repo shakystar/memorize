@@ -1,4 +1,4 @@
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -220,5 +220,83 @@ describe('consolidate() records the attempt in meta (#51)', () => {
     await expect(
       consolidate({ projectId, actor: 'test', consolidator: failing }),
     ).rejects.toThrow('extractor exploded');
+  });
+});
+
+describe('consolidate() — #99 cat-1 conversation-only sessions', () => {
+  // A consolidator that emits ONLY when it actually received conversation text,
+  // so a passing test proves the conversation was read (not the observations).
+  const fromConversation: Consolidator = {
+    async extract(input) {
+      return input.transcriptTail?.includes('AGPL')
+        ? [{ kind: 'decision' as const, text: 'License is AGPL-3.0', salience: 8 }]
+        : [];
+    },
+  };
+
+  it('consolidates a ZERO-observation session when the hook supplies a transcript with conversation', async () => {
+    await seedProject();
+    // No observations appended — this is the cat-1 case.
+    const transcriptPath = join(sandbox, 'conv.jsonl');
+    await writeFile(
+      transcriptPath,
+      JSON.stringify({
+        type: 'user',
+        message: { content: 'we will use AGPL-3.0 for the license' },
+      }) + '\n',
+      'utf8',
+    );
+
+    const result = await consolidate({
+      projectId,
+      actor: 'test',
+      transcriptPath,
+      consolidator: fromConversation,
+    });
+    expect(result.consolidated).toBe(1);
+    expect(result.observationsProcessed).toBe(0);
+  });
+
+  it('stays a NOOP when there are neither observations nor a transcript', async () => {
+    await seedProject();
+    const result = await consolidate({
+      projectId,
+      actor: 'test',
+      consolidator: fromConversation,
+    });
+    expect(result.consolidated).toBe(0);
+    expect(result.extractor).toBe('none');
+  });
+
+  it('advances the byte watermark so a re-read with no new conversation is a NOOP', async () => {
+    await seedProject();
+    const transcriptPath = join(sandbox, 'conv.jsonl');
+    await writeFile(
+      transcriptPath,
+      JSON.stringify({
+        type: 'user',
+        message: { content: 'we will use AGPL-3.0 for the license' },
+      }) + '\n',
+      'utf8',
+    );
+
+    const first = await consolidate({
+      projectId,
+      actor: 'test',
+      transcriptPath,
+      consolidator: fromConversation,
+    });
+    expect(first.consolidated).toBe(1);
+
+    // Same transcript, nothing appended: the byte watermark is at EOF, so the
+    // conversation read yields nothing and the boundary is a NOOP.
+    const second = await consolidate({
+      projectId,
+      actor: 'test',
+      transcriptPath,
+      consolidator: fromConversation,
+    });
+    expect(second.consolidated).toBe(0);
+    expect(second.extractor).toBe('none');
   });
 });
