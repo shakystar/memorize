@@ -116,6 +116,7 @@ describe('spawnDetachedConsolidate — detached mode (#46 Part A)', () => {
       { projectId, agent: 'claude', cwd: sandbox },
       'sess_abc',
       'post-compact',
+      undefined,
       spawnImpl,
     );
 
@@ -138,12 +139,33 @@ describe('spawnDetachedConsolidate — detached mode (#46 Part A)', () => {
     expect(call.unrefCalled).toBe(true);
   });
 
+  it('threads --transcript when a transcript path is given (#99 cat-1)', async () => {
+    const { spawnImpl, calls } = fakeSpawn();
+    await spawnDetachedConsolidate(
+      { projectId, agent: 'claude', cwd: sandbox },
+      'sess_abc',
+      'session-end',
+      '/path/to/transcript.jsonl',
+      spawnImpl,
+    );
+    expect(calls[0]!.args.slice(1)).toEqual([
+      'consolidate',
+      '--session',
+      'sess_abc',
+      '--boundary',
+      'session-end',
+      '--transcript',
+      '/path/to/transcript.jsonl',
+    ]);
+  });
+
   it('omits --session when no session id is known', async () => {
     const { spawnImpl, calls } = fakeSpawn();
     await spawnDetachedConsolidate(
       { projectId, agent: 'claude', cwd: sandbox },
       undefined,
       'session-start',
+      undefined,
       spawnImpl,
     );
     expect(calls).toHaveLength(1);
@@ -162,6 +184,7 @@ describe('spawnDetachedConsolidate — detached mode (#46 Part A)', () => {
       { projectId, agent: 'claude', cwd: sandbox },
       undefined,
       'session-start',
+      undefined,
       spawnImpl,
     );
     const types = (await readEvents(projectId)).map((e) => e.type);
@@ -177,6 +200,7 @@ describe('spawnDetachedConsolidate — detached mode (#46 Part A)', () => {
         { projectId, agent: 'claude', cwd: sandbox },
         undefined,
         'session-start',
+        undefined,
         failingSpawn,
       ),
     ).resolves.toBeUndefined();
@@ -196,6 +220,7 @@ describe('spawnDetachedConsolidate — inline escape hatch (MEMORIZE_CONSOLIDATE
       { projectId, agent: 'claude', cwd: sandbox },
       undefined,
       'session-end',
+      undefined,
       spawnImpl,
     );
     expect(calls).toHaveLength(0);

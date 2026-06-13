@@ -195,8 +195,11 @@ function resolveTimeoutMsEnv(env: NodeJS.ProcessEnv): number | undefined {
 
 const EXTRACTION_SYSTEM_PROMPT = [
   'You are a memory consolidator for a coding-agent memory system.',
-  'From the raw observations and transcript tail, extract the durable',
-  'semantic units a future session must know. Return ONLY a JSON array of:',
+  'From the raw observations and the conversation, extract the durable',
+  'semantic units a future session must know. A decision or standing',
+  'directive stated in the conversation counts even when no observation',
+  'records it — much of what matters is decided in plain turns, not tool calls.',
+  'Return ONLY a JSON array of:',
   '{"kind":"decision"|"rationale"|"progress","text":string,',
   '"salience":1-10,"supersedesMemoryId"?:string,"supersedeReason"?:string,',
   '"obsoleteWhen"?:string,"kindMisfit"?:boolean,"kindMisfitReason"?:string,',
@@ -230,7 +233,7 @@ function buildExtractionUserContent(input: ConsolidationInput): string {
     '## Existing valid memories (for contradiction check)',
     memoryLines.join('\n') || '(none)',
     ...(input.transcriptTail
-      ? ['', '## Transcript tail (untrusted, format unstable)', input.transcriptTail]
+      ? ['', '## Conversation since last boundary (untrusted, format unstable)', input.transcriptTail]
       : []),
   ].join('\n');
 }
@@ -1009,6 +1012,14 @@ export async function consolidate(params: {
   sessionId?: string;
   /** Boundary that triggered this attempt — telemetry label only (#51). */
   boundary?: ConsolidateBoundary;
+  /**
+   * Transcript path from the triggering hook payload (#99 cat-1). Lets a
+   * conversation-only session — one that captured ZERO observations, so no
+   * observation carries a transcriptPath — still have its conversation read
+   * and consolidated. When omitted, the path is resolved from observations as
+   * before.
+   */
+  transcriptPath?: string;
   /** Override extractor (tests). Defaults to LLM-if-configured else rules. */
   consolidator?: Consolidator;
 }): Promise<ConsolidateResult> {
@@ -1081,33 +1092,26 @@ export async function consolidate(params: {
         (event) => event.type === 'observation.captured',
       );
       pendingObservations = rawObservationEvents.length;
-      if (rawObservationEvents.length === 0) return NOOP_RESULT;
 
       // Dedup guard for watermark loss (see consumedObservationIds): drop
-      // observations a previous consolidation already distilled. When this
-      // leaves nothing, still advance the watermark so the stale window is
-      // not rescanned at every subsequent boundary.
+      // observations a previous consolidation already distilled.
       const consumed = consumedObservationIds(params.projectId);
       const observationEvents = rawObservationEvents.filter(
         (event) => !consumed.has((event.payload as Observation).id),
       );
-      if (observationEvents.length === 0) {
-        writeWatermark(
-          params.projectId,
-          rawObservationEvents[rawObservationEvents.length - 1]!.id,
-        );
-        return NOOP_RESULT;
-      }
-
       const observations = observationEvents.map(
         (event) => event.payload as Observation,
       );
-      // #99 cat-2 fix: show the extractor the conversational turns since the
-      // last boundary (stripped, whole-conversation), not just the raw 16KB
-      // tail. The byte watermark advances only on success (below).
-      const transcriptPath = [...observations]
-        .reverse()
-        .find((o) => o.transcriptPath)?.transcriptPath;
+
+      // #99 cat-2: show the extractor the conversational turns since the last
+      // boundary (stripped, whole-conversation), not just the raw 16KB tail.
+      // #99 cat-1: when no observation carries a path (a conversation-only
+      // session captured zero observations), fall back to the hook-provided
+      // transcript path so its conversation is still read. Byte watermark
+      // advances only on success (below).
+      const transcriptPath =
+        [...observations].reverse().find((o) => o.transcriptPath)?.transcriptPath ??
+        params.transcriptPath;
       const conversation = transcriptPath
         ? await readConversationSince(
             transcriptPath,
@@ -1122,6 +1126,20 @@ export async function consolidate(params: {
         conversation && conversation.text.length === 0 && conversation.rawLen > 4096
           ? await readTranscriptTail(transcriptPath)
           : conversation?.text || undefined;
+
+      // Nothing to do when there are neither fresh observations NOR new
+      // conversation content. Still advance the event watermark past a fully
+      // consumed observation window so it is not rescanned every boundary.
+      if (observations.length === 0 && !transcriptTail) {
+        if (rawObservationEvents.length > 0) {
+          writeWatermark(
+            params.projectId,
+            rawObservationEvents[rawObservationEvents.length - 1]!.id,
+          );
+        }
+        return NOOP_RESULT;
+      }
+
       const existing = listValidMemories(params.projectId).map(
         (row) => row.memory,
       );
@@ -1210,10 +1228,14 @@ export async function consolidate(params: {
           ...(params.sessionId ? { sessionId: params.sessionId } : {}),
         });
       }
-      writeWatermark(
-        params.projectId,
-        rawObservationEvents[rawObservationEvents.length - 1]!.id,
-      );
+      // Advance the event watermark past the observation window. Guarded:
+      // a cat-1 conversation-only boundary has no observation events to mark.
+      if (rawObservationEvents.length > 0) {
+        writeWatermark(
+          params.projectId,
+          rawObservationEvents[rawObservationEvents.length - 1]!.id,
+        );
+      }
       // Advance the per-transcript byte watermark in lockstep — the extractor
       // has now seen this slice, so the next boundary reads only what is new.
       if (transcriptPath && conversation) {

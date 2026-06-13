@@ -131,6 +131,22 @@ function prepareHookText(
 }
 
 /**
+ * The transcript path a boundary hook (SessionEnd / PreCompact / SessionStart)
+ * carries in its payload (#99 cat-1). Lets consolidation read the conversation
+ * of a session that captured zero observations — there is no observation to
+ * carry the path otherwise. Best-effort: any parse failure means "unknown".
+ */
+function transcriptPathFromPayload(raw: string | undefined): string | undefined {
+  if (!raw) return undefined;
+  try {
+    const obj = JSON.parse(raw) as Record<string, unknown>;
+    return typeof obj.transcript_path === 'string' ? obj.transcript_path : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
  * Boundary consolidation attempt — NEVER fails the hook. A failure (LLM
  * timeout, lock contention, mid-write kill) leaves the watermark behind,
  * and the next boundary — including the next SessionStart's catch-up —
@@ -140,6 +156,7 @@ async function tryConsolidate(
   ctx: Pick<HookContext, 'projectId' | 'agent'>,
   sessionId: string | undefined,
   boundary: ConsolidateBoundary,
+  transcriptPath?: string,
 ): Promise<void> {
   try {
     await consolidate({
@@ -147,6 +164,7 @@ async function tryConsolidate(
       actor: ctx.agent,
       boundary,
       ...(sessionId ? { sessionId } : {}),
+      ...(transcriptPath ? { transcriptPath } : {}),
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
@@ -193,10 +211,11 @@ export async function spawnDetachedConsolidate(
   ctx: Pick<HookContext, 'projectId' | 'agent' | 'cwd'>,
   sessionId: string | undefined,
   boundary: ConsolidateBoundary,
+  transcriptPath?: string,
   spawnImpl: DetachedSpawnImpl = spawn,
 ): Promise<void> {
   if (process.env[CONSOLIDATE_INLINE_ENV_VAR] === '1') {
-    await tryConsolidate(ctx, sessionId, boundary);
+    await tryConsolidate(ctx, sessionId, boundary, transcriptPath);
     return;
   }
   try {
@@ -214,6 +233,9 @@ export async function spawnDetachedConsolidate(
         // attempt is attributable. Telemetry only — never changes behavior.
         '--boundary',
         boundary,
+        // #99 cat-1: hand the child the transcript so a conversation-only
+        // session (zero observations) still has its conversation consolidated.
+        ...(transcriptPath ? ['--transcript', transcriptPath] : []),
       ],
       {
         cwd: ctx.cwd,
@@ -283,7 +305,12 @@ const handleSessionStart: HookHandler = async (ctx) => {
   // composed below may lag one window (the catch-up's memories land
   // seconds later); the PostToolUse live-update channel injects them
   // into the running session as soon as they exist.
-  await spawnDetachedConsolidate(ctx, undefined, 'session-start');
+  await spawnDetachedConsolidate(
+    ctx,
+    undefined,
+    'session-start',
+    transcriptPathFromPayload(ctx.rawPayload),
+  );
 
   // P3-b: pull sibling-machine events BEFORE composing startup context so the
   // injected memories/tasks reflect the latest remote state. No-op + silent
@@ -434,7 +461,12 @@ const handlePostCompact: HookHandler = async (ctx) => {
   // Compaction is a CLS boundary: consolidate the observation window that
   // is about to fall out of the agent's context — detached (#46), so the
   // hook returns immediately. The child autoPushes its own new events.
-  await spawnDetachedConsolidate(ctx, sessionId, 'post-compact');
+  await spawnDetachedConsolidate(
+    ctx,
+    sessionId,
+    'post-compact',
+    transcriptPathFromPayload(ctx.rawPayload),
+  );
 
   // P3-b: propagate this boundary's capture events to siblings (background,
   // no-op unless syncTransport is configured; never throws).
@@ -503,7 +535,12 @@ const handleSessionEnd: HookHandler = async (ctx) => {
   // that reap and finishes the consolidation on its own. If the child
   // still dies mid-way, the watermark only advances on success and the
   // next SessionStart's catch-up redoes the window.
-  await spawnDetachedConsolidate(ctx, resolvedSessionId, 'session-end');
+  await spawnDetachedConsolidate(
+    ctx,
+    resolvedSessionId,
+    'session-end',
+    transcriptPathFromPayload(ctx.rawPayload),
+  );
 
   // P3-b: final push of the session's events before it exits. The subprocess
   // may be reaped mid-push — fine, push is watermark-idempotent and the next
