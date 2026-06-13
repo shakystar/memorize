@@ -24,154 +24,22 @@
 //   tsx scripts/decision-label.ts <project-id|db-path>           # list sessions
 //   tsx scripts/decision-label.ts <project-id|db-path> <session> # label one
 
-import { spawn } from 'node:child_process';
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 
 import Database from 'better-sqlite3';
 
-const TRANSCRIPT_TAIL_BYTES = 16 * 1024; // mirror consolidate-service (for exposure note)
-const JUDGE_TIMEOUT_MS = 300_000;
-// Above this much stripped conversational text we'd need chunking; the
-// validation subset stays well under it, so we refuse rather than silently
-// truncate (a truncated denominator would understate the miss rate).
-const MAX_PROMPT_CHARS = 500_000;
-
-function resolveDbPath(arg: string): string {
-  if (arg.endsWith('.db') || fs.existsSync(arg)) return arg;
-  const root = process.env.MEMORIZE_ROOT ?? path.join(os.homedir(), '.memorize');
-  return path.join(root, 'projects', arg, 'memorize.db');
-}
-
-// --- transcript -> conversational text --------------------------------------
-
-interface Turn {
-  role: 'user' | 'agent';
-  text: string;
-}
-
-/**
- * Reduce a transcript .jsonl to the conversational turns a decision could be
- * stated in: user message text and assistant *visible* text. Tool inputs,
- * tool results, and assistant thinking are dropped — decisions are
- * communicated in plain turns, and the bulk bytes (#99 cat-2) are tool I/O.
- */
-function readConversation(transcriptPath: string): Turn[] {
-  const turns: Turn[] = [];
-  const lines = fs.readFileSync(transcriptPath, 'utf8').split('\n');
-  for (const line of lines) {
-    if (!line.trim()) continue;
-    let obj: unknown;
-    try {
-      obj = JSON.parse(line);
-    } catch {
-      continue;
-    }
-    const rec = obj as { type?: string; message?: { content?: unknown } };
-    if (rec.type === 'user') {
-      const content = rec.message?.content;
-      if (typeof content === 'string') {
-        if (content.trim()) turns.push({ role: 'user', text: content.trim() });
-      } else if (Array.isArray(content)) {
-        for (const block of content as Array<{ type?: string; text?: string }>) {
-          if (block.type === 'text' && block.text?.trim()) {
-            turns.push({ role: 'user', text: block.text.trim() });
-          }
-        }
-      }
-    } else if (rec.type === 'assistant') {
-      const content = rec.message?.content;
-      if (Array.isArray(content)) {
-        for (const block of content as Array<{ type?: string; text?: string }>) {
-          if (block.type === 'text' && block.text?.trim()) {
-            turns.push({ role: 'agent', text: block.text.trim() });
-          }
-        }
-      }
-    }
-  }
-  return turns;
-}
-
-function renderConversation(turns: Turn[]): string {
-  return turns
-    .map((t) => `### ${t.role === 'user' ? 'USER' : 'AGENT'}\n${t.text}`)
-    .join('\n\n');
-}
-
-// --- judge ------------------------------------------------------------------
-
-const JUDGE_PROMPT = `You are labeling a development-session transcript for a MEASUREMENT. Your output is the ground-truth denominator for a capture-miss-rate metric — be precise, not generous.
-
-TASK: extract every DECISION or STANDING DIRECTIVE that was actually established in this conversation.
-
-Include an item ONLY if it passes one of these operational tests. The COMMITMENT vs STANDING split is by LIFECYCLE — apply it strictly, it is the most common labeling error:
-- COMMITMENT — a specific thing the team committed to DO, which COMPLETES. Once done you would answer "yes, done" and it stops applying. A one-off instruction to do something before/while working ("document these gaps first", "git init the repo", "ship X as a patch") is a COMMITMENT even when phrased like a rule — the test is whether it is discharged by being done, not whether it sounds general.
-- STANDING — a standard, preference, fact, or rule that PERSISTS and keeps constraining future work indefinitely, until someone explicitly changes it ("always use the @scoped package name", "dogfood before every publish"). If it can be "finished", it is NOT standing.
-
-EXCLUDE strictly:
-- brainstorming, options weighed and dropped, questions, hypotheticals, restated background;
-- anything the agent merely PROPOSED that the user did not accept — an agent suggestion counts ONLY if the user confirmed it (an explicit "ok / ㅇㅋ / ㅇㅇ / do it" on that point, or the user then acting on it);
-- do NOT double-count: if the user gives one instruction and the agent enumerates the concrete items it covers, count the concrete decisions that carry independent content (e.g. a specific validation rule) — do NOT also emit the umbrella instruction AND a restated general-principle version of it as separate items.
-
-For each item output an object:
-  {"type":"commitment"|"standing","statement":"<one-line paraphrase>","quote":"<short verbatim snippet that establishes it>","by":"user"|"agent","accepted":"<how the user confirmed it, or 'unilateral-agent' if they did not>","confidence":<0.0-1.0>}
-
-Output ONLY a JSON array of these objects. No prose, no markdown fences. If there are no qualifying decisions, output [].
-
-TRANSCRIPT:
-`;
-
-function runJudge(prompt: string): Promise<string> {
-  return new Promise<string>((resolve, reject) => {
-    const child = spawn('claude', ['-p', '--output-format', 'text'], {
-      env: { ...process.env, MEMORIZE_SUPPRESS_HOOKS: '1' },
-      windowsHide: true,
-    });
-    let stdout = '';
-    let stderr = '';
-    let timedOut = false;
-    const timer = setTimeout(() => {
-      timedOut = true;
-      child.kill();
-    }, JUDGE_TIMEOUT_MS);
-    child.stdout.on('data', (c) => (stdout += String(c)));
-    child.stderr.on('data', (c) => (stderr += String(c)));
-    child.on('error', (e) => {
-      clearTimeout(timer);
-      reject(e);
-    });
-    child.on('close', (code) => {
-      clearTimeout(timer);
-      if (timedOut) reject(new Error(`judge timed out after ${JUDGE_TIMEOUT_MS}ms`));
-      else if (code !== 0) reject(new Error(`judge exited ${code}: ${stderr.slice(0, 200)}`));
-      else resolve(stdout);
-    });
-    child.stdin.end(prompt);
-  });
-}
-
-interface Label {
-  type: 'commitment' | 'standing';
-  statement: string;
-  quote: string;
-  by: 'user' | 'agent';
-  accepted?: string;
-  confidence: number;
-}
-
-/** Tolerant: pull the first JSON array out of the model's reply. */
-function parseLabels(raw: string): Label[] {
-  const start = raw.indexOf('[');
-  const end = raw.lastIndexOf(']');
-  if (start === -1 || end === -1 || end < start) {
-    throw new Error(`no JSON array in judge output:\n${raw.slice(0, 300)}`);
-  }
-  const parsed = JSON.parse(raw.slice(start, end + 1)) as unknown;
-  if (!Array.isArray(parsed)) throw new Error('judge output is not an array');
-  return parsed as Label[];
-}
+import {
+  JUDGE_PROMPT,
+  type Label,
+  MAX_PROMPT_CHARS,
+  parseJsonArray,
+  readConversation,
+  renderConversation,
+  resolveDbPath,
+  runCli,
+  TRANSCRIPT_TAIL_BYTES,
+} from './decision-lib.ts';
 
 // --- main -------------------------------------------------------------------
 
@@ -252,8 +120,8 @@ async function main(): Promise<void> {
   }
 
   console.log('\nRunning judge (claude CLI)…');
-  const raw = await runJudge(JUDGE_PROMPT + conversation);
-  const labels = parseLabels(raw);
+  const raw = await runCli(JUDGE_PROMPT + conversation);
+  const labels = parseJsonArray<Label>(raw);
 
   const outDir = path.join('scripts', 'dogfood', 'labels');
   fs.mkdirSync(outDir, { recursive: true });

@@ -76,6 +76,7 @@
     "dogfood:stats": "tsx scripts/dogfood-stats.ts",
     "dogfood:capture-audit": "tsx scripts/decision-capture-audit.ts",
     "dogfood:label": "tsx scripts/decision-label.ts",
+    "dogfood:miss-rate": "tsx scripts/decision-miss-rate.ts",
     "pack:check": "tsx scripts/validate/package-dry-run.ts"
   },
   "dependencies": {

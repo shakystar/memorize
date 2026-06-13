@@ -62,4 +62,7 @@ gitPAT.txt
 
 # Private dogfood measurement artifacts — judge labels derived from session
 # transcripts (private project content); local-only, never committed (#99).
+# The .out.txt run logs fluctuate with LLM-judge variance (denominator ±), so
+# they are local-only too; the converged result is recorded in issue #99.
 scripts/dogfood/labels/
+scripts/dogfood/*.out.txt
