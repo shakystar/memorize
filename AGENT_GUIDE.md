@@ -214,9 +214,10 @@ session start or auto-installs anything.
 ### `memorize consolidate [--session <id>] [--boundary <label>] [--report]`
 
 Runs one memory-consolidation boundary for the project bound to cwd:
-collects observations past the watermark, extracts consolidated
-memories through the configured backend (see the LLM env section), and
-appends them as events. This is the same command the boundary hooks
+collects observations past the watermark and the conversation since the
+last transcript byte-offset, extracts consolidated memories through the
+configured backend (see the LLM env section), and appends them as
+events. This is the same command the boundary hooks
 (SessionStart catch-up / PostCompact / SessionEnd) spawn as a detached
 background child — running it by hand is equally valid and idempotent
 (an already-consumed window is a clean no-op).
@@ -226,6 +227,11 @@ background child — running it by hand is equally valid and idempotent
 - `--boundary <label>` (single) — telemetry label for the recorded
   attempt (`session-start | post-compact | session-end | manual`); junk
   or missing values read as `manual` and never fail the run.
+- `--transcript <path>` (single) — transcript to read the conversation
+  from when no observation in the window carries one (a zero-observation,
+  pure-conversation session). The boundary hooks pass this automatically
+  from the hook payload; supply it by hand to consolidate a session that
+  produced no tool observations. Absent for the bare manual command.
 - `--report` (boolean) — do NOT consolidate; print the observed
   lifecycle-evidence distribution as JSON instead (#57): per kind the
   memory count, how many carry `obsoleteWhen`, the kind-misfit count and

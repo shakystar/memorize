@@ -58,9 +58,14 @@ Physically they persist forever — auditable, re-consolidatable.
 
 At session boundaries (SessionStart catch-up, PostCompact, SessionEnd —
 or `memorize consolidate` by hand) a **detached background child**
-distills accumulated observations into **consolidated memories**:
-`decision | rationale | progress`, each with a salience score 1–10 and
-provenance (the observation ids it was distilled from).
+distills two sources into **consolidated memories**
+(`decision | rationale | progress`, each with a salience score 1–10 and
+provenance): the accumulated **observations**, and the **conversation
+itself** since the last boundary — read incrementally from the
+transcript, so a decision that was discussed but never typed into a tool
+is still captured. A boundary even fires for a session with *zero*
+observations when the hook hands it a transcript path, so
+pure-conversation sessions are no longer invisible to memory.
 
 The extractor is pluggable, in priority order:
 
@@ -70,11 +75,12 @@ The extractor is pluggable, in priority order:
    recursion guard env var keeps the spawned CLI's own hooks inert.
 3. **Rule-based** — no LLM at all; modest but never worse than nothing.
 
-Correctness contract: the consolidation **watermark** advances only
-after events are durably appended. A timeout, HTTP error, or
-unparseable LLM reply propagates *without* advancing it, so the next
-boundary retries the same window — failed extractions are never
-silently lost. Watermark loss itself is survivable: a dedup guard on
+Correctness contract: two watermarks advance in lockstep, both only
+after events are durably appended — the observation watermark over
+consumed events, and a per-transcript **byte offset** marking how far
+the conversation has been read. A timeout, HTTP error, or unparseable
+LLM reply propagates *without* advancing either, so the next boundary
+retries the same window — failed extractions are never silently lost. Watermark loss itself is survivable: a dedup guard on
 observation provenance prevents re-consolidating history into
 duplicates. Every attempt (success and failure) is recorded and
 surfaced by `memorize doctor`.

@@ -36,8 +36,9 @@ del proyecto, entre máquinas, sin servidor y sin API key.
    observaciones baratas filtradas por reglas (ediciones de archivos,
    decisiones, transiciones de tareas). Sin LLM, sin latencia.
 2. **Consolidación** — en los límites de sesión, un proceso en segundo
-   plano destila las observaciones en memorias a largo plazo
-   (decisiones, razones, progreso) con puntuación de relevancia. El
+   plano destila las observaciones y la conversación misma en memorias a
+   largo plazo (decisiones, razones, progreso) con puntuación de
+   relevancia. El
    extractor funciona a través de tu login existente de
    `claude` / `codex` — sin API key — o cualquier endpoint compatible
    con OpenAI, con un fallback basado en reglas.
