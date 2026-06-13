@@ -37,8 +37,9 @@ required.
    the agent works (file writes, decisions, task transitions). No LLM,
    no latency.
 2. **Consolidate** — at session boundaries, a detached background
-   process distills observations into long-term memories (decisions,
-   rationale, progress) with salience scores. The extractor runs through
+   process distills the observations and the conversation itself into
+   long-term memories (decisions, rationale, progress) with salience
+   scores. The extractor runs through
    your existing `claude` / `codex` login — no API key — or any
    OpenAI-compatible endpoint, with a rule-based fallback below that.
 3. **Retrieve** — next session start, memories compete for a context
