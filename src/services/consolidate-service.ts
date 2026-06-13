@@ -23,6 +23,7 @@ import {
 import { withFileLock } from '../storage/file-lock.js';
 import { getProjectRoot } from '../storage/path-resolver.js';
 import { detectContradictions } from './contradiction-service.js';
+import { readConversationSince } from './transcript-reader.js';
 import { ensureEmbeddings } from './embeddings-service.js';
 import {
   listValidMemories,
@@ -610,6 +611,38 @@ function writeWatermark(projectId: string, eventId: string): void {
     .run(WATERMARK_META_KEY, eventId);
 }
 
+// Per-transcript byte watermark (#99 cat-2 fix): how far into each transcript
+// the extractor has already been shown conversational content. Keyed by
+// transcript basename so it survives the transcript being shared across several
+// memorize sessions (compaction splits one .jsonl across session ids — the
+// measurement keyed by transcript for exactly this reason). Stored in the same
+// per-project meta table as the event watermark; advances in lockstep with it
+// (only after a successful extraction), so a failed boundary re-reads the slice.
+function transcriptOffsetKey(transcriptPath: string): string {
+  return `cls_transcript_offset:${path.basename(transcriptPath)}`;
+}
+
+function readTranscriptOffset(projectId: string, transcriptPath: string): number {
+  const row = getDb(projectId)
+    .prepare('SELECT value FROM meta WHERE key = ?')
+    .get(transcriptOffsetKey(transcriptPath)) as { value: string } | undefined;
+  const n = row ? Number(row.value) : 0;
+  return Number.isFinite(n) && n >= 0 ? n : 0;
+}
+
+function writeTranscriptOffset(
+  projectId: string,
+  transcriptPath: string,
+  offset: number,
+): void {
+  getDb(projectId)
+    .prepare(
+      'INSERT INTO meta (key, value) VALUES (?, ?) ' +
+        'ON CONFLICT(key) DO UPDATE SET value = excluded.value',
+    )
+    .run(transcriptOffsetKey(transcriptPath), String(offset));
+}
+
 // --- attempt telemetry (#51) -------------------------------------------------
 
 export const CONSOLIDATE_BOUNDARIES = [
@@ -1069,10 +1102,26 @@ export async function consolidate(params: {
       const observations = observationEvents.map(
         (event) => event.payload as Observation,
       );
-      const transcriptTail = await readTranscriptTail(
-        [...observations].reverse().find((o) => o.transcriptPath)
-          ?.transcriptPath,
-      );
+      // #99 cat-2 fix: show the extractor the conversational turns since the
+      // last boundary (stripped, whole-conversation), not just the raw 16KB
+      // tail. The byte watermark advances only on success (below).
+      const transcriptPath = [...observations]
+        .reverse()
+        .find((o) => o.transcriptPath)?.transcriptPath;
+      const conversation = transcriptPath
+        ? await readConversationSince(
+            transcriptPath,
+            readTranscriptOffset(params.projectId, transcriptPath),
+          )
+        : undefined;
+      // Graceful degradation: only when stripping yields NOTHING from a
+      // substantial raw slice (format changed, or the slice is pure tool I/O)
+      // fall back to the old raw-tail behaviour, so this boundary is never
+      // worse than before. A slice with any conversation uses the stripped path.
+      const transcriptTail =
+        conversation && conversation.text.length === 0 && conversation.rawLen > 4096
+          ? await readTranscriptTail(transcriptPath)
+          : conversation?.text || undefined;
       const existing = listValidMemories(params.projectId).map(
         (row) => row.memory,
       );
@@ -1165,6 +1214,11 @@ export async function consolidate(params: {
         params.projectId,
         rawObservationEvents[rawObservationEvents.length - 1]!.id,
       );
+      // Advance the per-transcript byte watermark in lockstep — the extractor
+      // has now seen this slice, so the next boundary reads only what is new.
+      if (transcriptPath && conversation) {
+        writeTranscriptOffset(params.projectId, transcriptPath, conversation.newOffset);
+      }
 
       return {
         consolidated: extracted.length,
