@@ -74,6 +74,7 @@
     "benchmark:conflict": "tsx scripts/benchmarks/run-conflict-benchmark.ts",
     "benchmark:all": "pnpm benchmark:import && pnpm benchmark:startup && pnpm benchmark:handoff && pnpm benchmark:conflict",
     "dogfood:stats": "tsx scripts/dogfood-stats.ts",
+    "dogfood:capture-audit": "tsx scripts/decision-capture-audit.ts",
     "pack:check": "tsx scripts/validate/package-dry-run.ts"
   },
   "dependencies": {
