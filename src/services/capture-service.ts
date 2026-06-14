@@ -1,3 +1,4 @@
+import path from 'node:path';
 import type { AdapterAgent } from '../adapters/index.js';
 import {
   type Observation,
@@ -6,7 +7,24 @@ import {
 } from '../domain/entities.js';
 import { appendEvent } from '../storage/event-store.js';
 import { rebuildProjectProjection } from './projection-store.js';
-import { resolveSessionContext } from './session-context.js';
+import {
+  resolveByAgentSessionId,
+  resolveSessionContext,
+} from './session-context.js';
+
+/**
+ * A continuous conversation keyed by its transcript file, independent of how
+ * many memorize session ids it spans. Compaction restarts the agent's
+ * session_id mid-conversation (#109), and env/pid/tty resolution can miss the
+ * owning session entirely (#108) — but the transcript path is stable across
+ * both. We mirror the consolidator's `transcriptOffsetKey` convention
+ * (basename, not the full path) so the same conversation maps to one key
+ * everywhere. Used as a last-resort scope id so anonymous observations from
+ * distinct conversations no longer collapse onto `projectId`.
+ */
+export function transcriptScopeId(transcriptPath: string): string {
+  return `transcript:${path.basename(transcriptPath)}`;
+}
 
 /**
  * CLS Phase 1 — short-term capture (the cheap half of D3).
@@ -179,6 +197,7 @@ export interface PostToolUsePayloadFields {
   toolName?: string;
   toolInputText: string;
   transcriptPath?: string;
+  agentSessionId?: string;
 }
 
 /**
@@ -204,6 +223,11 @@ export function parsePostToolUsePayload(
     typeof obj.tool_name === 'string' ? obj.tool_name : undefined;
   const transcriptPath =
     typeof obj.transcript_path === 'string' ? obj.transcript_path : undefined;
+  // The agent's own session id (Claude/codex UUID). We stamp this same id as
+  // `agentSessionId` on the cwd pointer at SessionStart, so it lets us recover
+  // the owning memorize session when env/pid/tty resolution misses (#108).
+  const agentSessionId =
+    typeof obj.session_id === 'string' ? obj.session_id : undefined;
 
   // Flatten tool_input into a single searchable text. For Write/Edit the
   // interesting field is file_path; for Bash it is command. Fall back to a
@@ -231,6 +255,7 @@ export function parsePostToolUsePayload(
     ...(toolName ? { toolName } : {}),
     toolInputText,
     ...(transcriptPath ? { transcriptPath } : {}),
+    ...(agentSessionId ? { agentSessionId } : {}),
   };
 }
 
@@ -257,6 +282,23 @@ export async function captureObservation(params: {
     debugLabel: 'hook-post-tool-use',
   });
 
+  // #108: env/pid/tty resolution can miss the owning session (notably on
+  // Windows, where the PostToolUse hook process is neither a pid-descendant of
+  // the agent nor tty-attached). Before falling back to an anonymous scope,
+  // recover the session from the agent's own session_id in the payload —
+  // matched against the `agentSessionId` we stamped on the cwd pointer at
+  // SessionStart. Without this, ~6% of observations here were captured with no
+  // session and collapsed onto `projectId` as a shared scope.
+  let sessionId = sessionCtx.sessionId;
+  if (!sessionId && payload.agentSessionId) {
+    const recovered = await resolveByAgentSessionId(
+      params.cwd,
+      payload.agentSessionId,
+      { debugLabel: 'hook-post-tool-use-agent-id' },
+    );
+    sessionId = recovered.sessionId;
+  }
+
   // The structured file path (set by evaluateCapture for Write/Edit/MultiEdit
   // and apply_patch) lets Phase 2 live sharing detect cross-session file
   // collisions without re-parsing the clipped summary. Bash signals carry a
@@ -264,7 +306,7 @@ export async function captureObservation(params: {
   const observation = createObservation({
     projectId: params.projectId,
     signal: verdict.signal,
-    ...(sessionCtx.sessionId ? { sessionId: sessionCtx.sessionId } : {}),
+    ...(sessionId ? { sessionId } : {}),
     ...(payload.toolName ? { toolName: payload.toolName } : {}),
     ...(verdict.summary ? { summary: verdict.summary } : {}),
     ...(verdict.filePath ? { filePath: verdict.filePath } : {}),
@@ -273,11 +315,21 @@ export async function captureObservation(params: {
       : {}),
   });
 
+  // Scope fallback ladder: real session → stable per-conversation key
+  // (transcript) → project. The transcript step stops distinct conversations
+  // from collapsing onto one `projectId` scope when the session is unknown
+  // (#108), while staying constant across compaction's session splits (#109).
+  const scopeId =
+    sessionId ??
+    (payload.transcriptPath
+      ? transcriptScopeId(payload.transcriptPath)
+      : params.projectId);
+
   await appendEvent({
     type: 'observation.captured',
     projectId: params.projectId,
     scopeType: 'session',
-    scopeId: sessionCtx.sessionId ?? params.projectId,
+    scopeId,
     actor: params.agent,
     payload: observation,
   });

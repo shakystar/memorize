@@ -31,6 +31,10 @@ import {
 } from '../../src/services/projection-store.js';
 import { searchProject } from '../../src/services/search-service.js';
 import { closeAll, getDb } from '../../src/storage/db.js';
+import {
+  SESSION_ENV_VAR,
+  writeCwdPointer,
+} from '../../src/storage/cwd-session-store.js';
 import { appendEvent, readEvents } from '../../src/storage/event-store.js';
 
 const projectId = 'proj_cls_test1';
@@ -64,11 +68,16 @@ async function seedProject(): Promise<void> {
   await rebuildProjectProjection(projectId);
 }
 
-function postToolUsePayload(toolName: string, input: object): string {
+function postToolUsePayload(
+  toolName: string,
+  input: object,
+  extra: Record<string, unknown> = {},
+): string {
   return JSON.stringify({
     session_id: 'agent-uuid-1',
     tool_name: toolName,
     tool_input: input,
+    ...extra,
   });
 }
 
@@ -115,6 +124,54 @@ describe('CLS capture → consolidate → retrieve (in-process)', () => {
     const observations = listRecentObservations(projectId, { limit: 10 });
     expect(observations).toHaveLength(1);
     expect(observations[0]!.summary).toContain('/repo/src/index.ts');
+  });
+
+  it('#108: recovers the owning session from the agent session_id when env/pid/tty miss', async () => {
+    await seedProject();
+    // env/pid/tty resolution can't reach the session (the hook process is not
+    // a pid-descendant and SESSION_ENV_VAR is unset) — exactly the Windows
+    // PostToolUse case that produced NULL session_id observations.
+    delete process.env[SESSION_ENV_VAR];
+    await writeCwdPointer(sandbox, {
+      sessionId: 'sess-real-1',
+      startedAt: ts,
+      projectId,
+      agentSessionId: 'agent-uuid-1',
+    });
+
+    const captured = await captureWrite('/repo/src/recovered.ts');
+
+    // The observation is attributed to the real memorize session, not dropped
+    // anonymously onto the project scope.
+    expect(captured?.sessionId).toBe('sess-real-1');
+    const event = (await readEvents(projectId)).find(
+      (e) => e.type === 'observation.captured',
+    );
+    expect(event?.scopeId).toBe('sess-real-1');
+  });
+
+  it('#108/#109: unknown session falls back to a per-transcript scope, not projectId', async () => {
+    await seedProject();
+    delete process.env[SESSION_ENV_VAR];
+    // No cwd pointer to recover from, but the payload carries a transcript
+    // path — distinct conversations must NOT collapse onto the project scope.
+    const captured = await captureObservation({
+      projectId,
+      agent: 'claude',
+      cwd: sandbox,
+      rawPayload: postToolUsePayload(
+        'Write',
+        { file_path: '/repo/src/orphan.ts' },
+        { session_id: 'no-such-agent', transcript_path: '/tmp/conv-A.jsonl' },
+      ),
+    });
+    expect(captured?.sessionId).toBeUndefined();
+
+    const event = (await readEvents(projectId)).find(
+      (e) => e.type === 'observation.captured',
+    );
+    expect(event?.scopeId).toBe('transcript:conv-A.jsonl');
+    expect(event?.scopeId).not.toBe(projectId);
   });
 
   it('consolidates at the boundary (rule-based, no key), idempotently, append-only', async () => {

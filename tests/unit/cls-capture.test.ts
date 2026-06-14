@@ -4,6 +4,7 @@ import {
   evaluateCapture,
   extractApplyPatchPaths,
   parsePostToolUsePayload,
+  transcriptScopeId,
 } from '../../src/services/capture-service.js';
 
 describe('CLS capture filter (decision ③ — conservative whitelist)', () => {
@@ -103,7 +104,7 @@ describe('CLS capture filter (decision ③ — conservative whitelist)', () => {
 });
 
 describe('PostToolUse payload parsing (defensive)', () => {
-  it('extracts tool_name, command, and transcript_path', () => {
+  it('extracts tool_name, command, transcript_path, and the agent session_id', () => {
     const parsed = parsePostToolUsePayload(
       JSON.stringify({
         session_id: 'abc',
@@ -115,6 +116,9 @@ describe('PostToolUse payload parsing (defensive)', () => {
     expect(parsed.toolName).toBe('Bash');
     expect(parsed.toolInputText).toBe('git push origin main');
     expect(parsed.transcriptPath).toBe('/tmp/t.jsonl');
+    // #108: the agent session_id is the fallback handle for recovering the
+    // owning memorize session when env/pid/tty resolution misses.
+    expect(parsed.agentSessionId).toBe('abc');
   });
 
   it('falls back to file_path for write tools', () => {
@@ -131,5 +135,33 @@ describe('PostToolUse payload parsing (defensive)', () => {
     expect(parsePostToolUsePayload('not json').toolInputText).toBe('');
     expect(parsePostToolUsePayload('[1,2]').toolName).toBeUndefined();
     expect(parsePostToolUsePayload(undefined).toolInputText).toBe('');
+    expect(parsePostToolUsePayload('not json').agentSessionId).toBeUndefined();
+  });
+});
+
+describe('transcriptScopeId (#108/#109 — stable per-conversation key)', () => {
+  it('keys on the transcript basename, ignoring the directory', () => {
+    // Same conversation reached via different absolute roots must collapse to
+    // one scope so distinct conversations are what differ — not their paths.
+    expect(transcriptScopeId('/home/u/.claude/projects/p/abc.jsonl')).toBe(
+      'transcript:abc.jsonl',
+    );
+    expect(transcriptScopeId('C:\\Users\\u\\.claude\\projects\\p\\abc.jsonl')).toBe(
+      'transcript:abc.jsonl',
+    );
+  });
+
+  it('gives distinct conversations distinct scopes (no collapse onto projectId)', () => {
+    expect(transcriptScopeId('/t/abc.jsonl')).not.toBe(
+      transcriptScopeId('/t/def.jsonl'),
+    );
+  });
+
+  it('is constant across compaction, which keeps one transcript path (#109)', () => {
+    // Compaction restarts the agent session_id but writes the same transcript
+    // file, so the transcript key stays put even as session ids split.
+    const before = transcriptScopeId('/t/conv.jsonl');
+    const after = transcriptScopeId('/t/conv.jsonl');
+    expect(after).toBe(before);
   });
 });
