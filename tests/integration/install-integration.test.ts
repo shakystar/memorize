@@ -329,6 +329,41 @@ describe('install integration', () => {
     expect(stripped).not.toContain('memorize:ground-rule');
   });
 
+  it('install claude plants the using-memorize skill idempotently; uninstall removes only its dir', async () => {
+    const skillPath = join(
+      sandbox,
+      '.claude',
+      'skills',
+      'using-memorize',
+      'SKILL.md',
+    );
+    // A sibling skill that must survive uninstall.
+    const siblingDir = join(sandbox, '.claude', 'skills', 'other-skill');
+    await mkdir(siblingDir, { recursive: true });
+    await writeFile(join(siblingDir, 'SKILL.md'), '# other\n', 'utf8');
+
+    // Install plants the skill file with the expected frontmatter.
+    runCli(['install', 'claude']);
+    const planted = await readFile(skillPath, 'utf8');
+    expect(planted).toContain('name: using-memorize');
+
+    // Idempotent: re-install does not throw and content is still present.
+    const again = runCli(['install', 'claude']);
+    expect(again.status).toBe(0);
+    expect(await readFile(skillPath, 'utf8')).toContain('name: using-memorize');
+
+    // Uninstall removes the using-memorize dir but leaves siblings.
+    runCli(['uninstall', 'claude']);
+    await expect(readFile(skillPath, 'utf8')).rejects.toThrow();
+    expect(await readFile(join(siblingDir, 'SKILL.md'), 'utf8')).toContain(
+      '# other',
+    );
+
+    // Uninstall again when absent does not throw.
+    const secondUninstall = runCli(['uninstall', 'claude']);
+    expect(secondUninstall.status).toBe(0);
+  });
+
   it('install codex keeps unrelated AGENTS.override.md content untouched when no memorize block exists', async () => {
     const content = '# Team overrides\n\n- rule 1\n- rule 2\n';
     await writeFile(join(sandbox, 'AGENTS.override.md'), content, 'utf8');
