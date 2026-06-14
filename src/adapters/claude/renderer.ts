@@ -42,6 +42,36 @@ export function renderClaudeStartupContext(
     }),
   });
 
+  if (payload.consolidatedMemories && payload.consolidatedMemories.length > 0) {
+    const memoryLines: string[] = ['Consolidated memories:'];
+    for (const memory of payload.consolidatedMemories) {
+      memoryLines.push(`- [${memory.kind}/s${memory.salience}] ${memory.text}`);
+    }
+    blocks.push({
+      priority: 2,
+      source: 'memorize.memories',
+      content: wrapUntrusted(memoryLines.join('\n'), {
+        source: 'memorize.memories',
+      }),
+    });
+  }
+
+  if (payload.recentObservations && payload.recentObservations.length > 0) {
+    const observationLines: string[] = ['Recent work signals (prior session tail):'];
+    for (const observation of payload.recentObservations) {
+      observationLines.push(
+        `- [${observation.signal}${observation.toolName ? `/${observation.toolName}` : ''}] ${observation.summary ?? observation.createdAt}`,
+      );
+    }
+    blocks.push({
+      priority: 2.5,
+      source: 'memorize.observations',
+      content: wrapUntrusted(observationLines.join('\n'), {
+        source: 'memorize.observations',
+      }),
+    });
+  }
+
   if (payload.task) {
     const task = payload.task;
     const taskLines = [
@@ -72,7 +102,7 @@ export function renderClaudeStartupContext(
       }
     }
     blocks.push({
-      priority: 2,
+      priority: 3,
       source: 'memorize.task',
       content: wrapUntrusted(taskLines.join('\n'), { source: 'memorize.task' }),
     });
@@ -86,7 +116,7 @@ export function renderClaudeStartupContext(
       handoffLines.push(`${row.label}: ${row.value}`);
     }
     blocks.push({
-      priority: 3,
+      priority: 4,
       source: 'memorize.handoff',
       content: wrapUntrusted(handoffLines.join('\n'), {
         source: 'memorize.handoff',
@@ -107,24 +137,10 @@ export function renderClaudeStartupContext(
       }
     }
     blocks.push({
-      priority: 4,
+      priority: 5,
       source: 'memorize.checkpoint',
       content: wrapUntrusted(checkpointLines.join('\n'), {
         source: 'memorize.checkpoint',
-      }),
-    });
-  }
-
-  if (payload.consolidatedMemories && payload.consolidatedMemories.length > 0) {
-    const memoryLines: string[] = ['Consolidated memories:'];
-    for (const memory of payload.consolidatedMemories) {
-      memoryLines.push(`- [${memory.kind}/s${memory.salience}] ${memory.text}`);
-    }
-    blocks.push({
-      priority: 4.5,
-      source: 'memorize.memories',
-      content: wrapUntrusted(memoryLines.join('\n'), {
-        source: 'memorize.memories',
       }),
     });
   }
@@ -139,7 +155,7 @@ export function renderClaudeStartupContext(
       conflictLines.push(`  right: ${conflict.rightVersion}`);
     }
     blocks.push({
-      priority: 5,
+      priority: 5.5,
       source: 'memorize.conflicts',
       content: wrapUntrusted(conflictLines.join('\n'), {
         source: 'memorize.conflicts',
@@ -159,22 +175,6 @@ export function renderClaudeStartupContext(
       source: 'memorize.other-active-tasks',
       content: wrapUntrusted(otherLines.join('\n'), {
         source: 'memorize.other-active-tasks',
-      }),
-    });
-  }
-
-  if (payload.recentObservations && payload.recentObservations.length > 0) {
-    const observationLines: string[] = ['Recent work signals (prior session tail):'];
-    for (const observation of payload.recentObservations) {
-      observationLines.push(
-        `- [${observation.signal}${observation.toolName ? `/${observation.toolName}` : ''}] ${observation.summary ?? observation.createdAt}`,
-      );
-    }
-    blocks.push({
-      priority: 6.5,
-      source: 'memorize.observations',
-      content: wrapUntrusted(observationLines.join('\n'), {
-        source: 'memorize.observations',
       }),
     });
   }
