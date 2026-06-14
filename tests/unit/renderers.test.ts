@@ -286,6 +286,67 @@ describe('adapter renderers', () => {
     expect(codex).toContain('## Budget notice');
   });
 
+  // Guards #85 step-2: ambient memory must outrank task/handoff under budget pressure.
+  it('keeps consolidated memories and drops the task block under budget pressure', () => {
+    const consolidatedMemories = [
+      {
+        id: 'mem_1',
+        kind: 'decision' as const,
+        text: 'Adopt event-sourced SQLite store as the single source of truth for project state, replacing ad-hoc JSON snapshots.',
+        salience: 9,
+        createdAt: ISO,
+      },
+      {
+        id: 'mem_2',
+        kind: 'rationale' as const,
+        text: 'Full rebuild from the event log is an intentional asset: it keeps projections disposable and lets us add read models without migrations.',
+        salience: 7,
+        createdAt: ISO,
+      },
+    ];
+    const recentObservations = [
+      {
+        signal: 'decision-keyword' as const,
+        toolName: 'Edit',
+        summary: 'Re-ranked startup blocks so ambient memory survives eviction.',
+        createdAt: ISO,
+      },
+    ];
+    const payload: StartupContextPayload = {
+      ...samplePayload,
+      task: richTask,
+      consolidatedMemories,
+      recentObservations,
+    };
+
+    // applyRenderBudget sums block.content lengths (header/preamble excluded).
+    // Measured block sizes — Claude: project=157, memories=359, task=369;
+    // Codex: project=189, memories=361, task=410. A budget of 600 fits
+    // project+memories (Claude 516, Codex 550) but not project+memories+task
+    // (Claude 885, Codex 960), so strict-stop drops the lower-priority task
+    // block while ambient memory (now higher priority) survives.
+    const tightBudget = 600;
+    const claude = renderClaudeStartupContext(payload, { budget: tightBudget });
+    const codex = renderCodexStartupContext(payload, { budget: tightBudget });
+
+    // Claude: memories kept, task evicted.
+    expect(claude).toContain('Consolidated memories:');
+    expect(claude).toContain('Adopt event-sourced SQLite store');
+    expect(claude).not.toContain('Goal: Propagate full task context to agents');
+    expect(claude).not.toContain('Task: Wire renderer fields');
+    expect(claude).toContain('source="memorize.budget-notice"');
+    expect(claude).toContain('Sections dropped to fit budget');
+    expect(claude).toContain('memorize.task');
+
+    // Codex: memories kept, task evicted.
+    expect(codex).toContain('## Consolidated memories');
+    expect(codex).toContain('Adopt event-sourced SQLite store');
+    expect(codex).not.toContain('## Current task');
+    expect(codex).not.toContain('- Goal: Propagate full task context to agents');
+    expect(codex).toContain('## Budget notice');
+    expect(codex).toContain('memorize.task');
+  });
+
   it('does not emit a budget notice when payload fits within budget', () => {
     const claude = renderClaudeStartupContext(richPayload);
     const codex = renderCodexStartupContext(richPayload);
