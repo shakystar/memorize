@@ -1,4 +1,3 @@
-import path from 'node:path';
 import type { AdapterAgent } from '../adapters/index.js';
 import {
   type Observation,
@@ -23,7 +22,12 @@ import {
  * distinct conversations no longer collapse onto `projectId`.
  */
 export function transcriptScopeId(transcriptPath: string): string {
-  return `transcript:${path.basename(transcriptPath)}`;
+  // Separator-agnostic basename: `path.basename` only splits on the running
+  // platform's separator, so a Windows path on a POSIX runner (or a synced
+  // event replayed on another OS) would keep its backslashes and never match.
+  // Split on both to keep the key deterministic across platforms.
+  const base = transcriptPath.split(/[/\\]/).pop() ?? transcriptPath;
+  return `transcript:${base}`;
 }
 
 /**
