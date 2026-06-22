@@ -262,6 +262,66 @@ describe('phase 2 services and cli', () => {
     });
   });
 
+  it('marks a handoff_ready task done via cli', { timeout: 30_000 }, async () => {
+    await withSandboxRoot(async () => {
+      const project = await createProject({
+        title: 'Done flow',
+        rootPath: sandbox,
+        summary: 'task done CLI verb',
+      });
+      const task = await createTask({
+        projectId: project.id,
+        title: 'Task to complete',
+        actor: 'user',
+      });
+      delete process.env[SESSION_ENV_VAR];
+      const sessionId = await startSession(sandbox, {
+        projectId: project.id,
+        taskId: task.id,
+        actor: 'codex',
+      });
+      delete process.env[SESSION_ENV_VAR];
+
+      function runSessionCli(args: string[]): ReturnType<typeof spawnSync> {
+        return spawnSync('node', [tsxCliPath, cliEntryPath, ...args], {
+          cwd: sandbox,
+          encoding: 'utf8',
+          env: {
+            ...process.env,
+            MEMORIZE_ROOT: memorizeRoot,
+            [SESSION_ENV_VAR]: sessionId,
+          },
+        });
+      }
+
+      const handoff = runSessionCli([
+        'task',
+        'handoff',
+        '--summary',
+        'Ready to finish',
+        '--next',
+        'mark done',
+      ]);
+      expect(handoff.status).toBe(0);
+
+      const done = runSessionCli(['task', 'done']);
+      expect(done.status).toBe(0);
+      expect(done.stdout).toContain('marked done');
+
+      const storedTask = await readTask(project.id, task.id);
+      expect(storedTask?.status).toBe('done');
+    });
+  });
+
+  it('rejects task done on a task that is not handoff_ready', { timeout: 30_000 }, () => {
+    runCli(['project', 'init']);
+    runCli(['task', 'create', 'Fresh todo task']);
+
+    const done = runCli(['task', 'done']);
+    expect(done.status).not.toBe(0);
+    expect(done.stderr).toContain('Invalid task status transition');
+  });
+
   it('rejects task handoff when required flags are missing', () => {
     runCli(['project', 'init']);
     runCli(['task', 'create', 'Missing flags test']);
