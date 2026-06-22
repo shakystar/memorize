@@ -17,6 +17,7 @@ import {
   createTask,
   listTasks,
   readTask,
+  updateTask,
 } from '../../services/task-service.js';
 import type { CliContext } from '../context.js';
 import { parseFlags } from '../parse-flags.js';
@@ -217,6 +218,29 @@ async function runHandoffTask(
   console.log(`Created handoff ${handoff.id}\n\n${HANDOFF_INTENT_NOTICE}`);
 }
 
+async function runDoneTask(
+  args: string[],
+  ctx: CliContext,
+  projectId: string,
+): Promise<void> {
+  const flags = parseFlags(args, { single: ['task'] });
+  const sessionCtx = await resolveSessionContext(ctx.cwd, {
+    debugLabel: 'task-done',
+  });
+  const resolvedTaskId =
+    flags.single.task?.trim() ??
+    sessionCtx.taskId ??
+    (await resolveActiveTaskId(projectId));
+  if (!resolvedTaskId) {
+    throw new Error(
+      'Done requires a taskId (pass --task or ensure an active task exists).',
+    );
+  }
+  const actor = sessionCtx.actor ?? ACTOR_USER;
+  await updateTask(projectId, resolvedTaskId, { status: 'done' }, actor);
+  console.log(`Task ${resolvedTaskId} marked done`);
+}
+
 const taskHandlers: Record<string, TaskHandler> = {
   create: runCreateTask,
   show: runShowTask,
@@ -225,6 +249,8 @@ const taskHandlers: Record<string, TaskHandler> = {
   start: runResumeTask,
   checkpoint: runCheckpointTask,
   handoff: runHandoffTask,
+  done: runDoneTask,
+  complete: runDoneTask,
 };
 
 export async function runTaskCommand(
