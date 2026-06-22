@@ -264,7 +264,73 @@ export async function installClaudeIntegration(cwd: string): Promise<string> {
   // #68 — plant the single-source-of-truth contract where every Claude
   // session reads it. Default-on; the install command announces it.
   await upsertGroundRuleBlock(path.join(cwd, 'CLAUDE.md'));
+  // Plant the using-memorize Agent Skill so sessions know when to reach for
+  // memorize. Codex skills dir / tool names differ — follow-up.
+  await writeUsingMemorizeSkill(cwd);
   return settingsPath;
+}
+
+// --- using-memorize Agent Skill ----------------------------------------------
+
+const USING_MEMORIZE_SKILL = `---
+name: using-memorize
+description: Use when you need to recall cross-session decisions/progress or "why did we decide X"; check whether memorize's memory capture is healthy; or import pre-existing notes into the shared project brain — for projects using memorize.
+---
+
+# Using memorize
+
+## Overview
+memorize is the project's shared brain: past decisions, rationale, and cross-session progress in a local DB — NOT in the repo's files. Grep finds what was written to disk; memorize finds what was decided in conversation or by other sessions and never written down.
+
+## When to use
+- **Recall** — what another or earlier session worked on, decided, or handed off; a decision/rationale discussed but not in any doc; "what did we decide / why did we choose X" when the repo has no clear answer.
+- **Health** — checking whether memory capture / consolidation is actually working.
+- **Import** — getting pre-existing notes/decisions into the shared brain.
+
+## When NOT to use
+- The answer lives in code or docs → grep/read the files. memorize does not replace reading the repo.
+- A single file/function lookup → Glob/Grep/Read.
+
+For recall, grep silently omits conversation-only decisions — so for "what did we decide" or cross-session questions, check memorize even when grep returned something.
+
+## Recall
+\`memorize search "<query>"\` · \`memorize task resume\` · \`memorize session activity\`
+
+\`memorize search\` returns truncated snippets — to read a memory's full text, open the source it cites (often a \`docs/\` spec).
+
+## Health — "is capture/consolidation working?"
+Run \`memorize doctor\` (add \`--json\` for detail). Trust its output — it aggregates hooks, watermarks, last attempt, and pending observations. Do NOT hand-query the SQLite DB to reconstruct health, and do NOT run \`memorize consolidate\` to "check" — that executes a real consolidation boundary (side effect).
+
+## Import pre-existing notes into shared memory
+\`memorize memory import --source <label>\`, piping a JSON array on stdin:
+\`[{"kind":"decision|rationale|progress","text":"...","salience":1-10}]\`. Idempotent (dedup by kind+text). That's the full schema — don't read source to rediscover it.
+
+## Conventions
+Use the \`memorize\` binary directly (not \`node dist/...\`).
+
+## Common mistake
+Answering a cross-session or "why did we decide" question from grep alone and calling it complete — grep can't see decisions only ever spoken in conversation.
+`;
+
+/**
+ * Plant the using-memorize Agent Skill at
+ * <cwd>/.claude/skills/using-memorize/SKILL.md. Idempotent — overwrites on
+ * every (re)install so the content stays current. Mirrors the #68
+ * ground-rule block's managed-content style.
+ */
+async function writeUsingMemorizeSkill(cwd: string): Promise<void> {
+  const skillDir = path.join(cwd, '.claude', 'skills', 'using-memorize');
+  await fs.mkdir(skillDir, { recursive: true });
+  await fs.writeFile(path.join(skillDir, 'SKILL.md'), USING_MEMORIZE_SKILL, 'utf8');
+}
+
+/**
+ * Remove the using-memorize skill directory (only that dir; sibling skills
+ * are left alone). Never throws when absent.
+ */
+async function removeUsingMemorizeSkill(cwd: string): Promise<void> {
+  const skillDir = path.join(cwd, '.claude', 'skills', 'using-memorize');
+  await fs.rm(skillDir, { recursive: true, force: true });
 }
 
 // --- #68 ground-rule block ----------------------------------------------------
@@ -575,6 +641,8 @@ export async function uninstallClaudeIntegration(cwd: string): Promise<string> {
   // Strip the #68 block first — it must come out even when the settings
   // file is already gone (manually deleted, partial uninstall).
   await stripGroundRuleBlock(path.join(cwd, 'CLAUDE.md'));
+  // Remove the using-memorize skill (no-op when absent); leave sibling skills.
+  await removeUsingMemorizeSkill(cwd);
   let settings: { hooks?: Record<string, unknown> } = {};
   try {
     settings = JSON.parse(await fs.readFile(settingsPath, 'utf8')) as {
