@@ -576,6 +576,27 @@ export interface ValidMemoryRow {
   lastAccessedAt?: string;
 }
 
+/**
+ * Read a single memory by id (valid or already-superseded), with its
+ * best-effort reinforcement stamp. Mirrors the single-entity readers
+ * (getTask/getRule) but carries `lastAccessedAt` like listValidMemories so
+ * `memory show` can surface the reinforcement signal. Returns undefined when
+ * no memory with that id exists in the project.
+ */
+export function getMemory(
+  projectId: string,
+  memoryId: string,
+): ValidMemoryRow | undefined {
+  const row = db(projectId)
+    .prepare('SELECT data, last_accessed_at FROM memories WHERE id = ?')
+    .get(memoryId) as { data: string; last_accessed_at: string | null } | undefined;
+  if (!row) return undefined;
+  return {
+    memory: JSON.parse(row.data) as MemoryRecord,
+    ...(row.last_accessed_at ? { lastAccessedAt: row.last_accessed_at } : {}),
+  };
+}
+
 /** Memories whose validity window is still open, i.e. not superseded. */
 export function listValidMemories(projectId: string): ValidMemoryRow[] {
   const rows = db(projectId)
