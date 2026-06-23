@@ -426,6 +426,40 @@ describe('install integration', () => {
     expect(codexCheck?.fix).toContain('approve');
   });
 
+  it('doctor verifies all 4 Claude hooks (incl. PostToolUse capture) and reports the count truthfully', async () => {
+    runCli(['install', 'claude']);
+
+    const result = runCli(['doctor', '--json']);
+    const report = JSON.parse(String(result.stdout)) as {
+      checks: Array<{ id: string; status: string; message: string }>;
+    };
+    const claudeCheck = report.checks.find((c) => c.id === 'install.claude');
+    expect(claudeCheck?.status).toBe('ok');
+    // The count in the message must match what install actually writes
+    // (SessionStart, PostCompact, SessionEnd, PostToolUse) — not a stale 3.
+    expect(claudeCheck?.message).toContain('All 4');
+  });
+
+  it('doctor warns when the PostToolUse capture hook is missing (no longer silently passes)', async () => {
+    runCli(['install', 'claude']);
+
+    const settingsPath = join(sandbox, '.claude', 'settings.local.json');
+    const settings = JSON.parse(await readFile(settingsPath, 'utf8')) as {
+      hooks: Record<string, unknown[]>;
+    };
+    // Drop the capture hook the way a hand-edited settings file might.
+    delete settings.hooks.PostToolUse;
+    await writeFile(settingsPath, JSON.stringify(settings, null, 2), 'utf8');
+
+    const result = runCli(['doctor', '--json']);
+    const report = JSON.parse(String(result.stdout)) as {
+      checks: Array<{ id: string; status: string; message: string }>;
+    };
+    const claudeCheck = report.checks.find((c) => c.id === 'install.claude');
+    expect(claudeCheck?.status).toBe('warn');
+    expect(claudeCheck?.message).toContain('PostToolUse');
+  });
+
   it('doctor reports install.codex:warn when hooks.json exists but memorize hooks are missing', async () => {
     runCli(['install', 'codex']);
 
