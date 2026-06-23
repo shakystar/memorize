@@ -50,6 +50,13 @@ async function runCreateTask(
 ): Promise<void> {
   const title = args.join(' ').trim();
   if (!title) throw new Error('Task title is required.');
+  // Defense in depth: if a flag slipped through as the "title", reject it
+  // rather than creating a junk task (e.g. `task create --foo`).
+  if (args[0]?.startsWith('--')) {
+    throw new Error(
+      `Unknown flag ${args[0]}. Run \`memorize task --help\` for usage.`,
+    );
+  }
   const task = await createTask({
     projectId,
     title,
