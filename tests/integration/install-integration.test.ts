@@ -1,10 +1,10 @@
-import { existsSync } from 'node:fs';
+import { cpSync, existsSync, mkdtempSync, rmSync } from 'node:fs';
 import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
 
-import { afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 
 import { POST_TOOL_USE_MATCHER } from '../../src/services/capture-service.js';
 
@@ -20,6 +20,22 @@ const cliEntryPath = join(repoRoot, 'src', 'cli', 'index.ts');
 // runs from dist/ (the production path). The dev/tsx entry would embed a
 // `src/cli/index.js` path that never exists.
 const distCliPath = join(repoRoot, 'dist', 'cli', 'index.js');
+// The #123 probe tests spawn `node <cli/index.js>` directly. They must NOT
+// read the shared repo dist/, because release-packaging.test.ts runs `pnpm
+// build` in a parallel worker, whose `rmSync('dist') && tsc` transiently
+// deletes dist/cli/index.js — a spawn landing in that window exits 1
+// (MODULE_NOT_FOUND). beforeAll copies dist/ into an isolated dir and these
+// tests spawn from there instead. Two placement constraints:
+//   1. It lives UNDER repoRoot/node_modules so `node` still resolves the
+//      CLI's runtime deps (which, better-sqlite3, cross-spawn) by walking up,
+//      and so it stays git-ignored.
+//   2. The CLI resolves its own package.json via `../../package.json` relative
+//      to cli/index.js, and the #123 probe runs `node "<abs>" --version` which
+//      hits that path. So the copy keeps the dist/cli/index.js → ../.. → a dir
+//      holding package.json relationship: <isolatedDir>/dist/cli/index.js plus
+//      <isolatedDir>/package.json.
+let isolatedDir: string;
+let isolatedDistCliPath: string;
 
 function runCli(args: string[], stdinPayload?: object) {
   return spawnSync('node', [tsxCliPath, cliEntryPath, ...args], {
@@ -54,7 +70,19 @@ beforeAll(() => {
       throw new Error(`dist build failed:\n${build.stdout}\n${build.stderr}`);
     }
   }
+
+  // Copy the built dist/ to an isolated dir ONCE (see the placement note above).
+  isolatedDir = mkdtempSync(join(repoRoot, 'node_modules', '.memorize-iso-dist-'));
+  cpSync(join(repoRoot, 'dist'), join(isolatedDir, 'dist'), { recursive: true });
+  cpSync(join(repoRoot, 'package.json'), join(isolatedDir, 'package.json'));
+  isolatedDistCliPath = join(isolatedDir, 'dist', 'cli', 'index.js');
 }, 120_000);
+
+afterAll(() => {
+  if (isolatedDir) {
+    rmSync(isolatedDir, { recursive: true, force: true });
+  }
+});
 
 beforeEach(async () => {
   sandbox = await mkdtemp(join(tmpdir(), 'memorize-install-'));
@@ -451,7 +479,7 @@ describe('install integration', () => {
     // bare form emits the node-abs invocation pointing at the real
     // dist/cli/index.js — the probe runs `node "<abs>" --version` and must
     // succeed, keeping status ok. Runs from dist so the embedded path exists.
-    const install = spawnSync('node', [distCliPath, 'install', 'claude'], {
+    const install = spawnSync('node', [isolatedDistCliPath, 'install', 'claude'], {
       cwd: sandbox,
       encoding: 'utf8',
       env: {
@@ -464,7 +492,7 @@ describe('install integration', () => {
     });
     expect(install.status).toBe(0);
 
-    const result = spawnSync('node', [distCliPath, 'doctor', '--json'], {
+    const result = spawnSync('node', [isolatedDistCliPath, 'doctor', '--json'], {
       cwd: sandbox,
       encoding: 'utf8',
       env: {
@@ -488,7 +516,7 @@ describe('install integration', () => {
     // Install the node-abs (bare) form, then rewrite the cli.js path to a
     // path that does not exist. Presence regex still matches, but the
     // command can never run — doctor must downgrade off ok.
-    spawnSync('node', [distCliPath, 'install', 'claude'], {
+    spawnSync('node', [isolatedDistCliPath, 'install', 'claude'], {
       cwd: sandbox,
       encoding: 'utf8',
       env: {
