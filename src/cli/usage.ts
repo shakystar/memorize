@@ -8,6 +8,7 @@ export function renderScaffoldUsage(): string {
     '  memorize session activity    Show active sessions + their recent work',
     '  memorize consolidate         Run one memory-consolidation boundary now',
     '  memorize search <query>      Search project memory',
+    '  memorize memory show <id>    Print a memory full text + metadata',
     '  memorize project show        Print bound project summary (JSON)',
     '  memorize version             Print the version of this binary',
     '',
