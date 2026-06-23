@@ -68,7 +68,7 @@ function isMemorizeHookCommandFor(
 // registering it only spawned a useless subprocess on every compaction.
 // PostToolUse (CLS capture) carries a tool matcher so the hook subprocess
 // only spawns for tools the decision-signal filter could ever admit.
-const CLAUDE_HOOK_EVENTS = [
+export const CLAUDE_HOOK_EVENTS = [
   'SessionStart',
   'PostCompact',
   'SessionEnd',

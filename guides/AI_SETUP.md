@@ -47,6 +47,15 @@ no task lists, no summaries.**
      # or: yarn add -D @shakystar/memorize
      ```
 
+     In a **pnpm workspace monorepo**, a plain `pnpm add` at the root
+     fails with `ERR_PNPM_ADDING_TO_ROOT` — add it to the workspace root
+     with `pnpm add -D -w @shakystar/memorize`, or install globally
+     (`npm install -g @shakystar/memorize`, see the next bullet). If a
+     `node_modules` was linked from another machine's pnpm store you may
+     hit `ERR_PNPM_UNEXPECTED_STORE`; reinstall to rebuild the local
+     store. With a global install, the step 3 hooks must still resolve
+     the `memorize` binary — `doctor` (step 4) flags it if they cannot.
+
    - **Non-Node project (no `package.json` or you do not want to add
      one)** — install globally so the hooks installed in step 3 can
      invoke `memorize` directly:
@@ -114,7 +123,69 @@ no task lists, no summaries.**
    or `error`, apply the `fix` field of each issue in order and re-run
    until status is `ok`.
 
-5. **Offer to absorb pre-existing context** (mid-project adoption, #69).
+5. **Enable consolidation & semantic search** (optional but recommended).
+   Out of the box, memory consolidation auto-detects your agent CLI
+   (`claude`, then `codex`) on PATH and extracts through its existing
+   login. If no CLI is detected — and whenever `MEMORIZE_LLM_BACKEND=off`
+   — it drops to a degraded rule-based extractor, and a boundary with no
+   real extractor reports `extractor: "none"` and consolidates nothing of
+   substance. **Until a backend is configured or auto-detected,
+   consolidation is effectively a no-op.** Pin it explicitly so you do not
+   depend on auto-detect:
+
+   - **Extractor (zero extra download via the Claude CLI / OAuth you
+     already have):**
+
+     ```sh
+     MEMORIZE_LLM_BACKEND=claude-cli
+     ```
+
+     Accepted values: `claude-cli`, `codex-cli`, `off` (`off` =
+     rule-based, no LLM). This reuses the host CLI's existing
+     subscription auth — no API key, no endpoint.
+
+   - **Embeddings for semantic search** (otherwise `search` is FTS5
+     lexical only). Point these at any OpenAI-compatible `/v1` endpoint,
+     e.g. a local Ollama:
+
+     ```sh
+     MEMORIZE_EMBEDDINGS_ENDPOINT=http://localhost:11434/v1/embeddings
+     MEMORIZE_EMBEDDINGS_MODEL=bge-m3
+     MEMORIZE_EMBEDDINGS_API_KEY=ollama
+     ```
+
+     The key may be any dummy value for a keyless local server (it is
+     sent as `Authorization: Bearer <value>`). `bge-m3` (1024-dim) was
+     verified to give accurate Korean semantic search; swap in any model
+     your endpoint serves.
+
+   - **Verify it is actually on:** run
+     `npx @shakystar/memorize doctor` and read the
+     `Memory consolidation health` (`consolidation.health`) check — once
+     a boundary has run, its last attempt reports the resolved backend
+     (e.g. `via cli:claude`), not `rule-based`/`none`.
+
+   **Make the env reach the hooks (required).** Consolidation and
+   embedding run *inside* the hooks, which Claude Code / Codex execute in
+   a **non-interactive** shell that does **not** source `~/.bashrc` /
+   `~/.bash_profile`. Hooks inherit the agent process's environment, not
+   your interactive shell rc — `export MEMORIZE_LLM_BACKEND=...` in
+   `.bashrc` will NOT reach a hook.
+
+   - **Windows:** set persistent **User** environment variables (System
+     Properties → Environment Variables, or `setx MEMORIZE_LLM_BACKEND
+     claude-cli`), then **restart the agent** so it inherits them.
+     `setx` does not affect the already-running process — a restart is
+     required.
+   - **macOS / Linux:** set the vars where the agent process itself
+     inherits them (your login environment / the context that launches
+     the agent), not just an interactive shell rc.
+
+   See AGENT_GUIDE.md → "Optional: LLM extraction & semantic search
+   (env)" for the full variable list (timeouts, contradiction
+   detection, the `MEMORIZE_LLM_ENDPOINT` HTTP backend, etc.).
+
+6. **Offer to absorb pre-existing context** (mid-project adoption, #69).
    If this project lived under you (or another agent) before memorize —
    your harness memory has project notes, or the user keeps decision
    docs — offer:
@@ -140,7 +211,7 @@ no task lists, no summaries.**
    4. Report the result counts (`imported` / `skippedDuplicates`) to
       the user. Re-running is safe — duplicates are skipped.
 
-6. **Tell the user** briefly:
+7. **Tell the user** briefly:
 
    > Memorize is set up. Your project context will now persist across
    > sessions automatically — just work as usual, and each new session

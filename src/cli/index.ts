@@ -80,6 +80,21 @@ async function main(): Promise<void> {
     return;
   }
 
+  // Help must work without a bound project, so intercept BEFORE handler
+  // dispatch — otherwise `--help` is consumed as a positional (e.g. a task
+  // title) and reaches requireBoundProjectId. Covers both the bare `help`
+  // command and `--help`/`-h` appearing anywhere in the args.
+  if (
+    command === 'help' ||
+    command === '--help' ||
+    command === '-h' ||
+    args.includes('--help') ||
+    args.includes('-h')
+  ) {
+    console.log(renderScaffoldUsage());
+    return;
+  }
+
   const handler = command ? handlers[command] : undefined;
   if (!handler) {
     console.log(renderScaffoldUsage());

@@ -10,6 +10,7 @@ import {
   type ConsolidateAttempt,
   getConsolidationStatus,
 } from './consolidate-service.js';
+import { CLAUDE_HOOK_EVENTS } from './install-service.js';
 import { hasUnmigratedNdjson } from './migrate-service.js';
 import {
   getMemoryIndex,
@@ -126,7 +127,10 @@ async function checkClaudeInstall(
   // PreCompact left the contract in #85 (no-op handler; its role was
   // replaced by the PostCompact consolidation boundary) — doctor checks
   // the live set only, so a lingering legacy entry never warns.
-  const events = ['SessionStart', 'PostCompact', 'SessionEnd'];
+  // Verify the SAME event set install registers (single source —
+  // CLAUDE_HOOK_EVENTS) so doctor can't drift from install and silently
+  // pass when the PostToolUse capture hook is missing.
+  const events = CLAUDE_HOOK_EVENTS;
   const hooks = settings.hooks ?? {};
 
   const hasLegacyShape = events.some((event) => {

@@ -2,7 +2,11 @@ import fs from 'node:fs/promises';
 
 import path from 'node:path';
 
-import { appendEvent, ensureProjectDirectories } from '../storage/event-store.js';
+import {
+  appendEvent,
+  appendEvents,
+  ensureProjectDirectories,
+} from '../storage/event-store.js';
 import {
   bindProject,
   readBindings,
@@ -17,8 +21,17 @@ import {
 } from './projection-store.js';
 import { ACTOR_SYSTEM } from '../domain/common.js';
 import type { CreateProjectInput } from '../domain/commands.js';
-import { createProject as createProjectEntity, createWorkstream } from '../domain/entities.js';
-import type { Project, ProjectSyncState, Workstream } from '../domain/entities.js';
+import {
+  createDecision as createDecisionEntity,
+  createProject as createProjectEntity,
+  createWorkstream,
+} from '../domain/entities.js';
+import type {
+  Decision,
+  Project,
+  ProjectSyncState,
+  Workstream,
+} from '../domain/entities.js';
 import { getProjectsRoot, getSyncFile } from '../storage/path-resolver.js';
 
 export async function createProject(input: CreateProjectInput): Promise<Project> {
@@ -62,6 +75,54 @@ export async function createProject(input: CreateProjectInput): Promise<Project>
   await writeJson(getSyncFile(project.id), syncState);
   await bindProject(input.rootPath, project.id);
   return project;
+}
+
+/**
+ * Record a project decision. The events `decision.proposed` / `decision.accepted`
+ * and their projection were modeled but had no producer (Bug #121), so decisions
+ * could never be logged. MVP: a recorded decision is immediately accepted (the
+ * common "log a decision we already made" case), emitting both events as one
+ * atomic batch so `acceptedDecisionIds` / `recentDecisions` reflect it. The
+ * projector keys `state.decisions` by the EVENT scopeId, so it must be the
+ * decision id for distinct decisions to survive.
+ */
+export async function recordDecision(input: {
+  projectId: string;
+  title: string;
+  decision: string;
+  rationale?: string;
+  actor?: string;
+}): Promise<Decision> {
+  const actor = input.actor ?? ACTOR_SYSTEM;
+  const decision = createDecisionEntity({
+    scopeType: 'project',
+    scopeId: input.projectId,
+    title: input.title,
+    decision: input.decision,
+    rationale: input.rationale ?? '',
+    createdBy: actor,
+  });
+  const accepted: Decision = { ...decision, status: 'accepted' };
+  await appendEvents(input.projectId, [
+    {
+      type: 'decision.proposed',
+      projectId: input.projectId,
+      scopeType: 'project',
+      scopeId: decision.id,
+      actor,
+      payload: decision,
+    },
+    {
+      type: 'decision.accepted',
+      projectId: input.projectId,
+      scopeType: 'project',
+      scopeId: decision.id,
+      actor,
+      payload: accepted,
+    },
+  ]);
+  await rebuildProjectProjection(input.projectId);
+  return accepted;
 }
 
 export async function getBoundProjectId(
