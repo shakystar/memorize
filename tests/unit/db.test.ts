@@ -122,9 +122,13 @@ describe('db unwritable-data-dir diagnostics (#116)', () => {
 
   const isRoot =
     typeof process.getuid === 'function' && process.getuid() === 0;
+  // Windows ignores POSIX directory permission bits, so chmod 0o500 does not
+  // make the dir unwritable and the open would succeed. root ignores the
+  // read-only bit for the same reason — skip the chmod path on both. The
+  // classification + message tests above still cover the logic everywhere.
+  const cannotDenyDirWrite = isRoot || process.platform === 'win32';
 
-  // root ignores the read-only bit, so the open would succeed — skip there.
-  it.skipIf(isRoot)(
+  it.skipIf(cannotDenyDirWrite)(
     'surfaces the actionable hint when the data dir is not writable',
     () => {
       const projectsRoot = path.join(tmpRoot, 'projects');
