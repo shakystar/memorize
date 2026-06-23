@@ -1,9 +1,9 @@
-import { execFile, spawn } from 'node:child_process';
 import fs from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import os from 'node:os';
 import path from 'node:path';
 
+import spawn from 'cross-spawn';
 import which from 'which';
 
 import type { Project } from '../domain/entities.js';
@@ -18,7 +18,13 @@ import { importContextFiles } from './setup-service.js';
 
 export const PACKAGE_NAME = '@shakystar/memorize';
 
-const WIN = process.platform === 'win32';
+/**
+ * Spawn seam (test-injectable; cross-spawn satisfies it). cross-spawn runs
+ * `.cmd`/`.bat` shims directly on Windows without `shell: true`, so the
+ * three npm/memorize seams below avoid DEP0190 (args + shell:true). Matches
+ * CliConsolidator's `SpawnImpl` pattern.
+ */
+export type SpawnFn = typeof spawn;
 
 export function getCurrentVersion(): string {
   const pkg = createRequire(import.meta.url)('../../package.json') as {
@@ -70,23 +76,37 @@ export interface UpdateDeps {
   refresh(): Promise<RefreshResult>;
 }
 
-export function defaultUpdateDeps(): UpdateDeps {
+export function defaultUpdateDeps(spawnImpl: SpawnFn = spawn): UpdateDeps {
   return {
     npmCapture: (args) =>
       new Promise((resolve, reject) => {
-        execFile(
-          'npm',
-          args,
-          { timeout: 30_000, shell: WIN, windowsHide: true },
-          (error, stdout) => {
-            if (error) reject(error);
-            else resolve(stdout);
-          },
-        );
+        // cross-spawn has no execFile; collect stdout from the spawned child
+        // and enforce the same 30s timeout by killing it (mirrors the
+        // CliConsolidator capture path). No `shell` → no DEP0190.
+        const child = spawnImpl('npm', args, { windowsHide: true });
+        let stdout = '';
+        let timedOut = false;
+        const timer = setTimeout(() => {
+          timedOut = true;
+          child.kill();
+        }, 30_000);
+        child.stdout?.on('data', (chunk) => {
+          stdout += String(chunk);
+        });
+        child.on('error', (error) => {
+          clearTimeout(timer);
+          reject(error);
+        });
+        child.on('close', (code) => {
+          clearTimeout(timer);
+          if (timedOut) reject(new Error('npm view timed out after 30000ms'));
+          else if (code !== 0) reject(new Error(`npm exited with code ${code}`));
+          else resolve(stdout);
+        });
       }),
     npmInherit: (args) =>
       new Promise((resolve, reject) => {
-        const child = spawn('npm', args, { stdio: 'inherit', shell: WIN });
+        const child = spawnImpl('npm', args, { stdio: 'inherit' });
         child.on('error', reject);
         child.on('close', (code) => resolve(code ?? 1));
       }),
@@ -99,7 +119,7 @@ export function defaultUpdateDeps(): UpdateDeps {
           reject(new Error('memorize is no longer on PATH after the upgrade'));
           return;
         }
-        const child = spawn(bin, args, { stdio: 'inherit', shell: WIN });
+        const child = spawnImpl(bin, args, { stdio: 'inherit' });
         child.on('error', reject);
         child.on('close', (code) => resolve(code ?? 1));
       }),
