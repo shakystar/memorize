@@ -1,10 +1,12 @@
+import { EventEmitter } from 'node:events';
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { Project } from '../../src/domain/entities.js';
 import {
+  defaultUpdateDeps,
   getCurrentVersion,
   getUpdateCheckFile,
   getUpdateNotice,
@@ -14,6 +16,7 @@ import {
   runSelfUpdate,
   type RefreshDeps,
   type RefreshResult,
+  type SpawnFn,
   type UpdateDeps,
 } from '../../src/services/update-service.js';
 import { readJson, writeJson } from '../../src/storage/fs-utils.js';
@@ -141,6 +144,113 @@ describe('runSelfUpdate', () => {
     });
     const code = await runSelfUpdate(deps, () => {});
     expect(code).toBe(1);
+  });
+});
+
+// --- defaultUpdateDeps spawn seams (DEP0190 guard, #96) ----------------------
+
+class FakeChild extends EventEmitter {
+  stdout = new EventEmitter();
+  killed = false;
+  kill(): boolean {
+    this.killed = true;
+    this.emit('close', null);
+    return true;
+  }
+}
+
+interface SpawnCall {
+  command: string;
+  args: string[];
+  options: Record<string, unknown>;
+}
+
+function fakeSpawn(onSpawn?: (child: FakeChild) => void): {
+  spawnImpl: SpawnFn;
+  calls: SpawnCall[];
+  children: FakeChild[];
+} {
+  const calls: SpawnCall[] = [];
+  const children: FakeChild[] = [];
+  const spawnImpl = ((command: string, args: string[], options: Record<string, unknown>) => {
+    const child = new FakeChild();
+    children.push(child);
+    calls.push({ command, args, options });
+    if (onSpawn) queueMicrotask(() => onSpawn(child));
+    return child;
+  }) as unknown as SpawnFn;
+  return { spawnImpl, calls, children };
+}
+
+describe('defaultUpdateDeps spawn seams (#96 DEP0190 guard)', () => {
+  it('npmCapture: no shell:true, args preserved, resolves collected stdout', async () => {
+    const { spawnImpl, calls } = fakeSpawn((child) => {
+      child.stdout.emit('data', '2.4.0\n');
+      child.emit('close', 0);
+    });
+    const deps = defaultUpdateDeps(spawnImpl);
+    const out = await deps.npmCapture(['view', '@shakystar/memorize', 'version']);
+    expect(out).toBe('2.4.0\n');
+    expect(calls).toHaveLength(1);
+    expect(calls[0]!.command).toBe('npm');
+    expect(calls[0]!.args).toEqual(['view', '@shakystar/memorize', 'version']);
+    expect(calls[0]!.options).not.toHaveProperty('shell');
+  });
+
+  it('npmCapture: rejects on nonzero exit code', async () => {
+    const { spawnImpl } = fakeSpawn((child) => {
+      child.emit('close', 1);
+    });
+    const deps = defaultUpdateDeps(spawnImpl);
+    await expect(deps.npmCapture(['view'])).rejects.toThrow('code 1');
+  });
+
+  it('npmCapture: enforces a 30s timeout (kills child, rejects)', async () => {
+    vi.useFakeTimers();
+    try {
+      const { spawnImpl, children } = fakeSpawn();
+      const deps = defaultUpdateDeps(spawnImpl);
+      const promise = deps.npmCapture(['view']);
+      const rejection = expect(promise).rejects.toThrow('timed out');
+      vi.advanceTimersByTime(30_000);
+      await rejection;
+      expect(children[0]!.killed).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('npmInherit: no shell:true, stdio inherit, args preserved, resolves exit code', async () => {
+    const { spawnImpl, calls } = fakeSpawn((child) => {
+      child.emit('close', 0);
+    });
+    const deps = defaultUpdateDeps(spawnImpl);
+    const code = await deps.npmInherit(['install', '-g', '@shakystar/memorize@latest']);
+    expect(code).toBe(0);
+    expect(calls[0]!.command).toBe('npm');
+    expect(calls[0]!.args).toEqual(['install', '-g', '@shakystar/memorize@latest']);
+    expect(calls[0]!.options).not.toHaveProperty('shell');
+    expect(calls[0]!.options.stdio).toBe('inherit');
+  });
+
+  it('runMemorize: no shell:true, stdio inherit (binary resolved via which)', async () => {
+    const { spawnImpl, calls } = fakeSpawn((child) => {
+      child.emit('close', 0);
+    });
+    const deps = defaultUpdateDeps(spawnImpl);
+    // `memorize` may or may not be on PATH in CI; either it resolves and we
+    // assert the spawn options, or which returns null and the call rejects
+    // before spawning. The DEP0190-relevant assertion is on the spawn options.
+    try {
+      const code = await deps.runMemorize(['update', '--post-only']);
+      expect(code).toBe(0);
+      expect(calls[0]!.args).toEqual(['update', '--post-only']);
+      expect(calls[0]!.options).not.toHaveProperty('shell');
+      expect(calls[0]!.options.stdio).toBe('inherit');
+    } catch (error) {
+      expect((error as Error).message).toContain('no longer on PATH');
+      expect(calls).toHaveLength(0);
+    }
   });
 });
 
