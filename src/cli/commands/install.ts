@@ -2,6 +2,7 @@ import {
   installClaudeIntegration,
   installCodexIntegration,
 } from '../../services/install-service.js';
+import { getMemorizeRoot } from '../../storage/path-resolver.js';
 import type { CliContext } from '../context.js';
 
 export async function runInstallCommand(
@@ -39,6 +40,18 @@ export async function runInstallCommand(
     console.log(
       'until then, memorize will not record anything from codex sessions.',
     );
+    // Codex's default workspace-write sandbox only permits writes under the
+    // project root, but memorize's database lives in ~/.memorize. Without
+    // this, every in-sandbox command dies with `unable to open database
+    // file`. memorize cannot edit config.toml on the user's behalf. (#116)
+    console.log('');
+    console.log(
+      `If you run codex with the default workspace-write sandbox, also add "${getMemorizeRoot()}"`,
+    );
+    console.log(
+      'to sandbox_workspace_write.writable_roots in ~/.codex/config.toml — otherwise memorize',
+    );
+    console.log('cannot open its database from inside the sandbox.');
     return;
   }
   throw new Error('Install target must be `claude` or `codex`.');
