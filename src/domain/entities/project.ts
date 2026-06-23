@@ -14,6 +14,15 @@ export interface Project extends BaseEntity {
   activeTaskIds: EntityId[];
   acceptedDecisionIds: EntityId[];
   ruleIds: EntityId[];
+  /**
+   * Stable repo identity that survives a path move (#145). Captured at create
+   * time so `project setup` at a new path can detect a relocated repo instead
+   * of silently minting an empty project and orphaning the original's memory.
+   * Both optional + backward-compatible: legacy projects created before this
+   * have neither, and fall back to the path/basename heuristic on detection.
+   */
+  originUrl?: string;
+  rootCommit?: string;
 }
 
 export function createProject(input: {
@@ -21,6 +30,8 @@ export function createProject(input: {
   rootPath: string;
   summary?: string;
   goals?: string[];
+  originUrl?: string;
+  rootCommit?: string;
 }): Project {
   return {
     ...baseEntity('proj'),
@@ -34,5 +45,7 @@ export function createProject(input: {
     activeTaskIds: [],
     acceptedDecisionIds: [],
     ruleIds: [],
+    ...(input.originUrl ? { originUrl: input.originUrl } : {}),
+    ...(input.rootCommit ? { rootCommit: input.rootCommit } : {}),
   };
 }

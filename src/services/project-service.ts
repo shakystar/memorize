@@ -136,6 +136,11 @@ export async function ensureBoundProjectId(cwd: string): Promise<string> {
   if (existing) return existing;
   const { setupProject } = await import('./setup-service.js');
   const setup = await setupProject(cwd);
+  // Hooks run setup non-interactively; surface a moved-repo warning to stderr so
+  // it is never silently swallowed, but never block (#145).
+  for (const warning of setup.warnings) {
+    process.stderr.write(`memorize: ${warning}\n`);
+  }
   return setup.project.id;
 }
 
