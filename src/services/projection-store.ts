@@ -543,6 +543,16 @@ export function listImportedRules(projectId: string): Rule[] {
   return parseAll<Rule>(rows);
 }
 
+export function getConflict(
+  projectId: string,
+  conflictId: string,
+): Conflict | undefined {
+  const row = db(projectId)
+    .prepare('SELECT data FROM conflicts WHERE id = ?')
+    .get(conflictId) as { data: string } | undefined;
+  return parse<Conflict>(row);
+}
+
 export function listOpenConflicts(projectId: string): Conflict[] {
   const rows = db(projectId)
     .prepare("SELECT data FROM conflicts WHERE status != 'resolved'")

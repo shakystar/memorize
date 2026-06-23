@@ -4,11 +4,13 @@ import { createFileSyncTransport } from '../../adapters/sync-transport-file.js';
 import { createHttpSyncTransport } from '../../adapters/sync-transport-http.js';
 import type { SyncTransportConfig } from '../../domain/entities.js';
 import type { SyncTransport } from '../../domain/sync-transport.js';
+import { ACTOR_USER } from '../../domain/common.js';
 import {
   createProject,
   getBoundProjectId,
   readProject,
   readSyncState,
+  recordDecision,
   requireBoundProjectId,
 } from '../../services/project-service.js';
 import { inspectProject } from '../../services/repair-service.js';
@@ -124,6 +126,26 @@ export async function runProjectCommand(
     const projectId = await requireBoundProjectId(cwd);
     const project = await readProject(projectId);
     console.log(JSON.stringify(project, null, 2));
+    return;
+  }
+
+  if (subcommand === 'decision' && args[1] === 'add') {
+    const projectId = await requireBoundProjectId(cwd);
+    const flags = parseFlags(args.slice(2), {
+      single: ['title', 'decision', 'rationale'],
+    });
+    const title = flags.single.title?.trim();
+    const decisionText = flags.single.decision?.trim();
+    if (!title) throw new Error('--title is required.');
+    if (!decisionText) throw new Error('--decision is required.');
+    const recorded = await recordDecision({
+      projectId,
+      title,
+      decision: decisionText,
+      ...(flags.single.rationale ? { rationale: flags.single.rationale } : {}),
+      actor: ACTOR_USER,
+    });
+    console.log(`Recorded decision ${recorded.id} (${recorded.title})`);
     return;
   }
 
