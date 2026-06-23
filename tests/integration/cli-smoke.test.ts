@@ -19,4 +19,38 @@ describe('CLI smoke', () => {
     expect(result.stdout).toContain('AGENT_GUIDE.md');
     expect(result.stdout).not.toContain('memorize launch');
   });
+
+  it('shows usage for `task create --help` instead of creating a task', () => {
+    const result = spawnSync(
+      process.execPath,
+      [tsxCliPath, cliEntryPath, 'task', 'create', '--help'],
+      { encoding: 'utf8' },
+    );
+
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain('Memorize');
+    expect(result.stdout).not.toContain('Created task');
+  });
+
+  it('shows usage for `task --help`', () => {
+    const result = spawnSync(
+      process.execPath,
+      [tsxCliPath, cliEntryPath, 'task', '--help'],
+      { encoding: 'utf8' },
+    );
+
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain('Memorize');
+  });
+
+  it('shows usage for `--help`', () => {
+    const result = spawnSync(
+      process.execPath,
+      [tsxCliPath, cliEntryPath, '--help'],
+      { encoding: 'utf8' },
+    );
+
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain('Memorize');
+  });
 });
