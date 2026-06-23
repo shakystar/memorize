@@ -18,6 +18,8 @@ export function renderScaffoldUsage(): string {
     '  memorize task resume         Load startup context for the current task',
     '  memorize task handoff ...    Record a handoff to the next agent',
     '  memorize task done ...       Mark a task complete (handoff_ready -> done)',
+    '  memorize project decision add ...  Record a project decision',
+    '  memorize conflict resolve <id> ... Resolve an open conflict',
     '',
     'Setup (usually run by the AI assistant):',
     '  memorize setup               Detect installed agents + wire global integration',

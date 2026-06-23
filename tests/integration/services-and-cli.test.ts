@@ -5,9 +5,21 @@ import { spawnSync } from 'node:child_process';
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import { createProject } from '../../src/services/project-service.js';
+import {
+  createProject,
+  getBoundProjectId,
+  readProject,
+  recordDecision,
+} from '../../src/services/project-service.js';
 import { createTask, readHandoff, readTask } from '../../src/services/task-service.js';
 import { loadStartContext } from '../../src/services/context-service.js';
+import { resolveConflict } from '../../src/services/conflict-service.js';
+import {
+  getConflict,
+  rebuildProjectProjection,
+} from '../../src/services/projection-store.js';
+import { appendEvent } from '../../src/storage/event-store.js';
+import { createConflict } from '../../src/domain/entities.js';
 import { SESSION_ENV_VAR, startSession } from '../../src/services/session-service.js';
 import { closeAll } from '../../src/storage/db.js';
 import { readJson } from '../../src/storage/fs-utils.js';
@@ -430,6 +442,121 @@ describe('phase 2 services and cli', () => {
     ]);
     expect(result.status).not.toBe(0);
     expect(result.stderr).toContain('--confidence must be one of');
+  });
+
+  // Bug #120 — conflicts modeled with a `detected -> resolved` transition but
+  // no producer ever emitted `conflict.resolved`, so they were stuck open.
+  async function seedDetectedConflict(projectId: string): Promise<string> {
+    const conflict = createConflict({
+      projectId,
+      scopeType: 'decision',
+      scopeId: 'dec_seed',
+      fieldPath: 'topic',
+      leftVersion: 'left',
+      rightVersion: 'right',
+      conflictType: 'decision',
+    });
+    await appendEvent({
+      type: 'conflict.detected',
+      projectId,
+      scopeType: 'project',
+      scopeId: conflict.id,
+      actor: 'system',
+      payload: conflict,
+    });
+    await rebuildProjectProjection(projectId);
+    return conflict.id;
+  }
+
+  it('resolves a detected conflict via the service producer', async () => {
+    const project = await createProject({ title: 'Conflict flow', rootPath: sandbox });
+    const conflictId = await seedDetectedConflict(project.id);
+
+    expect((await loadStartContext({ projectId: project.id })).openConflicts).toHaveLength(1);
+
+    await resolveConflict(project.id, conflictId, {
+      actor: 'user',
+      summary: 'picked the right version',
+    });
+
+    const stored = getConflict(project.id, conflictId);
+    expect(stored?.status).toBe('resolved');
+    expect(stored?.resolvedBy).toBe('user');
+    expect(stored?.resolutionSummary).toBe('picked the right version');
+    // Projector must move it out of the open set (WHERE status != 'resolved').
+    expect((await loadStartContext({ projectId: project.id })).openConflicts).toHaveLength(0);
+  });
+
+  it('rejects resolving a conflict that is already resolved', async () => {
+    const project = await createProject({ title: 'Conflict guard', rootPath: sandbox });
+    const conflictId = await seedDetectedConflict(project.id);
+    await resolveConflict(project.id, conflictId, { actor: 'user' });
+
+    await expect(
+      resolveConflict(project.id, conflictId, { actor: 'user' }),
+    ).rejects.toThrow(/Invalid conflict status transition/);
+  });
+
+  it('resolves a conflict via cli and clears it from the open set', { timeout: 30_000 }, async () => {
+    // Bind cwd via the CLI so the spawned subprocess and the in-process
+    // seeding below share one project id.
+    const init = runCli(['project', 'init']);
+    expect(init.status).toBe(0);
+    const boundProjectId = (await getBoundProjectId(sandbox))!;
+    const conflictId = await seedDetectedConflict(boundProjectId);
+
+    const before = runCli(['conflict']);
+    expect(before.stdout).toContain(conflictId);
+
+    const resolve = runCli(['conflict', 'resolve', conflictId, '--summary', 'done']);
+    expect(resolve.status).toBe(0);
+    expect(resolve.stdout).toContain('resolved');
+
+    const after = runCli(['conflict']);
+    expect(after.stdout).not.toContain(conflictId);
+  });
+
+  // Bug #121 — decision.proposed/accepted modeled + projected but no producer.
+  it('records a decision via the service producer', async () => {
+    const project = await createProject({ title: 'Decision flow', rootPath: sandbox });
+
+    const decision = await recordDecision({
+      projectId: project.id,
+      title: 'Use SQLite',
+      decision: 'Adopt better-sqlite3 for the projection store',
+      rationale: 'Synchronous, embedded, zero-config',
+      actor: 'user',
+    });
+
+    expect(decision.status).toBe('accepted');
+    const refreshed = await readProject(project.id);
+    expect(refreshed?.acceptedDecisionIds).toContain(decision.id);
+  });
+
+  it('records a decision via cli', { timeout: 30_000 }, async () => {
+    expect(runCli(['project', 'init']).status).toBe(0);
+
+    const add = runCli([
+      'project',
+      'decision',
+      'add',
+      '--title',
+      'Use SQLite',
+      '--decision',
+      'Adopt better-sqlite3',
+      '--rationale',
+      'Synchronous embedded store',
+    ]);
+    expect(add.status).toBe(0);
+    expect(add.stdout).toContain('Recorded decision');
+
+    const show = runCli(['project', 'show']);
+    expect(show.status).toBe(0);
+    expect(show.stdout).toContain('acceptedDecisionIds');
+    const parsed = JSON.parse(String(show.stdout)) as {
+      acceptedDecisionIds: string[];
+    };
+    expect(parsed.acceptedDecisionIds.length).toBe(1);
   });
 
 });
