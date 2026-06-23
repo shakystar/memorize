@@ -15,8 +15,11 @@ import {
 import {
   createProject,
   getBoundProjectId,
+  listProjects,
   readProject,
+  relocateProject,
 } from './project-service.js';
+import { computeRepoIdentity, type RepoIdentity } from './repo-identity.js';
 
 interface DiscoverableContextFile {
   path: string;
@@ -185,17 +188,153 @@ export async function importContextFiles(project: Project): Promise<number> {
   return importedRules.length;
 }
 
+/**
+ * Has the project's stored rootPath disappeared from disk? A real move leaves
+ * the old location gone; a sibling checkout / monorepo peer is still present
+ * (so it is NOT a relocation candidate). ENOENT = gone; any other stat error is
+ * propagated rather than mistaken for "gone" (never orphan on a transient EACCES).
+ */
+async function rootPathGone(rootPath: string): Promise<boolean> {
+  try {
+    await fs.stat(rootPath);
+    return false;
+  } catch (error) {
+    // ENOENT: the path itself is gone. ENOTDIR: an intermediate component is now
+    // a file (the old tree was deleted and something took its place) — the repo
+    // is just as gone, and throwing here would crash setup entirely.
+    if (isEnoent(error)) return true;
+    if ((error as NodeJS.ErrnoException | undefined)?.code === 'ENOTDIR') return true;
+    throw error;
+  }
+}
+
+interface RelocationDecision {
+  /** Confident single move → reuse the project at the new path. */
+  autoProjectId?: string;
+  /** Ambiguous/legacy candidates → warn-and-create, never auto. */
+  warnCandidates: Project[];
+}
+
+/**
+ * Decide whether the repo at `rootPath` is a MOVED existing project (#145).
+ *
+ * Strongest → weakest: stable git identity (origin URL, then root commit) whose
+ * old path is gone on disk = a move. Auto-relocate only on a confident single
+ * match (the safe, non-interactive rule — hooks call setup non-interactively);
+ * anything ambiguous, or a legacy project with no captured identity, surfaces
+ * as a warning so the user can `project relocate` rather than silently orphan.
+ */
+async function decideRelocation(
+  rootPath: string,
+  identity: RepoIdentity,
+): Promise<RelocationDecision> {
+  const projects = await listProjects();
+  const targetBase = path.basename(rootPath);
+
+  if (identity.originUrl || identity.rootCommit) {
+    // Match on the strongest evidence available. When BOTH signals exist on both
+    // sides, require both to agree: a GitHub fork shares the upstream's root
+    // commit but has a different origin URL, so a rootCommit-only OR would
+    // wrongly fold a fork into the upstream project — itself a data-safety
+    // incident. Fall back to single-field matching only when one side lacks it.
+    const byIdentity = projects.filter((p) => {
+      const bothHaveOrigin = identity.originUrl != null && p.originUrl != null;
+      const bothHaveCommit = identity.rootCommit != null && p.rootCommit != null;
+      if (bothHaveOrigin && bothHaveCommit) {
+        return (
+          p.originUrl === identity.originUrl &&
+          p.rootCommit === identity.rootCommit
+        );
+      }
+      if (bothHaveOrigin) return p.originUrl === identity.originUrl;
+      if (bothHaveCommit) return p.rootCommit === identity.rootCommit;
+      return false;
+    });
+
+    const moved: Project[] = [];
+    for (const candidate of byIdentity) {
+      if (await rootPathGone(candidate.rootPath)) moved.push(candidate);
+    }
+
+    if (moved.length > 0) {
+      // Prefer an unambiguous basename match (disambiguates a wholesale
+      // monorepo move where several peers share origin + root commit).
+      const sameBase = moved.filter(
+        (p) => path.basename(p.rootPath) === targetBase,
+      );
+      const confident = sameBase.length === 1 ? sameBase[0] : moved.length === 1 ? moved[0] : undefined;
+      if (confident) return { autoProjectId: confident.id, warnCandidates: [] };
+      return { warnCandidates: moved }; // ambiguous — warn, never auto
+    }
+  }
+
+  // Legacy fallback: projects predating identity capture can only be matched by
+  // the orphaned-path + basename heuristic, and only ever warned about.
+  const legacy: Project[] = [];
+  for (const candidate of projects) {
+    if (candidate.originUrl || candidate.rootCommit) continue;
+    if (path.basename(candidate.rootPath) !== targetBase) continue;
+    if (await rootPathGone(candidate.rootPath)) legacy.push(candidate);
+  }
+  return { warnCandidates: legacy };
+}
+
+function buildRelocationWarning(
+  candidates: Project[],
+  rootPath: string,
+): string {
+  const lines = candidates.map(
+    (p) => `  - ${p.title} (${p.id}) last seen at ${p.rootPath}`,
+  );
+  const only = candidates.length === 1 ? candidates[0] : undefined;
+  const relocateCmd = only
+    ? `memorize project relocate "${rootPath}" --project ${only.id}`
+    : `memorize project relocate "${rootPath}" --project <id>`;
+  return (
+    `A new project was created at ${rootPath}, but it may be a MOVED existing ` +
+    `project whose old path is gone. If so, your earlier memory is under one of ` +
+    `these instead:\n${lines.join('\n')}\n` +
+    `To adopt it (retaining that memory) run:\n  ${relocateCmd}`
+  );
+}
+
 export async function setupProject(rootPath: string): Promise<{
   project: Project;
   importedContextCount: number;
+  relocated: boolean;
+  warnings: string[];
 }> {
+  const warnings: string[] = [];
+  let relocated = false;
+  let project: Project | undefined;
+
   const existingProjectId = await getBoundProjectId(rootPath);
-  const project = existingProjectId
-    ? await readProject(existingProjectId)
-    : await createProject({
+  if (existingProjectId) {
+    project = await readProject(existingProjectId);
+  } else {
+    // No binding at this path — detect a moved repo BEFORE creating, so we never
+    // silently orphan the original's memory (#145).
+    const identity = computeRepoIdentity(rootPath);
+    const decision = await decideRelocation(rootPath, identity);
+    if (decision.autoProjectId) {
+      const result = await relocateProject({
+        newPath: rootPath,
+        projectId: decision.autoProjectId,
+      });
+      project = result.project;
+      relocated = true;
+    } else {
+      project = await createProject({
         title: path.basename(rootPath),
         rootPath,
+        ...(identity.originUrl ? { originUrl: identity.originUrl } : {}),
+        ...(identity.rootCommit ? { rootCommit: identity.rootCommit } : {}),
       });
+      if (decision.warnCandidates.length > 0) {
+        warnings.push(buildRelocationWarning(decision.warnCandidates, rootPath));
+      }
+    }
+  }
 
   if (!project) {
     throw new Error('Unable to resolve or create project during setup.');
@@ -207,5 +346,7 @@ export async function setupProject(rootPath: string): Promise<{
   return {
     project: refreshedProject,
     importedContextCount,
+    relocated,
+    warnings,
   };
 }

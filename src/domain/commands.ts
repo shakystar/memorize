@@ -3,6 +3,9 @@ export interface CreateProjectInput {
   summary?: string;
   goals?: string[];
   rootPath: string;
+  /** Stable git identity captured at create time for move detection (#145). */
+  originUrl?: string;
+  rootCommit?: string;
 }
 
 export interface CreateTaskInput {

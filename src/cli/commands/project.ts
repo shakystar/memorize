@@ -15,6 +15,7 @@ import {
   requireBoundProjectId,
 } from '../../services/project-service.js';
 import { inspectProject } from '../../services/repair-service.js';
+import { computeRepoIdentity } from '../../services/repo-identity.js';
 import { setupProject } from '../../services/setup-service.js';
 import {
   cloneProject,
@@ -82,9 +83,14 @@ export async function runProjectCommand(
           `or pass --force to overwrite the binding with a new project.`,
       );
     }
+    // Capture git identity here too (#145) so an init'd project is protected by
+    // move detection just like a setup'd one — otherwise it is born "legacy".
+    const identity = computeRepoIdentity(cwd);
     const project = await createProject({
       title: path.basename(cwd),
       rootPath: cwd,
+      ...(identity.originUrl ? { originUrl: identity.originUrl } : {}),
+      ...(identity.rootCommit ? { rootCommit: identity.rootCommit } : {}),
     });
     console.log(`Initialized project ${project.title} (${project.id})`);
     return;
@@ -92,9 +98,13 @@ export async function runProjectCommand(
 
   if (subcommand === 'setup') {
     const result = await setupProject(cwd);
+    const verb = result.relocated ? 'Relocated existing project' : 'Initialized project';
     console.log(
-      `Initialized project ${result.project.title} (${result.project.id})\nImported context files: ${result.importedContextCount}`,
+      `${verb} ${result.project.title} (${result.project.id})\nImported context files: ${result.importedContextCount}`,
     );
+    for (const warning of result.warnings) {
+      console.warn(`\n⚠️  ${warning}`);
+    }
     return;
   }
 
