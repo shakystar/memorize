@@ -27,7 +27,7 @@ pnpm qa:quick              # typecheck + lint + unit + smoke
 Before opening a PR, please run:
 
 ```bash
-pnpm qa:full               # + integration + golden (CI runs this on 3 OSes)
+pnpm qa:full               # + integration + golden (CI runs the tests on 3 OSes)
 ```
 
 Integration tests isolate state via `MEMORIZE_ROOT` in a temp dir —

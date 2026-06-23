@@ -312,6 +312,23 @@ outside the project tree.
   configured), contradiction-checked against existing decisions, and
   ranked for injection exactly like consolidated ones.
 
+### `memorize memory show <memoryId> [--json]`
+
+#111 — prints a recalled memory's **full** text plus metadata. `search`
+only emits a truncated snippet; this is how an agent (or human) reads a
+memory's complete content once it has an id. Scope is the cwd-bound
+project, mirroring how `search` resolves the project.
+
+- `<memoryId>` (positional, required) — the memory id, e.g. one returned
+  by `memorize search`.
+- `--json` (boolean) — emit the raw row (memory + access metadata) as
+  JSON instead of the human-readable rendering.
+- Human form lists id, kind, salience, tags, provenance (consolidation
+  vs `import (<source>)`, session, source observation ids) and the
+  validity window (createdAt, last accessed, `obsoleteWhen`, `invalidAt`,
+  superseded-by / deduped-by pointers), followed by the memory text.
+- Fails with `no memory found with id <id>` when the id is unknown.
+
 ### `memorize project setup`
 
 Idempotent adoption command. Use this for existing projects.
@@ -324,6 +341,20 @@ Idempotent adoption command. Use this for existing projects.
   "squash on merge") and logs them as `conflict.detected` events.
 - Safe to re-run; files that do not exist are skipped, and already
   imported content is merged rather than duplicated.
+
+### `memorize project relocate [<newPath>] (--project <id> | --from <oldPath>)`
+
+#124 — rebinds an **existing** project to a new absolute path after the
+repo moved (machine migration, directory rename). Use this, NOT
+`project setup`, in a relocated checkout: `setup` would mint a *new*
+empty project and orphan the original's memory.
+
+- `<newPath>` (positional) — the project's new location; defaults to cwd.
+- `--project <id>` (single) — identify the source project by id.
+- `--from <oldPath>` (single) — identify it by its previous path instead.
+- One of `--project` / `--from` is required.
+- Idempotent: when the project is already bound to `<newPath>` it reports
+  `already bound … nothing to do` and changes nothing.
 
 ### `memorize project init [--force]`
 
@@ -351,9 +382,9 @@ need JSON.
 
 ### `memorize project sync [flags]` (experimental)
 
-> **Experimental in 1.x.** The file transport works and is roundtrip-tested,
-> but real cross-machine dogfooding is post-1.0. Flags and on-disk wire
-> format may change in a 1.x minor release. Do not depend on it for
+> **Experimental in 2.x.** The file transport works and is roundtrip-tested,
+> but real cross-machine dogfooding is still maturing. Flags and on-disk wire
+> format may change in a 2.x minor release. Do not depend on it for
 > production sharing yet.
 
 Event sync with a remote path.
@@ -367,6 +398,37 @@ Event sync with a remote path.
 
 Running with no flags prints the current sync state and queue
 snapshot as JSON.
+
+### `memorize project clone <remoteProjectId> (--remote-path <path> | --remote-url <url> [--token <t>])` (experimental)
+
+True-replica join (#30, #38): adopts an existing **remote** project's id
+in a FRESH directory so the same project keeps one identity on every
+machine — the git-clone analog to `project setup`, which mints a *new*
+id. The remote location is persisted, so later boundaries auto-sync with
+no flags (P3-b).
+
+| Flag | Shape | Purpose |
+|---|---|---|
+| `<remoteProjectId>` | positional, required | The remote project id to replicate |
+| `--remote-path <path>` | single | Filesystem transport location of the source |
+| `--remote-url <url>` | single | HTTP relay URL of the source (alternative to `--remote-path`) |
+| `--token <t>` | single | Bearer token for `--remote-url` |
+
+Pulls existing events on clone; if the source has not pushed yet it binds
+and tells you to run `project sync --pull` once it has. Same experimental
+caveats as `project sync`.
+
+### `memorize project decision add --title <text> --decision <text> [--rationale <text>]`
+
+Records an explicit project decision as a first-class event. The decision
+joins the startup context and is contradiction-checked against existing
+decisions exactly like a consolidated decision memory.
+
+| Flag | Shape | Purpose |
+|---|---|---|
+| `--title <text>` | single, required | Short decision title |
+| `--decision <text>` | single, required | The decision itself |
+| `--rationale <text>` | single | Why it was made — recommended; feeds contradiction detection |
 
 ## Tasks & handoffs — the OPTIONAL explicit-coordination layer
 
@@ -440,6 +502,18 @@ task status to `handoff_ready`.
 | `--remaining <text>` | multi | Item added to `remainingItems` |
 | `--warning <text>` | multi | Item added to `warnings` |
 | `--question <text>` | multi | Item added to `unresolvedQuestions` |
+
+### `memorize task done [--task <taskId>]`
+
+#118 — drives a task to the terminal `done` state. Resolves the target
+the same way `handoff` does (`--task` → the session's claimed task →
+the active task) and fails if none resolves. Typically the close-out
+after `task handoff` moved the task to `handoff_ready`; `done` records
+the final `handoff_ready -> done` transition.
+
+| Flag | Shape | Purpose |
+|---|---|---|
+| `--task <taskId>` | single | Overrides the auto-selected task |
 
 ### `memorize setup`
 
@@ -599,6 +673,13 @@ directly. See `src/services/hook-service.ts` for the stdin contract.
 ### `memorize conflict list`
 
 Lists all open conflicts for the bound project as JSON.
+
+### `memorize conflict resolve <id> [--summary <text>]`
+
+Marks an open conflict resolved, appending a `conflict.resolved` event.
+`<id>` (positional, required) is a conflict id from `conflict list`;
+`--summary <text>` (single) records how it was resolved. Resolving a
+conflict that does not exist fails.
 
 ### `memorize search "<query>" [--limit N] [--lexical] [--json]`
 
