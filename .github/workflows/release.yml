@@ -1,102 +1,50 @@
 name: Release
 
-# Publishes to npm whenever the version in package.json changes on main.
-# Auth: npm OIDC Trusted Publishing (no NPM_TOKEN secret) — provenance is automatic.
-# Idempotent: if the version is already on npm, the run no-ops.
+# Canonical release automation (see issue #97 + .github/CONTRIBUTING.md).
+# release-please computes the next version from Conventional Commits on main,
+# maintains a Release PR + CHANGELOG, and on merge cuts the tag + GitHub
+# Release. The publish job then ships to npm via OIDC Trusted Publishing
+# (no NPM_TOKEN; provenance attached).
 
 on:
   push:
     branches: [main]
-    paths:
-      - package.json
 
-permissions:
-  contents: write # create git tag + GitHub release
-  id-token: write # npm OIDC trusted publishing
-
-concurrency:
-  group: release
-  cancel-in-progress: false
+permissions: {}
 
 jobs:
-  release:
+  release-please:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    outputs:
+      release_created: ${{ steps.release.outputs.release_created }}
+      tag_name: ${{ steps.release.outputs.tag_name }}
+    steps:
+      - uses: googleapis/release-please-action@v4
+        id: release
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+  publish:
+    needs: release-please
+    if: ${{ needs.release-please.outputs.release_created == 'true' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write # npm OIDC trusted publishing
     steps:
       - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
       - uses: pnpm/action-setup@v4
-
       - uses: actions/setup-node@v4
         with:
           node-version: 22
           cache: pnpm
           registry-url: https://registry.npmjs.org
-
-      - name: Resolve version
-        id: ver
-        run: echo "version=$(node -p "require('./package.json').version")" >> "$GITHUB_OUTPUT"
-
-      - name: Skip if already published
-        id: check
-        run: |
-          if npm view "@shakystar/memorize@${{ steps.ver.outputs.version }}" version >/dev/null 2>&1; then
-            echo "published=true" >> "$GITHUB_OUTPUT"
-            echo "::notice::v${{ steps.ver.outputs.version }} is already on npm — skipping release."
-          else
-            echo "published=false" >> "$GITHUB_OUTPUT"
-          fi
-
-      - name: Install
-        if: steps.check.outputs.published == 'false'
-        run: pnpm install --frozen-lockfile
-
-      - name: Build
-        if: steps.check.outputs.published == 'false'
-        run: pnpm build
-
-      - name: Verify package contents
-        if: steps.check.outputs.published == 'false'
-        run: pnpm pack:check
-
-      - name: Test
-        if: steps.check.outputs.published == 'false'
-        run: pnpm test
-
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm build
+      - run: pnpm pack:check
       # OIDC trusted publishing requires npm >= 11.5.1.
-      - name: Upgrade npm for OIDC
-        if: steps.check.outputs.published == 'false'
-        run: npm install -g npm@latest
-
-      - name: Publish to npm
-        if: steps.check.outputs.published == 'false'
-        run: npm publish
-
-      - name: Extract release notes from CHANGELOG
-        if: steps.check.outputs.published == 'false'
-        id: notes
-        run: |
-          version="${{ steps.ver.outputs.version }}"
-          # Print the body under "## [<version>]" up to the next "## [" heading.
-          awk -v v="$version" '
-            $0 ~ "^## \\[" v "\\]" { capture=1; next }
-            capture && /^## \[/ { exit }
-            capture { print }
-          ' CHANGELOG.md > release-notes.md
-          if [ ! -s release-notes.md ]; then
-            echo "See [CHANGELOG.md](CHANGELOG.md)." > release-notes.md
-          fi
-
-      - name: Tag + GitHub Release
-        if: steps.check.outputs.published == 'false'
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          version="${{ steps.ver.outputs.version }}"
-          git tag "v$version"
-          git push origin "v$version"
-          gh release create "v$version" \
-            --title "v$version" \
-            --notes-file release-notes.md \
-            --verify-tag
+      - run: npm install -g npm@latest
+      - run: npm publish --provenance --access public

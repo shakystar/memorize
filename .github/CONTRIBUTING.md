@@ -48,27 +48,32 @@ never run them against your real `~/.memorize`.
 
 ## Releasing
 
-Releases are automated — there is no manual `npm publish`.
+Releasing is fully automated with
+[release-please](https://github.com/googleapis/release-please); the
+version is computed from Conventional Commits, not edited by hand.
 
-To cut a release:
+**Feature PRs must never touch `package.json` `version` or `CHANGELOG.md`.**
+A CI `version-guard` job fails any PR that bumps the version (except the
+bot's own `release-please--*` branch). Versioning intent travels in the
+commit type: `fix:` → patch, `feat:` → minor, `feat!:` /
+`BREAKING CHANGE:` → major.
 
-1. Bump `version` in `package.json` (semver; major-version bumps are
-   reserved for breaking changes to the on-disk event log or the public
-   CLI surface).
-2. Graduate the relevant items from `## [Unreleased]` into a new
-   `## [x.y.z] — YYYY-MM-DD` section in `CHANGELOG.md`.
-3. Merge to `main`.
+How a release happens:
 
-On merge, `.github/workflows/release.yml` builds, tests, and publishes
-`@shakystar/memorize` to npm via OIDC trusted publishing (no token,
-provenance attached), then creates the `v<version>` tag and a GitHub
-release from the matching CHANGELOG section. The run is idempotent: if
-the version is already on npm it no-ops.
+1. Feature PRs merge to `main` as usual — nobody touches the version.
+2. release-please opens and keeps a **Release PR** updated (titled e.g.
+   `chore(main): release 2.4.0`) with the computed version and a
+   CHANGELOG draft built from the merged commits.
+3. To ship, optionally add a narrative preamble to the Release PR (edit
+   it last — the bot regenerates it on new `main` commits), then **merge
+   the Release PR**.
+4. Merging it tags `vX.Y.Z`, creates the GitHub Release, and triggers the
+   `publish` job in `.github/workflows/release.yml`, which publishes
+   `@shakystar/memorize` to npm via **OIDC Trusted Publishing** (no
+   token, `--provenance` attached).
 
-**A new `version` is the only thing that triggers a publish.** Any other
-edit to `package.json` (deps, scripts, metadata) is safe and will not
-release; conversely, do not bump `version` for changes that should not
-ship to npm.
+Release timing stays a deliberate human act (merging the Release PR);
+only the mechanics are automated.
 
 ## License and relicensing
 
