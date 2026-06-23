@@ -7,6 +7,16 @@ loosely. The project adheres to [Semantic Versioning](https://semver.org/);
 major-version bumps are reserved for breaking changes to the on-disk event
 log layout or the public CLI surface.
 
+> **How releases are cut:** a release publishes automatically when
+> `version` in `package.json` is bumped on `main`. Record unreleased
+> changes under **[Unreleased]** below and graduate them into a new
+> versioned section when you bump. See
+> [CONTRIBUTING.md](.github/CONTRIBUTING.md#releasing).
+
+## [Unreleased]
+
+_Nothing yet._
+
 ## [2.3.1] — 2026-06-13
 
 Windows-only console-noise patch, cut from the `v2.3.0` tag so it carries
