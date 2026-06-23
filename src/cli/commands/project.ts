@@ -11,6 +11,7 @@ import {
   readProject,
   readSyncState,
   recordDecision,
+  relocateProject,
   requireBoundProjectId,
 } from '../../services/project-service.js';
 import { inspectProject } from '../../services/repair-service.js';
@@ -118,6 +119,34 @@ export async function runProjectCommand(
         ? `Cloned project ${result.projectId} (${result.pulled} events pulled).`
         : `Bound to remote project ${result.projectId}; no events yet. ` +
             'Run `memorize project sync --pull --remote-path <path>` after the source pushes.',
+    );
+    return;
+  }
+
+  if (subcommand === 'relocate') {
+    // #124 — rebind an EXISTING project to a new absolute path (e.g. machine
+    // migration) instead of letting `project setup` mint a new empty project
+    // and orphan the original's memory. Identify the source by --project <id>
+    // or --from <oldPath>; <newPath> defaults to cwd.
+    const flags = parseFlags(args.slice(1), {
+      single: ['project', 'from'],
+    });
+    const newPath = flags.positional[0] ?? cwd;
+    if (!flags.single.project && !flags.single.from) {
+      throw new Error(
+        'Usage: memorize project relocate [<newPath>] ' +
+          '(--project <id> | --from <oldPath>)',
+      );
+    }
+    const { project, alreadyBound } = await relocateProject({
+      newPath,
+      ...(flags.single.project ? { projectId: flags.single.project } : {}),
+      ...(flags.single.from ? { fromPath: flags.single.from } : {}),
+    });
+    console.log(
+      alreadyBound
+        ? `Project ${project.title} (${project.id}) already bound to ${project.rootPath}; nothing to do.`
+        : `Relocated project ${project.title} (${project.id}) to ${project.rootPath}`,
     );
     return;
   }

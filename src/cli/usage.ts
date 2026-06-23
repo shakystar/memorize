@@ -24,6 +24,7 @@ export function renderScaffoldUsage(): string {
     'Setup (usually run by the AI assistant):',
     '  memorize setup               Detect installed agents + wire global integration',
     '  memorize project setup       Bind cwd + import AGENTS.md / CLAUDE.md / rules',
+    '  memorize project relocate    Rebind an existing project to a new path (after a move)',
     '  memorize project clone ...   Replica-clone a remote project into a fresh dir',
     '  memorize install claude      Wire Memorize into .claude/settings.local.json',
     '  memorize install codex       Wire Memorize bootstrap into AGENTS.override.md',

@@ -23,6 +23,15 @@ export async function bindProject(rootPath: string, projectId: string): Promise<
   await writeJson(getProjectBindingsFile(), bindings);
 }
 
+export async function unbindPath(rootPath: string): Promise<void> {
+  const bindings = await readBindings();
+  const key = normalizeRoot(rootPath);
+  if (key in bindings.byPath) {
+    delete bindings.byPath[key];
+    await writeJson(getProjectBindingsFile(), bindings);
+  }
+}
+
 export async function resolveProjectIdForPath(
   rootPath: string,
 ): Promise<string | undefined> {
