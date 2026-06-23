@@ -196,9 +196,16 @@ export async function runSelfUpdate(
   return deps.runMemorize(['update', '--post-only']);
 }
 
-/** Matches any memorize hook command form for the given agent. */
-const MEMORIZE_CODEX_HOOK_RE = /(@shakystar\/)?memorize\s+hook\s+codex\s/;
-const MEMORIZE_CLAUDE_HOOK_RE = /(@shakystar\/)?memorize\s+hook\s+claude\s/;
+/**
+ * Matches any memorize hook command form for the given agent — npx/bare
+ * (`memorize hook <agent>`) AND the #122 node-abs form
+ * (`node "<.../cli/index.js>" hook <agent>`). Scans raw settings text, so the
+ * node-abs alternative tolerates the JSON-escaped closing quote (`index.js\"`).
+ */
+const MEMORIZE_CODEX_HOOK_RE =
+  /(?:(?:@shakystar\/)?memorize\s+hook|[/\\]cli[/\\]index\.js\\?"\s+hook)\s+codex\s/;
+const MEMORIZE_CLAUDE_HOOK_RE =
+  /(?:(?:@shakystar\/)?memorize\s+hook|[/\\]cli[/\\]index\.js\\?"\s+hook)\s+claude\s/;
 
 export interface RefreshDeps {
   listProjects(): Promise<Project[]>;

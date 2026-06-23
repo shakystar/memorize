@@ -1,9 +1,10 @@
+import { existsSync } from 'node:fs';
 import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
 
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 
 import { POST_TOOL_USE_MATCHER } from '../../src/services/capture-service.js';
 
@@ -14,6 +15,11 @@ let codexHome: string;
 const repoRoot = process.cwd();
 const tsxCliPath = join(repoRoot, 'node_modules', 'tsx', 'dist', 'cli.mjs');
 const cliEntryPath = join(repoRoot, 'src', 'cli', 'index.ts');
+// Built CLI — the #122 node-abs hook embeds the path of the running module,
+// so the #123 executability probe only resolves to a real file when install
+// runs from dist/ (the production path). The dev/tsx entry would embed a
+// `src/cli/index.js` path that never exists.
+const distCliPath = join(repoRoot, 'dist', 'cli', 'index.js');
 
 function runCli(args: string[], stdinPayload?: object) {
   return spawnSync('node', [tsxCliPath, cliEntryPath, ...args], {
@@ -34,6 +40,21 @@ function runCli(args: string[], stdinPayload?: object) {
     ...(stdinPayload ? { input: JSON.stringify(stdinPayload) } : {}),
   });
 }
+
+beforeAll(() => {
+  // The #123 probe tests run install from the built dist/ CLI so the
+  // node-abs hook embeds a path that actually exists. Build once if absent.
+  if (!existsSync(distCliPath)) {
+    const build = spawnSync('pnpm', ['build'], {
+      cwd: repoRoot,
+      encoding: 'utf8',
+      shell: true,
+    });
+    if (build.status !== 0) {
+      throw new Error(`dist build failed:\n${build.stdout}\n${build.stderr}`);
+    }
+  }
+}, 120_000);
 
 beforeEach(async () => {
   sandbox = await mkdtemp(join(tmpdir(), 'memorize-install-'));
@@ -388,6 +409,138 @@ describe('install integration', () => {
     expect(result.stdout).toContain('approve');
   });
 
+  it('doctor detects a missing PostToolUse claude hook (#130 — installer wires 4 events, doctor must check all 4)', async () => {
+    // Install (npx form) writes all four claude events. Doctor's event set
+    // must match the installer's — including PostToolUse — or a missing
+    // PostToolUse hook reads as a false green.
+    runCli(['install', 'claude']);
+
+    const settingsPath = join(sandbox, '.claude', 'settings.local.json');
+    const settings = JSON.parse(await readFile(settingsPath, 'utf8')) as {
+      hooks: Record<string, unknown[]>;
+    };
+    // Drop the PostToolUse memorize hook, leaving the other three intact.
+    delete settings.hooks.PostToolUse;
+    await writeFile(settingsPath, JSON.stringify(settings, null, 2), 'utf8');
+
+    const result = runCli(['doctor', '--json']);
+    const report = JSON.parse(String(result.stdout)) as {
+      checks: Array<{ id: string; status: string; message: string }>;
+    };
+    const claudeCheck = report.checks.find((c) => c.id === 'install.claude');
+    expect(claudeCheck?.status).toBe('warn');
+    expect(claudeCheck?.message).toContain('PostToolUse');
+  });
+
+  it('doctor reports all 4 claude hooks present after a clean install (#130)', async () => {
+    runCli(['install', 'claude']);
+
+    const result = runCli(['doctor', '--json']);
+    const report = JSON.parse(String(result.stdout)) as {
+      checks: Array<{ id: string; status: string; message: string }>;
+    };
+    const claudeCheck = report.checks.find((c) => c.id === 'install.claude');
+    // npx form is presence-only (no offline probe); all 4 present → ok.
+    expect(claudeCheck === undefined || claudeCheck.status === 'ok').toBe(true);
+    if (claudeCheck) {
+      expect(claudeCheck.message).toContain('4 memorize hooks');
+    }
+  });
+
+  it('doctor reports install.claude:ok for a freshly, correctly installed node-abs hook (#123)', async () => {
+    // bare form emits the node-abs invocation pointing at the real
+    // dist/cli/index.js — the probe runs `node "<abs>" --version` and must
+    // succeed, keeping status ok. Runs from dist so the embedded path exists.
+    const install = spawnSync('node', [distCliPath, 'install', 'claude'], {
+      cwd: sandbox,
+      encoding: 'utf8',
+      env: {
+        ...process.env,
+        MEMORIZE_ROOT: memorizeRoot,
+        HOME: codexHome,
+        USERPROFILE: codexHome,
+        MEMORIZE_HOOK_COMMAND_FORM: 'bare',
+      },
+    });
+    expect(install.status).toBe(0);
+
+    const result = spawnSync('node', [distCliPath, 'doctor', '--json'], {
+      cwd: sandbox,
+      encoding: 'utf8',
+      env: {
+        ...process.env,
+        MEMORIZE_ROOT: memorizeRoot,
+        HOME: codexHome,
+        USERPROFILE: codexHome,
+        MEMORIZE_HOOK_COMMAND_FORM: 'bare',
+      },
+    });
+    const report = JSON.parse(String(result.stdout)) as {
+      checks: Array<{ id: string; status: string; message: string }>;
+    };
+    const claudeCheck = report.checks.find((c) => c.id === 'install.claude');
+    // Present and runnable → ok (or omitted, which doctor treats as a no-op
+    // green when zero memorize hooks — but here all four are present).
+    expect(claudeCheck === undefined || claudeCheck.status === 'ok').toBe(true);
+  });
+
+  it('doctor does NOT report install.claude:ok when a node-abs hook points at an unresolvable path (#123 — presence-only would false-green)', async () => {
+    // Install the node-abs (bare) form, then rewrite the cli.js path to a
+    // path that does not exist. Presence regex still matches, but the
+    // command can never run — doctor must downgrade off ok.
+    spawnSync('node', [distCliPath, 'install', 'claude'], {
+      cwd: sandbox,
+      encoding: 'utf8',
+      env: {
+        ...process.env,
+        MEMORIZE_ROOT: memorizeRoot,
+        HOME: codexHome,
+        USERPROFILE: codexHome,
+        MEMORIZE_HOOK_COMMAND_FORM: 'bare',
+      },
+    });
+
+    const settingsPath = join(sandbox, '.claude', 'settings.local.json');
+    const settings = JSON.parse(await readFile(settingsPath, 'utf8')) as {
+      hooks: Record<
+        string,
+        Array<{ hooks: Array<{ command: string }> }>
+      >;
+    };
+    // Point every node-abs command at a cli/index.js that does not exist,
+    // keeping the memorize-identifying path shape so presence still matches.
+    for (const groups of Object.values(settings.hooks)) {
+      for (const group of groups) {
+        for (const entry of group.hooks ?? []) {
+          entry.command = entry.command.replace(
+            /node "[^"]*\/cli\/index\.js"/,
+            'node "C:/nonexistent-memorize/dist/cli/index.js"',
+          );
+        }
+      }
+    }
+    await writeFile(settingsPath, JSON.stringify(settings, null, 2), 'utf8');
+
+    const result = spawnSync('node', [tsxCliPath, cliEntryPath, 'doctor', '--json'], {
+      cwd: sandbox,
+      encoding: 'utf8',
+      env: {
+        ...process.env,
+        MEMORIZE_ROOT: memorizeRoot,
+        HOME: codexHome,
+        USERPROFILE: codexHome,
+        MEMORIZE_HOOK_COMMAND_FORM: 'bare',
+      },
+    });
+    const report = JSON.parse(String(result.stdout)) as {
+      checks: Array<{ id: string; status: string; message: string }>;
+    };
+    const claudeCheck = report.checks.find((c) => c.id === 'install.claude');
+    expect(claudeCheck).toBeDefined();
+    expect(claudeCheck?.status).not.toBe('ok');
+    expect(claudeCheck?.message).toContain('nonexistent-memorize');
+  });
+
   it('doctor reports install.codex:ok after a clean install codex', () => {
     runCli(['install', 'codex']);
 
@@ -492,13 +645,15 @@ describe('install integration', () => {
     expect(report.checks.find((c) => c.id === 'install.codex')).toBeUndefined();
   });
 
-  it('install claude with MEMORIZE_HOOK_COMMAND_FORM=bare uses bare `memorize` (faster, lets SessionEnd finish before Claude exits)', async () => {
-    // Why we care: Claude's SessionEnd hook is non-blocking — Claude
-    // reaps the subprocess as soon as it exits, so npx's cold-cache
-    // resolution latency was preventing cleanup work from completing
-    // (verified empirically during rc.5 dogfood). Using bare
-    // `memorize` when it's on PATH avoids npx entirely and gets the
-    // cleanup done in milliseconds.
+  it('install claude with MEMORIZE_HOOK_COMMAND_FORM=bare emits an absolute node invocation (#122 — bare `memorize` is not on Git Bash PATH when Claude runs hooks)', async () => {
+    // Why we care: Claude Code executes hooks via Git Bash, where the npm
+    // global bin is NOT on PATH — a literal `memorize` token there fails
+    // `command not found`. The fast (`bare`) form therefore emits
+    // `node "<abs .../dist/cli/index.js>" hook ...`: `node` is always
+    // resolvable, the absolute path removes shim/PATHEXT/PATH ambiguity,
+    // and a direct node launch keeps the ms-level startup the bare form
+    // was chosen for (so SessionEnd cleanup still completes before Claude
+    // reaps the subprocess). It must NOT regress to npx.
     const result = spawnSync(
       'node',
       [tsxCliPath, cliEntryPath, 'install', 'claude'],
@@ -528,9 +683,12 @@ describe('install integration', () => {
     for (const event of ['SessionStart', 'PostCompact', 'SessionEnd']) {
       const groups = settings.hooks[event] ?? [];
       const cmds = groups.flatMap((g) => g.hooks.map((h) => h.command));
-      const memorizeCmd = cmds.find((c) => /memorize\s+hook\s+claude/.test(c));
+      const memorizeCmd = cmds.find((c) => /\bhook\s+claude/.test(c));
       expect(memorizeCmd, `event ${event} has a memorize entry`).toBeDefined();
-      expect(memorizeCmd!).toBe(`memorize hook claude ${event}`);
+      // node-abs form: `node "<abs>/cli/index.js" hook claude <event>`.
+      expect(memorizeCmd!).toMatch(/^node\s+"/);
+      expect(memorizeCmd!).toMatch(/\/cli\/index\.js"\s/);
+      expect(memorizeCmd!).toMatch(new RegExp(`hook claude ${event}$`));
       expect(memorizeCmd!).not.toMatch(/^npx\s/);
     }
   });
@@ -621,9 +779,15 @@ describe('install integration', () => {
       const cmds = (settings.hooks[event] ?? []).flatMap((g) =>
         g.hooks.map((h) => h.command),
       );
-      const memorizeCmds = cmds.filter((c) => /memorize\s+hook\s+claude/.test(c));
+      // Match any memorize form (npx token OR node-abs cli/index.js) so the
+      // strip's form-migration is what's under test, not the literal shape.
+      const memorizeCmds = cmds.filter(
+        (c) => /memorize\s+hook\s+claude/.test(c) || /\/cli\/index\.js"\s+hook\s+claude/.test(c),
+      );
       expect(memorizeCmds.length, `event ${event} should have exactly one memorize entry`).toBe(1);
-      expect(memorizeCmds[0]).toBe(`memorize hook claude ${event}`);
+      // After swapping npx → bare, the surviving entry is the node-abs form.
+      expect(memorizeCmds[0]).toMatch(/^node\s+".*\/cli\/index\.js"\s+hook claude /);
+      expect(memorizeCmds[0]).toMatch(new RegExp(`hook claude ${event}$`));
     }
   });
 });

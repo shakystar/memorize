@@ -92,20 +92,26 @@ describe('runRefresh end-to-end (sandboxed)', () => {
 
     // Legacy Stop entry (memorize-only) is gone entirely.
     expect(settings.hooks.Stop).toBeUndefined();
-    // The full current contract is present.
+    // The full current contract is present. detectHookCommandForm() chooses
+    // the form (npx when memorize is off PATH, else the #122 node-abs form);
+    // this test pins migration behavior, not the literal shape, so match any
+    // memorize hook command for the event.
+    const isMemorizeFor = (cmd: string, event: string): boolean =>
+      new RegExp(`(?:memorize\\s+hook|/cli/index\\.js"\\s+hook)\\s+claude\\s+${event}\\b`).test(cmd);
     for (const event of ['SessionStart', 'PostCompact', 'SessionEnd', 'PostToolUse']) {
       const commands = (settings.hooks[event] ?? []).flatMap((g) =>
         g.hooks.map((h) => h.command),
       );
-      expect(commands).toContain(`memorize hook claude ${event}`);
+      expect(commands.some((c) => isMemorizeFor(c, event))).toBe(true);
     }
-    // npx form was migrated to bare — no duplicate npx entry left.
+    // The legacy npx entry was migrated to a single current-form entry — no
+    // duplicate left behind.
     const startCommands = settings.hooks.SessionStart!.flatMap((g) =>
       g.hooks.map((h) => h.command),
     );
-    expect(startCommands.filter((c) => c.includes('hook claude SessionStart'))).toEqual(
-      ['memorize hook claude SessionStart'],
-    );
+    expect(
+      startCommands.filter((c) => isMemorizeFor(c, 'SessionStart')),
+    ).toHaveLength(1);
     // Third-party entry survived.
     expect(startCommands).toContain('other-tool --on-start');
 

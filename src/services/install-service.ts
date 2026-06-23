@@ -1,6 +1,7 @@
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 import which from 'which';
 
@@ -32,30 +33,75 @@ function detectHookCommandForm(): HookCommandForm {
   return which.sync('memorize', { nothrow: true }) ? 'bare' : 'npx';
 }
 
+/**
+ * Absolute path to this package's CLI entrypoint (dist/cli/index.js),
+ * resolved from the running module location and normalized to forward
+ * slashes. #122 — Claude Code executes hooks via Git Bash, where the npm
+ * global bin is NOT on PATH, so a bare `memorize` token fails
+ * `command not found`. `node` is always resolvable; an absolute path to
+ * cli/index.js removes shim/PATHEXT/PATH ambiguity while keeping the
+ * ms-level startup the `bare` form was chosen for. Forward slashes work
+ * both as a Git Bash command-string arg and for node on Windows.
+ */
+function resolveCliPath(): string {
+  // This module is dist/services/install-service.js at runtime.
+  const here = path.dirname(fileURLToPath(import.meta.url));
+  return path.resolve(here, '../cli/index.js').replace(/\\/g, '/');
+}
+
 function buildHookCommand(
   form: HookCommandForm,
   agent: 'claude' | 'codex',
   event: string,
 ): string {
   return form === 'bare'
-    ? `memorize hook ${agent} ${event}`
+    ? `node "${resolveCliPath()}" hook ${agent} ${event}`
     : `npx @shakystar/memorize hook ${agent} ${event}`;
 }
 
 /**
+ * Source-of-truth fragment that identifies a command as memorize's, no
+ * matter the form. Precedes the `hook <agent> <event>` suffix:
+ *   - npx form:  `npx @shakystar/memorize hook ...`
+ *   - bare form (legacy): `memorize hook ...`
+ *   - node-abs form (#122): `node "<.../memorize/.../dist/cli/index.js>" hook ...`
+ *     — no `memorize` token adjacent to `hook`; identified instead by a
+ *     path that contains `memorize` and ends in `cli/index.js`
+ *     (or backslash variant for a Windows path written verbatim).
+ *
+ * A command is memorize's iff it carries one of these identifying tokens
+ * AND the `hook <agent> <event>` suffix. Shared by install (strip/migrate)
+ * and doctor (presence) so the two can never drift.
+ */
+const MEMORIZE_TOKEN =
+  '(?:(?:@shakystar/)?memorize\\s+hook|memorize[^"\\s]*[/\\\\]cli[/\\\\]index\\.js"?\\s+hook)';
+
+/**
  * Matches any historical or current memorize hook command shape so
  * re-installing migrates from one form to another (e.g. swap npx for
- * bare when memorize lands on PATH, or strip a removed event like
- * Stop) without leaving duplicates.
+ * bare/node-abs when memorize lands on PATH, or strip a removed event
+ * like Stop) without leaving duplicates.
  */
 function isMemorizeHookCommandFor(
   command: string,
   agent: 'claude' | 'codex',
   event: string,
 ): boolean {
-  const re = new RegExp(
-    `(@shakystar/)?memorize\\s+hook\\s+${agent}\\s+${event}\\b`,
-  );
+  const re = new RegExp(`${MEMORIZE_TOKEN}\\s+${agent}\\s+${event}\\b`);
+  return re.test(command);
+}
+
+/**
+ * Doctor-side presence check: is `command` a memorize hook for `agent`
+ * (any event, any form)? Shares MEMORIZE_TOKEN with the install strip so
+ * doctor never reports a node-abs hook as missing. Exported for
+ * repair-service.
+ */
+export function isMemorizeHookCommandForAgent(
+  command: string,
+  agent: 'claude' | 'codex',
+): boolean {
+  const re = new RegExp(`${MEMORIZE_TOKEN}\\s+${agent}\\b`);
   return re.test(command);
 }
 
