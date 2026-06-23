@@ -962,15 +962,23 @@ export interface ConsolidateResult {
   superseded: number;
   /** Observations processed in this boundary window. */
   observationsProcessed: number;
-  extractor: 'llm' | 'cli' | 'rule-based' | 'custom' | 'none';
+  /** Resolved extractor kind (the configured backend's family). */
+  extractor: 'llm' | 'cli' | 'rule-based' | 'custom';
+  /**
+   * #127: the RESOLVED backend label — the SAME string doctor surfaces
+   * (`cli:claude`, `llm`, `rule-based`, `custom`). Populated on every exit
+   * path, so a configured-but-idle boundary can no longer read as "no
+   * extractor". The genuinely-unconfigured/degraded signal is `rule-based`.
+   */
+  backend: string;
+  /**
+   * #127: what this boundary actually did, decoupled from the backend.
+   * `noop` = a configured backend had nothing to consolidate (empty window);
+   * `ok` = it processed observations/conversation. Distinguishes an idle run
+   * from an unconfigured one without overloading the backend field.
+   */
+  outcome: 'ok' | 'noop';
 }
-
-const NOOP_RESULT: ConsolidateResult = {
-  consolidated: 0,
-  superseded: 0,
-  observationsProcessed: 0,
-  extractor: 'none',
-};
 
 /**
  * Observation ids already consumed by ANY consolidated memory (valid or
@@ -1144,7 +1152,14 @@ export async function consolidate(params: {
             rawObservationEvents[rawObservationEvents.length - 1]!.id,
           );
         }
-        return NOOP_RESULT;
+        return {
+          consolidated: 0,
+          superseded: 0,
+          observationsProcessed: 0,
+          extractor: extractorKind,
+          backend: backendLabel,
+          outcome: 'noop',
+        };
       }
 
       const existing = listValidMemories(params.projectId).map(
@@ -1254,6 +1269,8 @@ export async function consolidate(params: {
         superseded: supersededCount,
         observationsProcessed: observations.length,
         extractor: extractorKind,
+        backend: backendLabel,
+        outcome: observations.length > 0 ? 'ok' : 'noop',
       };
     },
     { holdTimeoutMs: CONSOLIDATE_LOCK_HOLD_TIMEOUT_MS },

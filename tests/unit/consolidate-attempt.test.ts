@@ -265,7 +265,11 @@ describe('consolidate() — #99 cat-1 conversation-only sessions', () => {
       consolidator: fromConversation,
     });
     expect(result.consolidated).toBe(0);
-    expect(result.extractor).toBe('none');
+    // #127: a configured-but-nothing-to-do run names its backend and marks the
+    // outcome 'noop' — it must NOT read as an unconfigured/no-extractor run.
+    expect(result.extractor).toBe('custom');
+    expect(result.backend).toBe('custom');
+    expect(result.outcome).toBe('noop');
   });
 
   it('advances the byte watermark so a re-read with no new conversation is a NOOP', async () => {
@@ -297,6 +301,37 @@ describe('consolidate() — #99 cat-1 conversation-only sessions', () => {
       consolidator: fromConversation,
     });
     expect(second.consolidated).toBe(0);
-    expect(second.extractor).toBe('none');
+    expect(second.extractor).toBe('custom');
+    expect(second.backend).toBe('custom');
+    expect(second.outcome).toBe('noop');
+  });
+});
+
+describe('consolidate() — #127 backend/outcome reporting', () => {
+  it('a rule-based no-op names rule-based as the backend (NOT "none")', async () => {
+    await seedProject();
+    // No observations, no transcript, no injected consolidator: the resolved
+    // backend falls back to rule-based. The genuinely-degraded/unconfigured
+    // signal is "rule-based", and the empty-window outcome is "noop".
+    const result = await consolidate({ projectId, actor: 'test' });
+    expect(result.consolidated).toBe(0);
+    expect(result.extractor).toBe('rule-based');
+    expect(result.backend).toBe('rule-based');
+    expect(result.outcome).toBe('noop');
+  });
+
+  it('a real-work boundary reports outcome "ok" and the resolved backend', async () => {
+    await seedProject();
+    await appendObservation();
+    const result = await consolidate({
+      projectId,
+      actor: 'test',
+      consolidator: oneMemory,
+    });
+    expect(result.consolidated).toBe(1);
+    expect(result.observationsProcessed).toBe(1);
+    expect(result.extractor).toBe('custom');
+    expect(result.backend).toBe('custom');
+    expect(result.outcome).toBe('ok');
   });
 });
