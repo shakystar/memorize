@@ -130,6 +130,21 @@ export async function readSyncState(
  * without a project row) are silently skipped.
  */
 /**
+ * Resolve symlinks in a path when it exists on disk, falling back to the input
+ * unchanged when it does not. Bindings are keyed under the canonical (realpath)
+ * form that the OS gives back for process.cwd(); this keeps argument-supplied
+ * paths in that same form without throwing on paths that are already gone.
+ */
+async function realpathIfExists(absPath: string): Promise<string> {
+  try {
+    return await fs.realpath(absPath);
+  } catch (error) {
+    if (isEnoent(error)) return absPath;
+    throw error;
+  }
+}
+
+/**
  * Relocate an existing project binding to a new absolute root path (#124).
  *
  * Moving an adopted repo to a different path (e.g. machine migration) would
@@ -149,33 +164,43 @@ export async function relocateProject(input: {
   projectId?: string;
   fromPath?: string;
 }): Promise<{ project: Project; alreadyBound: boolean }> {
-  const newPath = path.resolve(input.newPath);
+  const requestedPath = path.resolve(input.newPath);
 
   // The target directory must actually exist — relocating onto a missing path
   // would just recreate the original orphaning at a new location.
   let stat: Awaited<ReturnType<typeof fs.stat>>;
   try {
-    stat = await fs.stat(newPath);
+    stat = await fs.stat(requestedPath);
   } catch (error) {
     if (isEnoent(error)) {
-      throw new Error(`New path does not exist on disk: ${newPath}`);
+      throw new Error(`New path does not exist on disk: ${requestedPath}`);
     }
     throw error;
   }
   if (!stat.isDirectory()) {
-    throw new Error(`New path is not a directory: ${newPath}`);
+    throw new Error(`New path is not a directory: ${requestedPath}`);
   }
+
+  // Canonicalize through realpath so the binding key matches what cwd-derived
+  // lookups (`project show`, `getBoundProjectId(process.cwd())`) produce. The
+  // OS realpaths process.cwd(), so on platforms where the parent is a symlink
+  // (macOS tmpdir: /var -> /private/var) a path.resolve-only key would sit at a
+  // location no cwd lookup ever yields, and the relocated project would resolve
+  // as unbound. The directory is guaranteed to exist by the stat above. (#124)
+  const newPath = await fs.realpath(requestedPath);
 
   // Resolve which existing project to rebind.
   let projectId: string | undefined;
   if (input.projectId) {
     projectId = input.projectId;
   } else if (input.fromPath) {
-    projectId = await getBoundProjectId(path.resolve(input.fromPath));
+    // Match the same canonical form bindings are keyed under. The old path may
+    // already be gone (the repo moved), so realpath only when it still exists;
+    // otherwise fall back to path.resolve.
+    const fromPath = await realpathIfExists(path.resolve(input.fromPath));
+    projectId = await getBoundProjectId(fromPath);
     if (!projectId) {
-      throw new Error(
-        `No project is bound to --from path: ${path.resolve(input.fromPath)}`,
-      );
+      throw new Error(`No project is bound to --from path: ${fromPath}`);
     }
   } else {
     throw new Error('Specify the source project with --project <id> or --from <oldPath>.');
