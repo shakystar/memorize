@@ -1,7 +1,14 @@
 import fs from 'node:fs/promises';
 
+import path from 'node:path';
+
 import { appendEvent, ensureProjectDirectories } from '../storage/event-store.js';
-import { bindProject, resolveProjectIdForPath } from '../storage/bindings-store.js';
+import {
+  bindProject,
+  readBindings,
+  resolveProjectIdForPath,
+  unbindPath,
+} from '../storage/bindings-store.js';
 import { isEnoent, readJson, writeJson } from '../storage/fs-utils.js';
 import {
   getProjectProjection,
@@ -122,6 +129,102 @@ export async function readSyncState(
  * entries that are not readable projects (stray files, invalid ids, dirs
  * without a project row) are silently skipped.
  */
+/**
+ * Relocate an existing project binding to a new absolute root path (#124).
+ *
+ * Moving an adopted repo to a different path (e.g. machine migration) would
+ * otherwise make `project setup` mint a brand-new empty project at the new
+ * path, orphaning the original project's memory. Relocate rebinds the SAME
+ * project id to the new path so the project — and all its memory under
+ * `~/.memorize/projects/<id>/` — resolves at the new location instead.
+ *
+ * Identify the source project either by `projectId` or by its current/old
+ * `fromPath`. The new path must exist on disk and must not already be bound to
+ * a DIFFERENT project. Re-running with a path already bound to the same project
+ * is a clean no-op. The project's stored `rootPath` is updated to match, and
+ * any stale binding entries for the same project (the old path) are removed.
+ */
+export async function relocateProject(input: {
+  newPath: string;
+  projectId?: string;
+  fromPath?: string;
+}): Promise<{ project: Project; alreadyBound: boolean }> {
+  const newPath = path.resolve(input.newPath);
+
+  // The target directory must actually exist — relocating onto a missing path
+  // would just recreate the original orphaning at a new location.
+  let stat: Awaited<ReturnType<typeof fs.stat>>;
+  try {
+    stat = await fs.stat(newPath);
+  } catch (error) {
+    if (isEnoent(error)) {
+      throw new Error(`New path does not exist on disk: ${newPath}`);
+    }
+    throw error;
+  }
+  if (!stat.isDirectory()) {
+    throw new Error(`New path is not a directory: ${newPath}`);
+  }
+
+  // Resolve which existing project to rebind.
+  let projectId: string | undefined;
+  if (input.projectId) {
+    projectId = input.projectId;
+  } else if (input.fromPath) {
+    projectId = await getBoundProjectId(path.resolve(input.fromPath));
+    if (!projectId) {
+      throw new Error(
+        `No project is bound to --from path: ${path.resolve(input.fromPath)}`,
+      );
+    }
+  } else {
+    throw new Error('Specify the source project with --project <id> or --from <oldPath>.');
+  }
+
+  const project = await readProject(projectId);
+  if (!project) {
+    throw new Error(`Project not found: ${projectId}`);
+  }
+
+  // Guard against hijacking a path that belongs to a different project. An
+  // exact-path binding to the SAME project is the idempotent no-op case.
+  const bindings = await readBindings();
+  const occupant = bindings.byPath[newPath];
+  if (occupant && occupant !== projectId) {
+    throw new Error(
+      `New path is already bound to a different project (${occupant}): ${newPath}`,
+    );
+  }
+
+  const alreadyBound = occupant === projectId && project.rootPath === newPath;
+
+  // Rebind: point the new path at this project id and drop any prior path
+  // bindings for the same project so the stale location can't silently re-adopt
+  // or split memory.
+  await bindProject(newPath, projectId);
+  for (const [boundPath, boundId] of Object.entries(bindings.byPath)) {
+    if (boundId === projectId && boundPath !== newPath) {
+      await unbindPath(boundPath);
+    }
+  }
+
+  // Keep the project's stored rootPath in sync with the binding.
+  if (project.rootPath !== newPath) {
+    await appendEvent({
+      type: 'project.updated',
+      projectId,
+      scopeType: 'project',
+      scopeId: projectId,
+      actor: ACTOR_SYSTEM,
+      payload: { rootPath: newPath } satisfies Partial<Project>,
+    });
+    await rebuildProjectProjection(projectId);
+  }
+
+  const refreshed = (await readProject(projectId)) ?? project;
+  return { project: refreshed, alreadyBound };
+}
+
 export async function listProjects(): Promise<Project[]> {
   let entries: string[];
   try {
