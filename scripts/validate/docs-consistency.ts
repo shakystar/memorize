@@ -181,6 +181,30 @@ for (const cmd of commands) {
   }
 }
 
+// 3b: every MULTI-WORD command advertised in usage.ts (the curated public
+// surface) must ALSO be documented in AGENT_GUIDE. The check above only sees
+// top-level handler keys, so new SUBCOMMANDS — `project relocate`, `memory
+// show`, `task done`, `conflict resolve`, `project decision add` — would
+// otherwise drift undocumented exactly the way they did before this guard.
+function usageSubcommandPaths(text: string): Set<string> {
+  const paths = new Set<string>();
+  for (const line of text.split('\n')) {
+    // Leading lowercase command tokens only; stops at a `<placeholder>`,
+    // `...`, or the capitalized aligned description. `+` ⇒ 2+ tokens.
+    const m = line.match(/memorize\s+((?:[a-z][\w-]*)(?:\s+[a-z][\w-]*)+)/);
+    if (m) paths.add(m[1]!);
+  }
+  return paths;
+}
+
+for (const path of usageSubcommandPaths(usage)) {
+  if (!agentGuide.includes(`memorize ${path}`)) {
+    fail(
+      `AGENT_GUIDE.md: subcommand \`memorize ${path}\` (advertised in usage.ts) is undocumented`,
+    );
+  }
+}
+
 // --- 4: i18n day-to-day parity -----------------------------------------------
 
 /** `memorize …` lines inside the first day-to-day ```sh fence of a README. */

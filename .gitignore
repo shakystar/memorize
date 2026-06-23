@@ -16,9 +16,10 @@
 # Git worktrees (subagent workspaces)
 /.worktrees/
 
-# Claude Code local workflow settings
+# Local agent workflow settings (kept per-machine, never committed)
 /.claude/
 /CLAUDE.md
+/AGENTS.md
 
 # Logs and temp files
 *.log
