@@ -2,10 +2,16 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 
+import { spawnSync } from 'node:child_process';
+
 import { getDb } from '../storage/db.js';
 import { readEventsWithIntegrity } from '../storage/event-store.js';
 import { isEnoent } from '../storage/fs-utils.js';
 import { getProjectRoot } from '../storage/path-resolver.js';
+import {
+  CLAUDE_HOOK_EVENTS,
+  isMemorizeHookCommandForAgent,
+} from './install-service.js';
 import {
   type ConsolidateAttempt,
   getConsolidationStatus,
@@ -123,10 +129,10 @@ async function checkClaudeInstall(
       fix: 'memorize install claude',
     };
   }
-  // PreCompact left the contract in #85 (no-op handler; its role was
-  // replaced by the PostCompact consolidation boundary) — doctor checks
-  // the live set only, so a lingering legacy entry never warns.
-  const events = ['SessionStart', 'PostCompact', 'SessionEnd'];
+  // #130 — doctor must check the SAME event set the installer wires, or a
+  // missing hook (e.g. PostToolUse) reads as a false green. Sourced from the
+  // single CLAUDE_HOOK_EVENTS constant in install-service so they can't drift.
+  const events = [...CLAUDE_HOOK_EVENTS];
   const hooks = settings.hooks ?? {};
 
   const hasLegacyShape = events.some((event) => {
@@ -152,8 +158,11 @@ async function checkClaudeInstall(
   const commandPresent = (entry: {
     hooks?: Array<{ command?: string }>;
   }): boolean =>
+    // Shared matcher with the install strip (#122) — also recognizes the
+    // node-abs form `node "<.../cli/index.js>" hook claude ...`, so doctor
+    // never reports a correctly-installed node-abs hook as missing.
     (entry.hooks ?? []).some((inner) =>
-      /memorize\s+hook\s+claude/.test(inner.command ?? ''),
+      isMemorizeHookCommandForAgent(inner.command ?? '', 'claude'),
     );
 
   const missing = events.filter(
@@ -171,12 +180,89 @@ async function checkClaudeInstall(
       fix: 'memorize install claude',
     };
   }
+
+  // #123 — presence is not runnability. With #122's node-abs form, a hook
+  // entry can be PRESENT yet point at a cli.js that does not exist (stale
+  // worktree, moved install), so it fails `command not found` at runtime
+  // while doctor reports a false green. Probe the actual command harmlessly.
+  const probeFailure = probeClaudeHookExecutability(hooks, events);
+  if (probeFailure) {
+    return {
+      id: 'install.claude',
+      label: 'Claude hook integration',
+      status: 'error',
+      message: probeFailure,
+      fix: 'memorize install claude',
+    };
+  }
+
   return {
     id: 'install.claude',
     label: 'Claude hook integration',
     status: 'ok',
     message: `All ${events.length} memorize hooks present in .claude/settings.local.json`,
   };
+}
+
+/**
+ * #123 executability probe. Take a present memorize hook command and confirm
+ * the binary it resolves to is actually runnable, mirroring the shell
+ * semantics Claude Code uses (Git Bash on Windows). Non-destructive: we run
+ * `--version` against the SAME binary, never the real `hook` subcommand
+ * (which has side effects).
+ *
+ * Only the node-abs form (#122) is probed — that's the form a real Windows
+ * install writes and the one whose runtime resolvability presence-checking
+ * cannot see. The `npx`/legacy-bare forms can't be probed cheaply offline
+ * (npx hits the network; bare `memorize` resolves differently per shell), so
+ * for them we keep presence-only — they were never the #123 false-green.
+ * Returns an error message on failure, or undefined when the probe passes
+ * (or is not applicable).
+ */
+function probeClaudeHookExecutability(
+  hooks: Record<string, Array<{ hooks?: Array<{ command?: string }> }>>,
+  events: string[],
+): string | undefined {
+  // Find the first node-abs memorize command across the checked events.
+  let nodeAbsCommand: string | undefined;
+  for (const event of events) {
+    for (const group of hooks[event] ?? []) {
+      for (const inner of group.hooks ?? []) {
+        const cmd = inner.command ?? '';
+        if (
+          isMemorizeHookCommandForAgent(cmd, 'claude') &&
+          /^node\s+"[^"]*\/cli\/index\.js"/.test(cmd)
+        ) {
+          nodeAbsCommand = cmd;
+          break;
+        }
+      }
+      if (nodeAbsCommand) break;
+    }
+    if (nodeAbsCommand) break;
+  }
+  if (!nodeAbsCommand) return undefined; // npx/bare form — presence-only.
+
+  // Derive a harmless probe: same `node "<abs>"` prefix, `--version` instead
+  // of the `hook <agent> <event>` suffix.
+  const prefixMatch = nodeAbsCommand.match(/^node\s+"[^"]*\/cli\/index\.js"/);
+  if (!prefixMatch) return undefined;
+  const probeCommand = `${prefixMatch[0]} --version`;
+
+  // Run via a shell so PATH/`node` resolution matches the hook's runtime
+  // (Claude Code fires hooks through Git Bash on Windows; spawning with
+  // shell:true uses the platform default shell — close enough to catch an
+  // unresolvable command, and `node` is resolvable in either).
+  const result = spawnSync(probeCommand, {
+    shell: true,
+    encoding: 'utf8',
+    timeout: 10_000,
+    windowsHide: true,
+  });
+  if (result.status === 0) return undefined;
+  return `Claude hook command is not runnable: \`${probeCommand}\` exited ${
+    result.status ?? 'with no exit code'
+  }${result.error ? ` (${result.error.message})` : ''}`;
 }
 
 async function checkCodexInstall(
@@ -218,8 +304,9 @@ async function checkCodexInstall(
   const missing = events.filter((event) => {
     const list = hooks[event] ?? [];
     return !list.some((group) =>
+      // Shared matcher (#122) — recognizes npx/bare AND the node-abs form.
       (group.hooks ?? []).some((h) =>
-        /memorize\s+hook\s+codex/.test(h.command ?? ''),
+        isMemorizeHookCommandForAgent(h.command ?? '', 'codex'),
       ),
     );
   });
