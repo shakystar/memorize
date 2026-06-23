@@ -5,7 +5,13 @@ import path from 'node:path';
 import Database from 'better-sqlite3';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import { closeAll, getDb, openDbAt } from '../../src/storage/db.js';
+import {
+  closeAll,
+  getDb,
+  isDataDirUnwritable,
+  openDbAt,
+  unwritableDataDirError,
+} from '../../src/storage/db.js';
 import { getProjectDbFile, getProjectRoot } from '../../src/storage/path-resolver.js';
 
 const VALID_PROJECT_ID = 'proj_l2x_abcdef12';
@@ -85,6 +91,58 @@ describe('db', () => {
       .all() as Array<{ name: string }>;
     expect(tables.map((t) => t.name).sort()).toEqual(['memories', 'observations']);
   });
+});
+
+// #116 — inside a Codex workspace-write sandbox, ~/.memorize is outside the
+// writable roots and better-sqlite3 throws a bare `unable to open database
+// file`. open() must translate that into an actionable hint instead.
+describe('db unwritable-data-dir diagnostics (#116)', () => {
+  it('classifies sandbox/permission failures as unwritable', () => {
+    const eacces = Object.assign(new Error('EACCES'), { code: 'EACCES' });
+    const erofs = Object.assign(new Error('EROFS'), { code: 'EROFS' });
+    const cantOpen = new Error('SQLITE_CANTOPEN: unable to open database file');
+    expect(isDataDirUnwritable(eacces)).toBe(true);
+    expect(isDataDirUnwritable(erofs)).toBe(true);
+    expect(isDataDirUnwritable(cantOpen)).toBe(true);
+  });
+
+  it('does not misclassify unrelated errors', () => {
+    expect(isDataDirUnwritable(new Error('database is locked'))).toBe(false);
+    expect(isDataDirUnwritable('not an error')).toBe(false);
+  });
+
+  it('names the data dir + the config.toml fix and preserves the cause', () => {
+    const cause = new Error('unable to open database file');
+    const err = unwritableDataDirError('/tmp/x/memorize.db', cause);
+    expect(err.message).toContain(tmpRoot); // the active MEMORIZE_ROOT
+    expect(err.message).toContain('writable_roots');
+    expect(err.message).toContain('~/.codex/config.toml');
+    expect(err.cause).toBe(cause);
+  });
+
+  const isRoot =
+    typeof process.getuid === 'function' && process.getuid() === 0;
+  // Windows ignores POSIX directory permission bits, so chmod 0o500 does not
+  // make the dir unwritable and the open would succeed. root ignores the
+  // read-only bit for the same reason — skip the chmod path on both. The
+  // classification + message tests above still cover the logic everywhere.
+  const cannotDenyDirWrite = isRoot || process.platform === 'win32';
+
+  it.skipIf(cannotDenyDirWrite)(
+    'surfaces the actionable hint when the data dir is not writable',
+    () => {
+      const projectsRoot = path.join(tmpRoot, 'projects');
+      fs.mkdirSync(projectsRoot, { recursive: true });
+      fs.chmodSync(projectsRoot, 0o500); // r-x: cannot create the project dir
+      try {
+        expect(() => getDb(VALID_PROJECT_ID)).toThrow(
+          /workspace-write sandbox/,
+        );
+      } finally {
+        fs.chmodSync(projectsRoot, 0o700);
+      }
+    },
+  );
 });
 
 // The v5 migration rebuilds the events table to fix schema_version's type.

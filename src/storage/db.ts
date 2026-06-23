@@ -3,7 +3,7 @@ import path from 'node:path';
 
 import Database from 'better-sqlite3';
 
-import { getProjectDbFile } from './path-resolver.js';
+import { getMemorizeRoot, getProjectDbFile } from './path-resolver.js';
 
 /**
  * Ordered DDL migrations applied via `PRAGMA user_version`. The user_version
@@ -274,15 +274,57 @@ function enableWalWithRetry(db: Database.Database): void {
   }
 }
 
+/**
+ * fs/SQLite failures that all mean the same thing: the memorize data tree
+ * can't be written from this process. The dominant real-world cause is a
+ * sandbox — notably Codex's default `workspace-write`, whose writable roots
+ * don't include `~/.memorize`. better-sqlite3 surfaces that as a bare
+ * `unable to open database file`, which leaves the user nothing to act on. (#116)
+ */
+export function isDataDirUnwritable(error: unknown): boolean {
+  if (!(error instanceof Error)) return false;
+  const code = (error as NodeJS.ErrnoException).code;
+  return (
+    code === 'EACCES' ||
+    code === 'EROFS' ||
+    code === 'EPERM' ||
+    code === 'SQLITE_CANTOPEN' ||
+    /unable to open database file/i.test(error.message)
+  );
+}
+
+/**
+ * Replace the opaque open failure with a message that names the data dir and
+ * the exact Codex sandbox fix, while preserving the original error as `cause`.
+ */
+export function unwritableDataDirError(dbFile: string, cause: Error): Error {
+  const root = getMemorizeRoot();
+  return new Error(
+    `Cannot open the memorize database at ${dbFile} (${cause.message}). ` +
+      `The memorize data directory ${root} is not writable from here.\n` +
+      `If you are inside a Codex workspace-write sandbox, add "${root}" to ` +
+      `sandbox_workspace_write.writable_roots in ~/.codex/config.toml, then ` +
+      `restart the codex session.`,
+    { cause },
+  );
+}
+
 function open(dbFile: string): Database.Database {
-  fs.mkdirSync(path.dirname(dbFile), { recursive: true });
-  const db = new Database(dbFile);
-  // Set busy_timeout first so ordinary statements + the IMMEDIATE migration
-  // lock wait rather than error; the WAL switch needs its own retry (above).
-  db.pragma('busy_timeout = 5000');
-  enableWalWithRetry(db);
-  runMigrations(db);
-  return db;
+  try {
+    fs.mkdirSync(path.dirname(dbFile), { recursive: true });
+    const db = new Database(dbFile);
+    // Set busy_timeout first so ordinary statements + the IMMEDIATE migration
+    // lock wait rather than error; the WAL switch needs its own retry (above).
+    db.pragma('busy_timeout = 5000');
+    enableWalWithRetry(db);
+    runMigrations(db);
+    return db;
+  } catch (error) {
+    if (isDataDirUnwritable(error)) {
+      throw unwritableDataDirError(dbFile, error as Error);
+    }
+    throw error;
+  }
 }
 
 const connections = new Map<string, Database.Database>();
