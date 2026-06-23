@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, rm } from 'node:fs/promises';
+import { mkdir, mkdtemp, realpath, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -17,7 +17,11 @@ let pathA: string;
 let pathB: string;
 
 beforeEach(async () => {
-  sandbox = await mkdtemp(join(tmpdir(), 'memorize-relocate-'));
+  // Canonicalize the sandbox: os.tmpdir() is a symlink on macOS (/var ->
+  // /private/var) and short-named on Windows, so the raw mkdtemp path differs
+  // from the realpath the OS hands back for process.cwd(). Without this the
+  // path the test passes in and the path bindings resolve under diverge.
+  sandbox = await realpath(await mkdtemp(join(tmpdir(), 'memorize-relocate-')));
   process.env.MEMORIZE_ROOT = join(sandbox, 'root');
   pathA = join(sandbox, 'old-location', 'emis');
   pathB = join(sandbox, 'new-location', 'emis');

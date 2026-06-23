@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, rm } from 'node:fs/promises';
+import { mkdir, mkdtemp, realpath, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { spawnSync, type SpawnSyncReturns } from 'node:child_process';
@@ -15,7 +15,12 @@ let pathA: string;
 let pathB: string;
 
 beforeEach(async () => {
-  sandbox = await mkdtemp(join(tmpdir(), 'memorize-relocate-cli-'));
+  // Canonicalize: os.tmpdir() is a symlink on macOS (/var -> /private/var) and
+  // short-named on Windows, so the raw mkdtemp path differs from the realpath a
+  // spawned process sees for process.cwd(). `project relocate` keys the binding
+  // off the path argument while `project show` resolves cwd — without this the
+  // two diverge and show can't find the relocated project.
+  sandbox = await realpath(await mkdtemp(join(tmpdir(), 'memorize-relocate-cli-')));
   memorizeRoot = join(sandbox, '.memorize-home');
   pathA = join(sandbox, 'old', 'emis');
   pathB = join(sandbox, 'new', 'emis');
