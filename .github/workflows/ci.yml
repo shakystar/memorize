@@ -9,6 +9,31 @@ permissions:
   contents: read
 
 jobs:
+  # Versioning is owned by release-please (see issue #97). Contributors must
+  # never bump package.json `version` in a feature PR — let the Release PR do
+  # it. Skipped on the release-please--* branch where the bump is expected.
+  version-guard:
+    if: github.event_name == 'pull_request' && !startsWith(github.head_ref, 'release-please--')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Reject manual version bumps
+        run: |
+          base="${{ github.event.pull_request.base.sha }}"
+          git show "$base:package.json" > base-package.json
+          old=$(node -p "require('./base-package.json').version")
+          new=$(node -p "require('./package.json').version")
+          rm -f base-package.json
+          echo "base version: $old"
+          echo "head version: $new"
+          if [ "$old" != "$new" ]; then
+            echo "::error file=package.json::PRs must not change package.json version ($old -> $new). Versioning is automated by release-please — use Conventional Commits (feat/fix/feat!) and let the Release PR bump the version."
+            exit 1
+          fi
+          echo "OK: version unchanged."
+
   lint-typecheck:
     runs-on: ubuntu-latest
     steps:
