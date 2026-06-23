@@ -46,6 +46,30 @@ never run them against your real `~/.memorize`.
   `tests/golden`); bug fixes need a regression test.
 - Conventional-commit style messages (`feat(scope): …`, `fix(scope): …`).
 
+## Releasing
+
+Releases are automated — there is no manual `npm publish`.
+
+To cut a release:
+
+1. Bump `version` in `package.json` (semver; major-version bumps are
+   reserved for breaking changes to the on-disk event log or the public
+   CLI surface).
+2. Graduate the relevant items from `## [Unreleased]` into a new
+   `## [x.y.z] — YYYY-MM-DD` section in `CHANGELOG.md`.
+3. Merge to `main`.
+
+On merge, `.github/workflows/release.yml` builds, tests, and publishes
+`@shakystar/memorize` to npm via OIDC trusted publishing (no token,
+provenance attached), then creates the `v<version>` tag and a GitHub
+release from the matching CHANGELOG section. The run is idempotent: if
+the version is already on npm it no-ops.
+
+**A new `version` is the only thing that triggers a publish.** Any other
+edit to `package.json` (deps, scripts, metadata) is safe and will not
+release; conversely, do not bump `version` for changes that should not
+ship to npm.
+
 ## License and relicensing
 
 Memorize is released under

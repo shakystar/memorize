@@ -129,9 +129,13 @@ async function checkClaudeInstall(
       fix: 'memorize install claude',
     };
   }
-  // #130 — doctor must check the SAME event set the installer wires, or a
-  // missing hook (e.g. PostToolUse) reads as a false green. Sourced from the
-  // single CLAUDE_HOOK_EVENTS constant in install-service so they can't drift.
+  // PreCompact left the contract in #85 (no-op handler; its role was
+  // replaced by the PostCompact consolidation boundary) — doctor checks
+  // the live set only, so a lingering legacy entry never warns.
+  // Verify the SAME event set install registers (single source —
+  // CLAUDE_HOOK_EVENTS) so doctor can't drift from install and silently
+  // pass when the PostToolUse capture hook is missing (#130). Spread to a
+  // mutable string[] — probeClaudeHookExecutability (#123) takes string[].
   const events = [...CLAUDE_HOOK_EVENTS];
   const hooks = settings.hooks ?? {};
 
