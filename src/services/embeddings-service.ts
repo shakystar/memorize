@@ -35,6 +35,19 @@ export const DEFAULT_EMBEDDINGS_MODEL = 'text-embedding-3-small';
 const EMBEDDINGS_TIMEOUT_MS = 20_000;
 
 /**
+ * Conservative initial char budget per embedding request. A batch whose summed
+ * tokens exceed the model's context window is rejected wholesale by some servers
+ * (Ollama returns HTTP 400 "the input length exceeds the context length"), so a
+ * large set of inputs — a full LongMemEval haystack, a big `memory import` — is
+ * packed into sub-requests of roughly this size. The exact char↔token ratio is
+ * unknown per model/language, so this is only a starting point: `embedPacked`
+ * adaptively halves any sub-batch the server still rejects for size.
+ */
+export const MAX_EMBED_BATCH_CHARS = 6_000;
+/** Floor for the single-input truncation retry, so the halving loop terminates. */
+export const MIN_EMBED_INPUT_CHARS = 512;
+
+/**
  * Resolve embeddings config from env. Enabled when EITHER an endpoint OR a key
  * is set — this is a deliberate widening of the consolidator's key-only gate so
  * a keyless local server (Ollama) can be opted into with just the endpoint. Both
@@ -66,8 +79,69 @@ export class HttpEmbedder implements Embedder {
     return this.config.model;
   }
 
+  /**
+   * Embed any number of texts → one vector per input, in input order. Inputs are
+   * greedily packed into sub-requests of ~MAX_EMBED_BATCH_CHARS; `embedPacked`
+   * then adaptively halves any sub-batch the server still rejects for size, so a
+   * batch whose summed tokens exceed the model context (e.g. a full LongMemEval
+   * haystack, a large `memory import`) always succeeds without us needing to know
+   * the exact char↔token ratio.
+   */
   async embed(texts: string[]): Promise<number[][]> {
     if (texts.length === 0) return [];
+    const out: number[][] = [];
+    let batch: string[] = [];
+    let batchChars = 0;
+    for (const text of texts) {
+      if (
+        batch.length > 0 &&
+        batchChars + text.length > MAX_EMBED_BATCH_CHARS
+      ) {
+        out.push(...(await this.embedPacked(batch)));
+        batch = [];
+        batchChars = 0;
+      }
+      batch.push(text);
+      batchChars += text.length;
+    }
+    if (batch.length > 0) out.push(...(await this.embedPacked(batch)));
+    return out;
+  }
+
+  /**
+   * Embed one sub-batch, halving it on a size rejection (HTTP 400/413) until each
+   * request fits. A single text still rejected is truncated and retried (lossy,
+   * but better than dropping the memory entirely); non-size errors propagate.
+   */
+  private async embedPacked(texts: string[]): Promise<number[][]> {
+    try {
+      return await this.embedBatch(texts);
+    } catch (error) {
+      const status = (error as { status?: number }).status;
+      const tooLarge = status === 400 || status === 413;
+      if (tooLarge && texts.length > 1) {
+        const mid = Math.ceil(texts.length / 2);
+        const left = await this.embedPacked(texts.slice(0, mid));
+        const right = await this.embedPacked(texts.slice(mid));
+        return [...left, ...right];
+      }
+      if (
+        tooLarge &&
+        texts.length === 1 &&
+        texts[0]!.length > MIN_EMBED_INPUT_CHARS
+      ) {
+        const half = Math.max(
+          MIN_EMBED_INPUT_CHARS,
+          Math.floor(texts[0]!.length / 2),
+        );
+        return this.embedPacked([texts[0]!.slice(0, half)]);
+      }
+      throw error;
+    }
+  }
+
+  /** One HTTP request for a single sub-batch. Throws with `.status` on non-2xx. */
+  private async embedBatch(texts: string[]): Promise<number[][]> {
     const fetchImpl = this.config.fetchImpl ?? fetch;
     const headers: Record<string, string> = {
       'content-type': 'application/json',
@@ -87,7 +161,11 @@ export class HttpEmbedder implements Embedder {
       },
     );
     if (!response.ok) {
-      throw new Error(`Embeddings HTTP ${response.status}`);
+      const error: Error & { status?: number } = new Error(
+        `Embeddings HTTP ${response.status}`,
+      );
+      error.status = response.status;
+      throw error;
     }
     const body = (await response.json()) as {
       data?: Array<{ embedding?: number[]; index?: number }>;
