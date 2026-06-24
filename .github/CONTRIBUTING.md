@@ -1,18 +1,18 @@
 # Contributing to Memorize
 
-Thanks for your interest! Issues, discussions, and PRs are all welcome.
-The project iterates quickly, so expect design and APIs to move.
+Thanks for your interest. Issues, discussions, and PRs are all welcome.
+The project iterates fast, so expect design and APIs to move.
 
 ## Where things go
 
-- **Bug reports / concrete feature requests** →
-  [Issues](https://github.com/shakystar/memorize/issues)
-- **Design debates, open-ended ideas, questions** →
-  [Discussions](https://github.com/shakystar/memorize/discussions) —
-  bigger design directions (memory taxonomy, sync semantics) are
-  deliberately discussed there before becoming issues.
+- **Bug reports and concrete feature requests** go to
+  [Issues](https://github.com/shakystar/memorize/issues).
+- **Design debates, open-ended ideas, and questions** go to
+  [Discussions](https://github.com/shakystar/memorize/discussions).
+  Bigger design directions (memory taxonomy, sync semantics) get
+  hashed out there before they become issues.
 
-When in doubt, open a discussion first; it gets promoted to an issue
+When in doubt, open a discussion first. It gets promoted to an issue
 once it has acceptance criteria.
 
 ## Development workflow
@@ -30,43 +30,43 @@ Before opening a PR, please run:
 pnpm qa:full               # + integration + golden (CI runs the tests on 3 OSes)
 ```
 
-Integration tests isolate state via `MEMORIZE_ROOT` in a temp dir —
+Integration tests isolate state via `MEMORIZE_ROOT` in a temp dir, so
 never run them against your real `~/.memorize`.
 
 ## Development conventions
 
 - Follow the existing module boundaries in `src/` (`adapters`,
   `domain`, `projections`, `services`, `storage`).
-- **The event log is append-only** and projections are derived — PRs
-  must never mutate or delete past events.
+- **The event log is append-only** and projections are derived from it.
+  PRs must never mutate or delete past events.
 - Architectural complexity is evidence-gated: if you propose a retry
   layer, a clock, or a cache, link the observed problem it solves.
-- Keep changes scoped; prefer small, reviewable PRs.
+- Keep changes scoped, and prefer small, reviewable PRs.
 - New behavior needs tests (`tests/unit`, `tests/integration`,
   `tests/golden`); bug fixes need a regression test.
-- Conventional-commit style messages (`feat(scope): …`, `fix(scope): …`).
+- Use Conventional-commit style messages (`feat(scope): ...`, `fix(scope): ...`).
 
 ## Releasing
 
 Releasing is fully automated with
-[release-please](https://github.com/googleapis/release-please); the
-version is computed from Conventional Commits, not edited by hand.
+[release-please](https://github.com/googleapis/release-please). The
+version is computed from Conventional Commits, never edited by hand.
 
 **Feature PRs must never touch `package.json` `version` or `CHANGELOG.md`.**
 A CI `version-guard` job fails any PR that bumps the version (except the
 bot's own `release-please--*` branch). Versioning intent travels in the
-commit type: `fix:` → patch, `feat:` → minor, `feat!:` /
-`BREAKING CHANGE:` → major.
+commit type: `fix:` is a patch, `feat:` is a minor, and `feat!:` or
+`BREAKING CHANGE:` is a major.
 
 How a release happens:
 
-1. Feature PRs merge to `main` as usual — nobody touches the version.
+1. Feature PRs merge to `main` as usual. Nobody touches the version.
 2. release-please opens and keeps a **Release PR** updated (titled e.g.
    `chore(main): release 2.4.0`) with the computed version and a
    CHANGELOG draft built from the merged commits.
 3. To ship, optionally add a narrative preamble to the Release PR (edit
-   it last — the bot regenerates it on new `main` commits), then **merge
-   the Release PR**.
+   it last, since the bot regenerates it on new `main` commits), then
+   **merge the Release PR**.
 4. Merging it tags `vX.Y.Z`, creates the GitHub Release, and triggers the
    `publish` job in `.github/workflows/release.yml`, which publishes
    `@shakystar/memorize` to npm via **OIDC Trusted Publishing** (no

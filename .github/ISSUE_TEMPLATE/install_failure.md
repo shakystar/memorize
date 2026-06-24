@@ -27,6 +27,6 @@ labels: bug, install
 ```
 
 > Tip: you can also paste this whole error into your Claude/Codex session
-> with the link https://github.com/shakystar/memorize/blob/main/guides/AI_SETUP.md
-> — the "Recovering a failed install" section there lets your agent fix
+> along with the link https://github.com/shakystar/memorize/blob/main/guides/AI_SETUP.md.
+> The "Recovering a failed install" section there lets your agent fix
 > most cases on the spot.

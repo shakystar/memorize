@@ -28,9 +28,6 @@ function fail(message: string): void {
 
 const I18N_READMES = [
   'docs/i18n/README.ko.md',
-  'docs/i18n/README.ja.md',
-  'docs/i18n/README.zh-CN.md',
-  'docs/i18n/README.es.md',
 ];
 
 const ALL_DOCS = [

@@ -2,7 +2,7 @@
 
 Reference for AI coding assistants (Claude Code, Codex, and similar
 agents) consuming `@shakystar/memorize`. Humans do not need to read
-this file end-to-end — the README is the human entry point.
+this file end-to-end; the README is the human entry point.
 
 This file assumes you already ran the setup steps in
 [guides/AI_SETUP.md](./guides/AI_SETUP.md). It exists so you can look up the
@@ -21,9 +21,9 @@ inside the npm tarball (listed in `package.json#files`).
 maintain your own long-term memory (Claude Code `MEMORY.md`, Cursor
 saved context, etc.):
 
-- ✅ OK: a one-line note "memorize is installed in this project;
+- OK: a one-line note "memorize is installed in this project;
   always query it for state."
-- ❌ Not OK: recording the project id, current tasks, handoff text,
+- Not OK: recording the project id, current tasks, handoff text,
   rule contents, decisions, or any other data memorize tracks.
 
 Reason: your memory cannot follow memorize's state when the user runs
@@ -39,7 +39,7 @@ npx @shakystar/memorize doctor --json # health + install state
 ```
 
 Treat any information in your own memory that overlaps with these
-outputs as a cache that must be re-validated — not as authoritative.
+outputs as a cache that must be re-validated, not as authoritative.
 
 ## Mental model
 
@@ -51,10 +51,10 @@ outputs as a cache that must be re-validated — not as authoritative.
 3. **Startup payload** is a small bundle built from the projection
    and rendered per-agent (`claude` vs `codex` formats differ).
 4. **Install hooks** wire your agent runtime:
-   - Claude Code: `.claude/settings.local.json` (per-project) — registers
+   - Claude Code: `.claude/settings.local.json` (per-project) registers
      `SessionStart`, `PostToolUse` (capture), `PostCompact`, `SessionEnd`.
    - Codex: `~/.codex/hooks.json` (global per-user; the handler no-ops
-     when cwd is not a memorize-bound project) — registers
+     when cwd is not a memorize-bound project) registers
      `SessionStart`, `PostToolUse` (capture), and `PostCompact`
      (consolidation boundary). Codex has no SessionEnd / Shutdown hook.
 
@@ -65,7 +65,7 @@ outputs as a cache that must be re-validated — not as authoritative.
 5. **Session lifecycle** is owned by memorize, not by per-turn hooks.
    - `SessionStart` mints a new session, claims a task (best-effort),
      and reaps any prior abandoned pointers in the same cwd.
-   - Heartbeat events fire from every memorize CLI call — they keep
+   - Heartbeat events fire from every memorize CLI call; they keep
      the session's `lastSeenAt` fresh.
    - Claude `SessionEnd` writes `session.completed` and unlinks the
      cwd pointer when the agent exits cleanly.
@@ -75,7 +75,7 @@ outputs as a cache that must be re-validated — not as authoritative.
      emits `session.abandoned`. Run `memorize session reap` to force a
      sweep at any time.
 6. **Handoffs are agent-initiated.** The `Stop` hook used to auto-write
-   a handoff at every assistant turn — that conflated "turn end" with
+   a handoff at every assistant turn, which conflated "turn end" with
    "session end." Now agents call `memorize handoff create ...` only
    when they actually want to hand off control or summarize their work
    for the next agent. Treat handoffs as intentional artifacts, not
@@ -162,7 +162,7 @@ Human-readable by default; `--json` emits a stable shape:
 
 Common checks: project binding, required directories, consolidation
 health (observations pending consolidation plus when/where/how the
-last consolidation attempt ended — warns when a backlog is stuck),
+last consolidation attempt ended; warns when a backlog is stuck),
 git redaction risk (`.memorize/` in `.gitignore`), install state.
 
 Exit code: `1` when status is not `ok`. Use `--json` for scripting.
@@ -177,11 +177,11 @@ every existing integration on this machine with the new binary:
 - Re-installs Claude hooks for every known project that already has them
   (never installs fresh into a project that has not opted in).
 - Re-imports changed context files (`CLAUDE.md`, `AGENTS.md`,
-  `GEMINI.md`, `.cursorrules`, `.cursor/rules`) for every bound project
-  — idempotent: unchanged files emit nothing; changed files upsert the
+  `GEMINI.md`, `.cursorrules`, `.cursor/rules`) for every bound project.
+  Idempotent: unchanged files emit nothing; changed files upsert the
   same rule in place.
 
-Already up to date → the npm step is skipped, but the refresh still
+Already up to date: the npm step is skipped, but the refresh still
 runs. `update` therefore doubles as a repair command when integrations
 drift after a manual change.
 
@@ -190,24 +190,24 @@ file leaves its previously imported rule intact.
 
 **Internal flags (not for direct use):**
 
-- `--post-only` — refresh-only re-exec entry point called by the
+- `--post-only`: refresh-only re-exec entry point called by the
   upgraded binary after `npm install -g` completes. The parent process
   exits and the new binary owns the machine-wide refresh.
-- `--check` — detached registry probe spawned by `SessionStart`. Writes
+- `--check`: detached registry probe spawned by `SessionStart`. Writes
   the latest available version to `~/.memorize/update-check.json`
   without installing anything.
 
 **Failure modes:**
 
-- No global install found → prints guidance and exits 1.
-- Registry unreachable → exits 1.
-- `npm install -g` fails → exit code propagated, refresh skipped.
-- Per-project refresh failure → reported at the end with exit 1; the
+- No global install found: prints guidance and exits 1.
+- Registry unreachable: exits 1.
+- `npm install -g` fails: exit code propagated, refresh skipped.
+- Per-project refresh failure: reported at the end with exit 1; the
   loop continues past individual failures so other projects still run.
 
 **Session-start notice:** when a newer version is cached in
 `update-check.json`, one line is appended to the startup context
-(`memorize vX.Y.Z available — run memorize update`). The background
+(`memorize vX.Y.Z available, run memorize update`). The background
 check is throttled to once per 24 h, runs detached, and never blocks
 session start or auto-installs anything.
 
@@ -219,20 +219,20 @@ last transcript byte-offset, extracts consolidated memories through the
 configured backend (see the LLM env section), and appends them as
 events. This is the same command the boundary hooks
 (SessionStart catch-up / PostCompact / SessionEnd) spawn as a detached
-background child — running it by hand is equally valid and idempotent
+background child; running it by hand is equally valid and idempotent
 (an already-consumed window is a clean no-op).
 
-- `--session <id>` (single) — attribute the consolidated events to that
+- `--session <id>` (single): attribute the consolidated events to that
   session and its agent actor.
-- `--boundary <label>` (single) — telemetry label for the recorded
+- `--boundary <label>` (single): telemetry label for the recorded
   attempt (`session-start | post-compact | session-end | manual`); junk
   or missing values read as `manual` and never fail the run.
-- `--transcript <path>` (single) — transcript to read the conversation
+- `--transcript <path>` (single): transcript to read the conversation
   from when no observation in the window carries one (a zero-observation,
   pure-conversation session). The boundary hooks pass this automatically
   from the hook payload; supply it by hand to consolidate a session that
   produced no tool observations. Absent for the bare manual command.
-- `--report` (boolean) — do NOT consolidate; print the observed
+- `--report` (boolean): do NOT consolidate; print the observed
   lifecycle-evidence distribution as JSON instead (#57): per kind the
   memory count, how many carry `obsoleteWhen`, the kind-misfit count and
   tag counts, plus the verbatim `obsoleteWhen` conditions and misfit
@@ -246,24 +246,24 @@ background child — running it by hand is equally valid and idempotent
 The extractor may attach observe-only lifecycle-evidence fields to each
 memory (`obsoleteWhen`, `kindMisfit` + `kindMisfitReason`,
 `supersedesNote`, `tags`). They are persisted and surfaced by
-`--report`, but no consumer reads them — injection, dedup, and
+`--report`, but no consumer reads them: injection, dedup, and
 contradiction detection key on `kind` exactly as before, and a missing
 or malformed field never fails an extraction.
 
 ### `memorize session list` / `memorize session activity [--limit N] [--json]`
 
-#83 — the on-demand answer when the user asks **"what are my other
+#83: the on-demand answer when the user asks **"what are my other
 sessions doing?"**. Reach for THIS, not `task list`: tasks are explicit
 artifacts created with `memorize task create`, so a project can have
-several busy sessions and zero tasks — **sessions ≠ tasks**.
+several busy sessions and zero tasks (**sessions ≠ tasks**).
 
-- `session list` — claiming sessions (active/paused within the staleness
+- `session list`: claiming sessions (active/paused within the staleness
   threshold): id, actor, status, lastSeenAt, claimed task when any. The
   asking session is marked `self` when resolvable.
-- `session activity` — the same list plus each session's recent captured
+- `session activity`: the same list plus each session's recent captured
   observations (default 10, `--limit N`). Sessions with no captured
   activity are shown as "(no captured activity yet)" rather than
-  omitted — plan-mode sessions mostly read, and read-only tools are
+  omitted; plan-mode sessions mostly read, and read-only tools are
   deliberately not captured.
 - `--json` for the machine-readable form.
 
@@ -273,39 +273,39 @@ complement for answering on demand.
 
 ### `memorize version`
 
-Prints the version of the binary that actually ran — `npx` resolves a
+Prints the version of the binary that actually ran. `npx` resolves a
 project-local devDependency before the global install, so when behavior
 looks stale, run this both inside and outside the project to detect a
 pinned old version (#82).
 
 ### `memorize memory import --source <label> [--session <id>]`
 
-#69 — the ingestion primitive for **agent-driven absorption** of context
+#69: the ingestion primitive for **agent-driven absorption** of context
 that predates memorize in a project: your own harness memory (Claude
 Code `MEMORY.md` and linked files), `CLAUDE.local.md` /
 `AGENTS.override.md` content, and user-named doc folders (ADRs, plans,
-postmortems). YOU do the reading and distillation — you have the read
+postmortems). YOU do the reading and distillation: you have the read
 access, you know where your own memory lives, and you can honor the
 per-self/shared split; memorize only ingests the result and never reads
 outside the project tree.
 
-- stdin: a JSON array of extractor-shaped items —
+- stdin: a JSON array of extractor-shaped items,
   `[{"kind":"decision"|"rationale"|"progress","text":string,`
   `"salience":1-10,"obsoleteWhen"?:string,"tags"?:string[],...}]`
   (same shape and sanitizers as boundary consolidation, so the #57
   lifecycle-evidence fields ride along and malformed evidence degrades
   to "absent" rather than failing the item).
-- `--source <label>` (single, required) — provenance, e.g.
+- `--source <label>` (single, required): provenance, e.g.
   `claude-memory`, `docs/adr`; stored on each memory as `importSource`.
-- `--session <id>` (single) — attribute events to that session's actor.
+- `--session <id>` (single): attribute events to that session's actor.
 - Distillation rules: import **project state only** (decisions,
   constraints, progress, rationale). User preferences and your own
-  work-style lessons are per-self memory — they STAY in your harness
+  work-style lessons are per-self memory; they STAY in your harness
   memory. One self-contained sentence per item; salience = how much a
   future session would regret not knowing it.
 - Idempotent: items whose kind + normalized text already exist as a
   valid memory are skipped; the result JSON reports
-  `{imported, skippedDuplicates}` — relay both counts to the user.
+  `{imported, skippedDuplicates}` (relay both counts to the user).
 - Caps: at most 100 items per invocation. A batch with zero valid items
   is an error and writes nothing.
 - Imported memories are first-class: searchable, embedded (when
@@ -314,31 +314,31 @@ outside the project tree.
 
 ### `memorize memory list [--json] [--limit <N>]`
 
-#148 — whole-store observation. Lists the project's **currently valid**
+#148: whole-store observation. Lists the project's **currently valid**
 memories (those whose validity window is still open; superseded ones are
 excluded, which is the correct default). Pure read of the derived
-projection — it appends and mutates nothing. Scope is the cwd-bound
+projection: it appends and mutates nothing. Scope is the cwd-bound
 project.
 
-- Default (human) form: one tab-separated line per memory —
+- Default (human) form: one tab-separated line per memory,
   `id\tkind\tsalience\t<snippet>` where the snippet is the first ~80
   characters of the memory text on a single line.
-- `--json` (boolean) — emit the raw rows (memory + access metadata) as a
+- `--json` (boolean): emit the raw rows (memory + access metadata) as a
   JSON array instead of the human-readable lines.
-- `--limit <N>` (single) — cap the output at N rows (positive integer).
+- `--limit <N>` (single): cap the output at N rows (positive integer).
   Rows are ordered salience-desc, then newest-first, so the cap keeps the
   most important memories.
 
 ### `memorize memory show <memoryId> [--json]`
 
-#111 — prints a recalled memory's **full** text plus metadata. `search`
+#111: prints a recalled memory's **full** text plus metadata. `search`
 only emits a truncated snippet; this is how an agent (or human) reads a
 memory's complete content once it has an id. Scope is the cwd-bound
 project, mirroring how `search` resolves the project.
 
-- `<memoryId>` (positional, required) — the memory id, e.g. one returned
+- `<memoryId>` (positional, required): the memory id, e.g. one returned
   by `memorize search`.
-- `--json` (boolean) — emit the raw row (memory + access metadata) as
+- `--json` (boolean): emit the raw row (memory + access metadata) as
   JSON instead of the human-readable rendering.
 - Human form lists id, kind, salience, tags, provenance (consolidation
   vs `import (<source>)`, session, source observation ids) and the
@@ -361,14 +361,14 @@ Idempotent adoption command. Use this for existing projects.
 
 ### `memorize project relocate [<newPath>] (--project <id> | --from <oldPath>)`
 
-#124 — rebinds an **existing** project to a new absolute path after the
+#124: rebinds an **existing** project to a new absolute path after the
 repo moved (machine migration, directory rename). Use this, NOT
 `project setup`, in a relocated checkout: `setup` would mint a *new*
 empty project and orphan the original's memory.
 
-- `<newPath>` (positional) — the project's new location; defaults to cwd.
-- `--project <id>` (single) — identify the source project by id.
-- `--from <oldPath>` (single) — identify it by its previous path instead.
+- `<newPath>` (positional): the project's new location; defaults to cwd.
+- `--project <id>` (single): identify the source project by id.
+- `--from <oldPath>` (single): identify it by its previous path instead.
 - One of `--project` / `--from` is required.
 - Idempotent: when the project is already bound to `<newPath>` it reports
   `already bound … nothing to do` and changes nothing.
@@ -420,7 +420,7 @@ snapshot as JSON.
 
 True-replica join (#30, #38): adopts an existing **remote** project's id
 in a FRESH directory so the same project keeps one identity on every
-machine — the git-clone analog to `project setup`, which mints a *new*
+machine, the git-clone analog to `project setup`, which mints a *new*
 id. The remote location is persisted, so later boundaries auto-sync with
 no flags (P3-b).
 
@@ -438,7 +438,7 @@ caveats as `project sync`.
 ### `memorize project decision list [--all] [--json]`
 
 Lists the project's decisions, newest first. By default it shows only the live
-(accepted) set — the same decisions startup context carries. Pass `--all` to
+(accepted) set, the same decisions startup context carries. Pass `--all` to
 also include superseded ones (preserved by design, never deleted). Read-only:
 a pure projection read that writes no events. Human output is tab-separated
 (`id\tstatus\ttitle`); `--json` emits the raw decision array.
@@ -469,11 +469,11 @@ decisions exactly like a consolidated decision memory.
 |---|---|---|
 | `--title <text>` | single, required | Short decision title |
 | `--decision <text>` | single, required | The decision itself |
-| `--rationale <text>` | single | Why it was made — recommended; feeds contradiction detection |
+| `--rationale <text>` | single | Why it was made (recommended; feeds contradiction detection) |
 
 ### `memorize project decision supersede <oldDecisionId> --title <text> --decision <text> [--rationale <text>] [--reason <text>]`
 
-Corrects/replaces a previously recorded decision — append-only, the way you
+Corrects/replaces a previously recorded decision, append-only, the way you
 fix a decision in an event-sourced log. It records the replacement as a
 brand-new accepted decision and appends a `decision.superseded` marker that
 closes out the old one: the original decision is preserved (its status flips
@@ -490,17 +490,17 @@ decision id is unknown or already superseded.
 | `--rationale <text>` | single | Why the replacement was made |
 | `--reason <text>` | single | Why the old decision was superseded |
 
-## Tasks & handoffs — the OPTIONAL explicit-coordination layer
+## Tasks & handoffs: the OPTIONAL explicit-coordination layer
 
 Everything above this point (memory capture, consolidation, retrieval,
 session visibility) is **ambient**: it works with zero ceremony, just by
 agents doing their work. Tasks, handoffs, and checkpoints are a
 different, **optional** layer: explicit coordination artifacts you
-declare on purpose — claim a piece of work so a parallel agent doesn't
-grab it, hand a baton to the next agent with intent. A project with
+declare on purpose, claiming a piece of work so a parallel agent doesn't
+grab it, handing a baton to the next agent with intent. A project with
 busy sessions and an empty task list is NORMAL, not broken (#85);
-never treat `task list` as the way to see what sessions are doing —
-that is `memorize session activity`.
+never treat `task list` as the way to see what sessions are doing.
+That is `memorize session activity`.
 
 ### `memorize task create "<title>"`
 
@@ -531,7 +531,7 @@ JSON. This is what an agent reads on `SessionStart`.
 
 Records a mid-session snapshot. **Mostly superseded**: boundary
 consolidation now captures session state automatically (the old
-PreCompact checkpoint flow is gone, #85) — reach for this only when you
+PreCompact checkpoint flow is gone, #85). Reach for this only when you
 want to pin an explicit, named snapshot the automatic distillation
 would not preserve verbatim.
 
@@ -565,24 +565,24 @@ task status to `handoff_ready`.
 
 ### `memorize task update [<taskId>] [--title <text>] [--note <text>]`
 
-#148 — append-only correction of a task's title and/or note. Calls the
+#148: append-only correction of a task's title and/or note. Calls the
 existing `updateTask`, which **appends** a `task.updated` event and
 rebuilds the projection; the original `task.created` event and every
 prior update stay in the log untouched (the events log is the immutable
-source of truth — nothing is mutated or deleted). Status changes are not
+source of truth; nothing is mutated or deleted). Status changes are not
 permitted here; status has its own verbs (`start` / `handoff` / `done` /
 `cancel`).
 
-- `<taskId>` (positional) or `--task <taskId>` (single) — the target;
+- `<taskId>` (positional) or `--task <taskId>` (single): the target;
   falls back to the session's claimed task, then the active task, the
   same way `task done` resolves.
-- `--title <text>` (single) — set the task title.
-- `--note <text>` (single) — set the task description.
+- `--title <text>` (single): set the task title.
+- `--note <text>` (single): set the task description.
 - At least one of `--title` / `--note` is required, else it errors.
 
 ### `memorize task cancel [<taskId>]`
 
-#148 — drives a task to the terminal `cancelled` state by **appending** a
+#148: drives a task to the terminal `cancelled` state by **appending** a
 `task.updated` event (a correction, NOT a delete). The cancelled task
 drops out of `activeTaskIds` and startup context because it is terminal,
 but its full history remains in the immutable event log. Resolves the
@@ -596,7 +596,7 @@ success).
 
 ### `memorize task done [--task <taskId>]`
 
-#118 — drives a task to the terminal `done` state. Resolves the target
+#118: drives a task to the terminal `done` state. Resolves the target
 the same way `handoff` does (`--task` → the session's claimed task →
 the active task) and fails if none resolves. Typically the close-out
 after `task handoff` moved the task to `handoff_ready`; `done` records
@@ -615,7 +615,7 @@ one-liner calls it). Detects installed agents and wires the global parts:
   `~/.codex`) exists or its launcher is on PATH.
 - Codex: if present, writes the global hook to `~/.codex/hooks.json`
   (same as `install codex`). Idempotent.
-- Claude: detection only — Claude hooks are per-project, so `setup`
+- Claude: detection only; Claude hooks are per-project, so `setup`
   prints the `memorize install claude` instruction rather than wiring.
 - No agent detected: prints guidance and exits 0.
 
@@ -638,7 +638,7 @@ stripped on re-install: Stop fired per-turn (not per-session), and
 PreCompact's checkpoint capture was replaced wholesale by the
 PostCompact consolidation boundary (#85).
 
-Existing user hooks for the same events are preserved — memorize
+Existing user hooks for the same events are preserved: memorize
 appends its own command array entry, it does not overwrite.
 
 Also plants the **ground-rule block** (#68) in the project's
@@ -655,47 +655,47 @@ a fallback for sessions that never read the file.
 Reverses `install`. Strips memorize's hook entries (and any historical
 integration blocks) from `.claude/settings.local.json` /
 `~/.codex/hooks.json`, preserving your other hooks and config. Idempotent
-— safe when nothing is installed. With no target (`memorize uninstall`) it
+and safe when nothing is installed. With no target (`memorize uninstall`) it
 does both. Captured memory (events/projection under `MEMORIZE_ROOT`) is
-NOT removed — uninstall undoes the editor integration, not the data.
+NOT removed; uninstall undoes the editor integration, not the data.
 
 ### Optional: LLM extraction & semantic search (env)
 
 All optional. With nothing configured, memory consolidation auto-detects
 your agent CLI (`claude`, then `codex`) on PATH and extracts through its
-existing login — no API key needed; with no CLI either, it falls back to
+existing login, no API key needed; with no CLI either, it falls back to
 rule-based consolidation. Semantic search stays OFF unless configured
 (FTS5 lexical search only). Point these at any OpenAI-compatible endpoint
 (a cloud provider or a local Ollama) to enable richer features:
 
-- `MEMORIZE_LLM_BACKEND` — `claude-cli` | `codex-cli` | `off`. Forces the
+- `MEMORIZE_LLM_BACKEND`: `claude-cli` | `codex-cli` | `off`. Forces the
   host-CLI extractor (`claude -p` / `codex exec`, the user's existing
   subscription auth) or disables LLM extraction entirely (`off` =
   rule-based). Unset: an API key below wins, else CLI auto-detect.
-- `MEMORIZE_LLM_ENDPOINT` / `MEMORIZE_LLM_API_KEY` / `MEMORIZE_LLM_MODEL`
-  — LLM memory consolidation at boundaries, plus the semantic-contradiction
+- `MEMORIZE_LLM_ENDPOINT` / `MEMORIZE_LLM_API_KEY` / `MEMORIZE_LLM_MODEL`:
+  LLM memory consolidation at boundaries, plus the semantic-contradiction
   judge. `MEMORIZE_LLM_API_KEY` must be set to enable it (use any dummy
   value, e.g. `ollama`, for a keyless local server).
-- `MEMORIZE_LLM_TIMEOUT_MS` — LLM extraction timeout in milliseconds,
+- `MEMORIZE_LLM_TIMEOUT_MS`: LLM extraction timeout in milliseconds,
   for both the HTTP and host-CLI backends. Defaults are backend-specific:
-  `20000` (HTTP) / `90000` (host-CLI — `claude -p` cold start plus a real
+  `20000` (HTTP) / `90000` (host-CLI, where `claude -p` cold start plus a real
   extraction takes tens of seconds). Raise it for local CPU models, which
   can need minutes per extraction.
-- `MEMORIZE_CONSOLIDATE_INLINE` — set to `1` to run boundary consolidation
+- `MEMORIZE_CONSOLIDATE_INLINE`: set to `1` to run boundary consolidation
   synchronously inside the hook process instead of the default detached
   background child (slower boundaries, deterministic ordering).
-- `MEMORIZE_CONSOLIDATE_THRESHOLD` — pending (un-consolidated) observation
+- `MEMORIZE_CONSOLIDATE_THRESHOLD`: pending (un-consolidated) observation
   count that fires an automatic mid-session consolidation, in addition to
   the lifecycle boundaries (default `20`; `0` disables the mid-session
   trigger entirely). Debounced: at most one fire per consolidation
   watermark per 5 minutes.
 - `MEMORIZE_EMBEDDINGS_ENDPOINT` / `MEMORIZE_EMBEDDINGS_API_KEY` /
-  `MEMORIZE_EMBEDDINGS_MODEL` — embedding-based semantic search (hybrid
+  `MEMORIZE_EMBEDDINGS_MODEL`: embedding-based semantic search (hybrid
   with FTS5, used in both explicit `search` and startup injection) and the
   same-topic candidate step of contradiction detection. Enabled when the
   endpoint **or** key is set (a keyless local Ollama works with just the
   endpoint).
-- `MEMORIZE_CONTRADICTION_MIN_SIMILARITY` — cosine pre-filter for
+- `MEMORIZE_CONTRADICTION_MIN_SIMILARITY`: cosine pre-filter for
   contradiction candidates (default `0.5`; tune per embedding model).
 
 Contradiction detection needs **both** an embedder and an LLM; with either
@@ -713,7 +713,7 @@ markers and uninstall reversal as the Claude variant above).
 
 - Adds memorize's `SessionStart`, `PostToolUse`, and `PostCompact` hook
   entries (legacy `Stop` entries from older versions are stripped on
-  re-install — Stop fires per-turn, not per-session, so the old
+  re-install; Stop fires per-turn, not per-session, so the old
   auto-handoff path was removed).
 - Memorize entries are **prepended** before any existing third-party
   entries (OMX, etc.) so memorize context is established first.
@@ -726,7 +726,7 @@ markers and uninstall reversal as the Claude variant above).
   in-repo bootstrap block was pure duplication.
 
 **ACTION REQUIRED: approve the hooks once.** Codex silently skips
-externally-written hooks — no error, no log — until you approve them
+externally-written hooks (no error, no log) until you approve them
 once in an interactive codex session (verified against codex
 v0.137.0). Until then the entire codex integration (session
 recording, capture, consolidation) is inert even though `install
@@ -742,14 +742,14 @@ trust itself and this step disappears.
 your home directory, not in the project, so every codex session on
 your machine will invoke the memorize hook. In unrelated directories
 that are not bound to a memorize project, the hook resolves to a
-no-op (`{}`) — memorize is silent there.
+no-op (`{}`); memorize is silent there.
 
 **Note: codex sandbox + memorize home directory.** memorize stores
 project state under `~/.memorize/` (overridable via `MEMORIZE_ROOT`).
 Codex's default workspace-write sandbox blocks writes outside the
 project root, so memorize CLI invocations from inside a sandboxed
-codex session — including the ones the agent itself runs to record
-handoffs — will fail unless `~/.memorize/` is added to the sandbox's
+codex session (including the ones the agent itself runs to record
+handoffs) will fail unless `~/.memorize/` is added to the sandbox's
 writable roots. The `Stop` hook handler still attributes the session
 correctly because it runs outside the sandbox; the failure mode is
 agent-initiated writes during the session (e.g. `memorize handoff
@@ -767,7 +767,7 @@ Lists all open conflicts for the bound project as JSON.
 
 ### `memorize conflict list`
 
-#148 — prints the project's open conflicts as JSON. Bare `memorize
+#148: prints the project's open conflicts as JSON. Bare `memorize
 conflict` (no args) does the same. Any other first argument is rejected
 with `Unknown conflict subcommand: <x>` rather than silently falling
 through to the list (so a typo like `conflict resovle` errors instead of
@@ -786,12 +786,12 @@ Searches the bound project's memory (consolidated memories, tasks,
 rules/topics). Hybrid by default: FTS5 lexical always, with semantic
 reranking joining when an embeddings endpoint is configured;
 `--lexical` (boolean) forces pure FTS. `--limit` (single) caps the hit
-count. Query punctuation is treated literally — input is
+count. Query punctuation is treated literally; input is
 injection-proof by construction.
 
 ### `memorize export [--out <file>]`
 
-Streams the project's full event log as NDJSON — to `--out <file>`
+Streams the project's full event log as NDJSON: to `--out <file>`
 (single) when given, else to stdout for piping. This is the
 backup/inspection primitive: the event log is the only source of
 truth, so an export IS a complete project backup.
@@ -868,10 +868,10 @@ Each event wraps its payload under a `payload` field and includes
 
 ## When in doubt
 
-1. Run `memorize doctor --json` first — the `checks[]` array tells
+1. Run `memorize doctor --json` first; the `checks[]` array tells
    you what the tool itself thinks is wrong.
 2. Follow the `fix` field literally where one is suggested; each fix
    is a real command or action.
 3. If a command fails in a way this guide does not cover, check the
-   source under `src/cli/commands/` and `src/services/` — they are
+   source under `src/cli/commands/` and `src/services/`; they are
    small files (100–200 lines each) and named after the command.
