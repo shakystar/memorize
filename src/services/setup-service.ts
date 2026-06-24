@@ -14,7 +14,7 @@ import {
 } from './projection-store.js';
 import {
   createProject,
-  getBoundProjectId,
+  getBindingForPath,
   listProjects,
   readProject,
   relocateProject,
@@ -308,9 +308,23 @@ export async function setupProject(rootPath: string): Promise<{
   let relocated = false;
   let project: Project | undefined;
 
-  const existingProjectId = await getBoundProjectId(rootPath);
-  if (existingProjectId) {
-    project = await readProject(existingProjectId);
+  const binding = await getBindingForPath(rootPath);
+  if (binding?.kind === 'exact') {
+    // This path IS a bound project root — adopt it (idempotent re-setup).
+    project = await readProject(binding.projectId);
+  } else if (binding?.kind === 'ancestor') {
+    // This path merely sits INSIDE a bound project. Adopting/importing here would
+    // absorb the subdir into its parent and leak the subdir's CLAUDE.md/AGENTS.md
+    // into the ancestor's memory (#151). Refuse and guide instead — create or
+    // modify NOTHING. Operational commands (walk-up) already resolve here.
+    const ancestor = await readProject(binding.projectId);
+    const ancestorTitle = ancestor?.title ?? binding.projectId;
+    throw new Error(
+      `${rootPath} is inside project "${ancestorTitle}" (${binding.projectId}), bound at ${binding.matchedPath}.\n` +
+        `memorize did not create or modify anything. Operational commands here already resolve to that project.\n` +
+        `To create a SEPARATE project for this directory instead, run:\n` +
+        `  memorize project init`,
+    );
   } else {
     // No binding at this path — detect a moved repo BEFORE creating, so we never
     // silently orphan the original's memory (#145).

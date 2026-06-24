@@ -10,9 +10,11 @@ import {
 import {
   bindProject,
   readBindings,
+  resolveBindingForPath,
   resolveProjectIdForPath,
   unbindPath,
 } from '../storage/bindings-store.js';
+import type { BindingMatch } from '../storage/bindings-store.js';
 import { isEnoent, readJson, writeJson } from '../storage/fs-utils.js';
 import {
   getProjectProjection,
@@ -129,6 +131,18 @@ export async function getBoundProjectId(
   rootPath: string,
 ): Promise<string | undefined> {
   return resolveProjectIdForPath(rootPath);
+}
+
+/**
+ * Resolve the binding for a path WITH its kind (exact vs ancestor). Used by
+ * binding-creation commands (`project setup`/`init`) that must not absorb a
+ * subdirectory into its parent (#151). `getBoundProjectId` (walk-up) remains the
+ * operational resolver — `ensureBoundProjectId`/`requireBoundProjectId` keep it.
+ */
+export async function getBindingForPath(
+  rootPath: string,
+): Promise<BindingMatch | undefined> {
+  return resolveBindingForPath(rootPath);
 }
 
 export async function ensureBoundProjectId(cwd: string): Promise<string> {

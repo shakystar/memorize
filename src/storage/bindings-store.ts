@@ -45,3 +45,37 @@ export async function resolveProjectIdForPath(
     current = parent;
   }
 }
+
+export interface BindingMatch {
+  projectId: string;
+  matchedPath: string;
+  kind: 'exact' | 'ancestor';
+}
+
+/**
+ * Like {@link resolveProjectIdForPath} but distinguishes an EXACT binding (this
+ * path IS a bound project root) from an ANCESTOR binding (this path merely sits
+ * inside a bound project). Binding-CREATION commands (`project setup`/`init`)
+ * need this so they don't silently absorb a subdirectory into its parent (#151).
+ * Operational commands keep using the walk-up resolver above.
+ */
+export async function resolveBindingForPath(
+  rootPath: string,
+): Promise<BindingMatch | undefined> {
+  const bindings = await readBindings();
+  const start = normalizeRoot(rootPath);
+  let current = start;
+  while (true) {
+    const projectId = bindings.byPath[current];
+    if (projectId) {
+      return {
+        projectId,
+        matchedPath: current,
+        kind: current === start ? 'exact' : 'ancestor',
+      };
+    }
+    const parent = path.dirname(current);
+    if (parent === current) return undefined;
+    current = parent;
+  }
+}

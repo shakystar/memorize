@@ -7,7 +7,7 @@ import type { SyncTransport } from '../../domain/sync-transport.js';
 import { ACTOR_USER } from '../../domain/common.js';
 import {
   createProject,
-  getBoundProjectId,
+  getBindingForPath,
   readProject,
   readSyncState,
   recordDecision,
@@ -75,10 +75,13 @@ export async function runProjectCommand(
 
   if (subcommand === 'init') {
     const flags = parseFlags(args.slice(1), { boolean: ['force'] });
-    const existingProjectId = await getBoundProjectId(cwd);
-    if (existingProjectId && !flags.boolean.force) {
+    const binding = await getBindingForPath(cwd);
+    // Only an EXACT binding (this dir IS a project root) is "already bound". An
+    // ancestor-only binding is the legitimate "create a separate nested project
+    // here" path and must NOT be blocked (#151).
+    if (binding?.kind === 'exact' && !flags.boolean.force) {
       throw new Error(
-        `Directory is already bound to project ${existingProjectId}. ` +
+        `Directory is already bound to project ${binding.projectId}. ` +
           `Run \`memorize project setup\` to adopt the existing project, ` +
           `or pass --force to overwrite the binding with a new project.`,
       );
@@ -93,6 +96,12 @@ export async function runProjectCommand(
       ...(identity.rootCommit ? { rootCommit: identity.rootCommit } : {}),
     });
     console.log(`Initialized project ${project.title} (${project.id})`);
+    if (binding?.kind === 'ancestor') {
+      console.log(
+        `Note: this project is nested inside project ${binding.projectId} ` +
+          `(bound at ${binding.matchedPath}).`,
+      );
+    }
     return;
   }
 
