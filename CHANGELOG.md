@@ -14,6 +14,45 @@ log layout or the public CLI surface.
 > entries by hand. See
 > [CONTRIBUTING.md](.github/CONTRIBUTING.md#releasing).
 
+## [2.4.0](https://github.com/shakystar/memorize/compare/v2.3.1...v2.4.0) (2026-06-24)
+
+
+### Features
+
+* **cli:** add decision list/show read command ([#148](https://github.com/shakystar/memorize/issues/148)) ([#161](https://github.com/shakystar/memorize/issues/161)) ([f0ab2f7](https://github.com/shakystar/memorize/commit/f0ab2f7245c58883417f985e95f2224e1a1bc80e))
+* **cli:** add project decision supersede correction event ([#148](https://github.com/shakystar/memorize/issues/148) slice 2) ([#158](https://github.com/shakystar/memorize/issues/158)) ([a346f0d](https://github.com/shakystar/memorize/commit/a346f0dc20dc7226521af15f764ad196e3933eea))
+* **cli:** task update/cancel, memory list, conflict unknown-subcommand rejection ([#148](https://github.com/shakystar/memorize/issues/148) slice 1) ([#156](https://github.com/shakystar/memorize/issues/156)) ([4e5f25d](https://github.com/shakystar/memorize/commit/4e5f25d4fe6ef960c593e59d815b7bfc1264ff53))
+* **conflict,project:** add producers for modeled-but-unreachable transitions ([#120](https://github.com/shakystar/memorize/issues/120), [#121](https://github.com/shakystar/memorize/issues/121)) ([#133](https://github.com/shakystar/memorize/issues/133)) ([ccf8736](https://github.com/shakystar/memorize/commit/ccf8736f21e6a01725f66b9a98bdccaa598def9c))
+* **consolidate:** conversation-complete transcript capture — cat-2 fix ([#99](https://github.com/shakystar/memorize/issues/99)) ([5f8f7e4](https://github.com/shakystar/memorize/commit/5f8f7e440d323540568a6b1d25b377b7901f76db))
+* **consolidate:** conversation-complete transcript capture — cat-2 fix ([#99](https://github.com/shakystar/memorize/issues/99)) ([0e7b6eb](https://github.com/shakystar/memorize/commit/0e7b6eba83b220d06b2e1894b5592fd525d5e6a7))
+* **consolidate:** read conversation for zero-observation sessions — cat-1 fix ([#99](https://github.com/shakystar/memorize/issues/99)) ([#106](https://github.com/shakystar/memorize/issues/106)) ([813cc79](https://github.com/shakystar/memorize/commit/813cc79457223c09119f6b4b2e628bd51004e326))
+* **inject:** demote explicit-coordination blocks below ambient memory ([#85](https://github.com/shakystar/memorize/issues/85)) ([#113](https://github.com/shakystar/memorize/issues/113)) ([50796b2](https://github.com/shakystar/memorize/commit/50796b236f9aa931fee3969df3d77c1ea6972ba1))
+* **install:** plant using-memorize skill on Claude install ([#112](https://github.com/shakystar/memorize/issues/112)) ([099a70b](https://github.com/shakystar/memorize/commit/099a70b6bcd74cba6b4e3be268547ce19ad8e94e))
+* **memory:** add 'memory show &lt;id&gt;' to read a recalled memory's full text ([#111](https://github.com/shakystar/memorize/issues/111)) ([#138](https://github.com/shakystar/memorize/issues/138)) ([d80d642](https://github.com/shakystar/memorize/commit/d80d642aed0ec5672c40849825f4c3ee4a526629))
+* **project:** add 'project relocate' to rebind a moved repo to its existing project ([#124](https://github.com/shakystar/memorize/issues/124)) ([#134](https://github.com/shakystar/memorize/issues/134)) ([326110b](https://github.com/shakystar/memorize/commit/326110bc2bc5b23a156b74e533f8d0b79b66cc43))
+* **realtime-share:** warn on concurrent destructive-git collisions across parallel sessions ([#168](https://github.com/shakystar/memorize/issues/168)) ([93fab8f](https://github.com/shakystar/memorize/commit/93fab8fd04c9c6a34101944fe0caf9dd219fedc1))
+* **scripts:** decision miss-rate measurement — semantic matcher + classifier ([#99](https://github.com/shakystar/memorize/issues/99)) ([d0c2319](https://github.com/shakystar/memorize/commit/d0c2319e76a4f06d6afa7324601b79dce5559486))
+* **scripts:** decision miss-rate measurement tooling for [#99](https://github.com/shakystar/memorize/issues/99) ([a9fff2c](https://github.com/shakystar/memorize/commit/a9fff2c24b77e4d055977fc8f88e08d4c2a518de))
+
+
+### Bug Fixes
+
+* **capture:** recover session from agent id + transcript scope fallback ([#108](https://github.com/shakystar/memorize/issues/108), [#109](https://github.com/shakystar/memorize/issues/109)) ([#110](https://github.com/shakystar/memorize/issues/110)) ([ec743c6](https://github.com/shakystar/memorize/commit/ec743c6ac35f6e75056e779be9ca117c319cb31d))
+* **cli:** handle --help instead of creating a junk task ([#131](https://github.com/shakystar/memorize/issues/131)) ([afe590a](https://github.com/shakystar/memorize/commit/afe590a9e89014567b66836995c0ba8e54aa317c))
+* **conflict:** emit conflict.detected with scopeId=conflict.id so resolve rebuild doesn't collide ([#157](https://github.com/shakystar/memorize/issues/157)) ([#160](https://github.com/shakystar/memorize/issues/160)) ([f68411a](https://github.com/shakystar/memorize/commit/f68411ac417e1572b97bf8fc7e15ab645ce560ab))
+* **consolidate:** harden extractor against memory-governance instruction-bleed ([#119](https://github.com/shakystar/memorize/issues/119)) ([303e854](https://github.com/shakystar/memorize/commit/303e8545d06101599efb3236297f29f8ca66b138))
+* **consolidate:** report resolved backend + outcome instead of misleading extractor:none ([#127](https://github.com/shakystar/memorize/issues/127)) ([#136](https://github.com/shakystar/memorize/issues/136)) ([1fb7878](https://github.com/shakystar/memorize/commit/1fb78789995ab3ae8154392a42ccdd425caf550d))
+* **db:** actionable hint when the data dir is unwritable (Codex sandbox) ([#116](https://github.com/shakystar/memorize/issues/116)) ([#144](https://github.com/shakystar/memorize/issues/144)) ([c9343c2](https://github.com/shakystar/memorize/commit/c9343c28f4aa9af9b0631160939ccfe5558a9ce8))
+* **doctor:** tolerate UTF-8 BOM in settings.local.json / codex hooks.json ([#102](https://github.com/shakystar/memorize/issues/102) follow-up) ([#153](https://github.com/shakystar/memorize/issues/153)) ([c3ce6be](https://github.com/shakystar/memorize/commit/c3ce6be2504f6daff2ba537157a65788dd27b3eb))
+* **doctor:** verify all 4 Claude hooks incl. PostToolUse capture ([#141](https://github.com/shakystar/memorize/issues/141)) ([2ec69a8](https://github.com/shakystar/memorize/commit/2ec69a8b34140252bfeddc1240abad79d316e119))
+* **install:** run hooks via absolute node path so Git Bash resolves them ([#122](https://github.com/shakystar/memorize/issues/122), [#123](https://github.com/shakystar/memorize/issues/123), [#130](https://github.com/shakystar/memorize/issues/130)) ([#132](https://github.com/shakystar/memorize/issues/132)) ([528d663](https://github.com/shakystar/memorize/commit/528d663a33572b4feb8c28d889484926da4626eb))
+* **release:** match existing v* tags (include-component-in-tag false) ([#147](https://github.com/shakystar/memorize/issues/147)) ([0cb3908](https://github.com/shakystar/memorize/commit/0cb3908e6baa5da31ebd1acdfd40b92f02249f8a))
+* **scripts:** sharpen judge — one-off vs standing + acceptance evidence ([#99](https://github.com/shakystar/memorize/issues/99)) ([ffdd785](https://github.com/shakystar/memorize/commit/ffdd785d3102e7ea82d121cb8e16470f4d34b87b))
+* **setup:** detect a moved repo and relocate instead of silently orphaning memory ([#145](https://github.com/shakystar/memorize/issues/145)) ([#149](https://github.com/shakystar/memorize/issues/149)) ([a8e7c5e](https://github.com/shakystar/memorize/commit/a8e7c5e8707ea6e5b0af822c102cc3f7ae0ae666))
+* **setup:** distinguish exact vs ancestor binding so setup no longer absorbs a subdir into its parent ([#151](https://github.com/shakystar/memorize/issues/151)) ([#155](https://github.com/shakystar/memorize/issues/155)) ([bd66ec0](https://github.com/shakystar/memorize/commit/bd66ec0d620dbf42f17a523ac8a9ede2d95e352a))
+* **task:** wire `task done` CLI verb to reach terminal done state ([#118](https://github.com/shakystar/memorize/issues/118)) ([1ef25ac](https://github.com/shakystar/memorize/commit/1ef25aca3d02aab4921e8f158262726d802d3dd5))
+* **update:** spawn npm via cross-spawn to drop shell:true and silence DEP0190 ([#96](https://github.com/shakystar/memorize/issues/96)) ([#137](https://github.com/shakystar/memorize/issues/137)) ([766f9dd](https://github.com/shakystar/memorize/commit/766f9dd243a30004d9dfefac3460e3caf9435a31))
+
 ## [2.3.1] — 2026-06-13
 
 Windows-only console-noise patch, cut from the `v2.3.0` tag so it carries
