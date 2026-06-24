@@ -8,6 +8,8 @@ import { ACTOR_USER } from '../../domain/common.js';
 import {
   createProject,
   getBindingForPath,
+  readDecision,
+  readDecisions,
   readProject,
   readSyncState,
   recordDecision,
@@ -175,6 +177,53 @@ export async function runProjectCommand(
     const projectId = await requireBoundProjectId(cwd);
     const project = await readProject(projectId);
     console.log(JSON.stringify(project, null, 2));
+    return;
+  }
+
+  if (subcommand === 'decision' && args[1] === 'list') {
+    const projectId = await requireBoundProjectId(cwd);
+    const flags = parseFlags(args.slice(2), { boolean: ['json', 'all'] });
+    const decisions = readDecisions(projectId, {
+      includeSuperseded: flags.boolean.all === true,
+    });
+    if (flags.boolean.json) {
+      console.log(JSON.stringify(decisions, null, 2));
+      return;
+    }
+    for (const decision of decisions) {
+      console.log(`${decision.id}\t${decision.status}\t${decision.title}`);
+    }
+    return;
+  }
+
+  if (subcommand === 'decision' && args[1] === 'show') {
+    const projectId = await requireBoundProjectId(cwd);
+    const flags = parseFlags(args.slice(2), { boolean: ['json'] });
+    const decisionId = flags.positional[0];
+    if (!decisionId) {
+      throw new Error('Usage: memorize project decision show <id> [--json]');
+    }
+    const decision = readDecision(projectId, decisionId);
+    if (!decision) {
+      throw new Error(
+        `decision show: no decision found with id ${decisionId}.`,
+      );
+    }
+    if (flags.boolean.json) {
+      console.log(JSON.stringify(decision, null, 2));
+      return;
+    }
+    const lines: string[] = [
+      `id:        ${decision.id}`,
+      `status:    ${decision.status}`,
+      `title:     ${decision.title}`,
+    ];
+    if (decision.supersededBy) {
+      lines.push(`superseded by: ${decision.supersededBy}`);
+    }
+    lines.push('', `decision:  ${decision.decision}`);
+    if (decision.rationale) lines.push(`rationale: ${decision.rationale}`);
+    console.log(lines.join('\n'));
     return;
   }
 
