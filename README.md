@@ -67,7 +67,16 @@ These numbers come from three days of unsupervised, hands-off dogfooding.
 - **Capture, consolidation, replacement, and injection all run with no human in the loop.**
 - **When parallel sessions touch the same file, a warning fires on the spot.**
 
-> A formal retrieval-accuracy benchmark is in progress. Results land here soon.
+### Retrieval benchmark
+
+Beyond live usage, we score retrieval on [LongMemEval-S](https://github.com/xiaowu0162/longmemeval), a public 500-question memory benchmark. Each question buries its answer in one of roughly fifty past chat sessions. We load those sessions into memorize and check whether the right one comes back.
+
+| mode | recall@5 | recall@10 | recall@20 | ndcg@10 | mrr |
+| --- | --- | --- | --- | --- | --- |
+| lexical (BM25) | 0.966 | 0.986 | 0.994 | 0.896 | 0.911 |
+| hybrid (BM25 + bge-m3) | 0.978 | 0.994 | 1.000 | 0.925 | 0.932 |
+
+Lexical search alone puts the right session in the top five for 96.6% of questions. Semantic search adds the most where the question and the session use different words, like preferences and paraphrased facts, and it ranks the right session higher. These are retrieval-recall scores, not answer accuracy, and they test the search layer rather than the consolidation that sits above it. Reproduce with `pnpm benchmark:retrieval bm25`.
 
 ## Why
 
