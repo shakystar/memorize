@@ -175,7 +175,9 @@ export async function importContextFiles(project: Project): Promise<number> {
       type: 'conflict.detected',
       projectId: project.id,
       scopeType: 'project',
-      scopeId: project.id,
+      // The projector keys state.conflicts by the EVENT scopeId, so it must be
+      // the conflict.id (not the projectId) or resolve's rebuild collides.
+      scopeId: conflict.id,
       actor: 'system-import',
       payload: conflict,
     });
