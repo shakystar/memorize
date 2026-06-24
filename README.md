@@ -67,7 +67,16 @@ These numbers come from three days of unsupervised, hands-off dogfooding.
 - **Capture, consolidation, replacement, and injection all run with no human in the loop.**
 - **When parallel sessions touch the same file, a warning fires on the spot.**
 
-> A formal retrieval-accuracy benchmark is in progress. Results land here soon.
+### Retrieval benchmark
+
+Beyond live usage, we score retrieval on [LongMemEval-S](https://github.com/xiaowu0162/longmemeval), a public 500-question memory benchmark. Each question buries its answer in one of roughly fifty past chat sessions. We load those sessions into memorize and check whether the right one comes back.
+
+| mode | recall@5 | recall@10 | recall@20 | ndcg@10 | mrr |
+| --- | --- | --- | --- | --- | --- |
+| lexical (BM25) | 0.966 | 0.986 | 0.994 | 0.896 | 0.911 |
+| hybrid (BM25 + bge-m3) | 0.978 | 0.994 | 1.000 | 0.925 | 0.932 |
+
+Lexical search alone puts the right session in the top five for 96.6% of questions. Semantic search adds the most where the question and the session use different words, like preferences and paraphrased facts, and it ranks the right session higher. These are retrieval-recall scores, not answer accuracy, and they test the search layer rather than the consolidation that sits above it. Reproduce with `pnpm benchmark:retrieval bm25`.
 
 ## Why
 
@@ -108,10 +117,10 @@ Every other command lives in [AGENT_GUIDE.md](./AGENT_GUIDE.md), which your AI r
 Here is the honest state of what is verified so far. Every item is on the near-term roadmap.
 
 - **Confirmed at three-day scale.** Performance at months and hundreds of memories is not proven yet.
-- **Embedding-based search is not validated yet.**
+- **Embedding-based search is validated on the benchmark above, not yet in long-run production use.**
 - **Decision capture leans toward file writes and commands** (99.8% of signals). Catching explicit decision keywords is in progress.
 
-Benchmarks, embedding search, and decision capture are the next things we are building.
+Embedding search and decision capture are the next things we are building.
 
 ## For AI assistants
 
