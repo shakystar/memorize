@@ -418,7 +418,10 @@ async function maybePromoteConflicts(
       type: 'conflict.detected',
       projectId,
       scopeType: 'project',
-      scopeId: projectId,
+      // The projector keys state.conflicts by the EVENT scopeId, so it must be
+      // the conflict.id (not the projectId) or resolve's rebuild collides, and
+      // concurrent file conflicts in one call each get their own entry.
+      scopeId: conflict.id,
       actor: agent,
       payload: conflict,
     });

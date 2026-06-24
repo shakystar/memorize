@@ -30,6 +30,7 @@ export {
 export {
   type Decision,
   type DecisionStatus,
+  type DecisionSupersededPayload,
   createDecision,
 } from './entities/decision.js';
 export { type Rule, createRule } from './entities/rule.js';

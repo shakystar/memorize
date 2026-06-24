@@ -8,11 +8,14 @@ import { ACTOR_USER } from '../../domain/common.js';
 import {
   createProject,
   getBindingForPath,
+  readDecision,
+  readDecisions,
   readProject,
   readSyncState,
   recordDecision,
   relocateProject,
   requireBoundProjectId,
+  supersedeDecision,
 } from '../../services/project-service.js';
 import { inspectProject } from '../../services/repair-service.js';
 import { computeRepoIdentity } from '../../services/repo-identity.js';
@@ -177,6 +180,53 @@ export async function runProjectCommand(
     return;
   }
 
+  if (subcommand === 'decision' && args[1] === 'list') {
+    const projectId = await requireBoundProjectId(cwd);
+    const flags = parseFlags(args.slice(2), { boolean: ['json', 'all'] });
+    const decisions = readDecisions(projectId, {
+      includeSuperseded: flags.boolean.all === true,
+    });
+    if (flags.boolean.json) {
+      console.log(JSON.stringify(decisions, null, 2));
+      return;
+    }
+    for (const decision of decisions) {
+      console.log(`${decision.id}\t${decision.status}\t${decision.title}`);
+    }
+    return;
+  }
+
+  if (subcommand === 'decision' && args[1] === 'show') {
+    const projectId = await requireBoundProjectId(cwd);
+    const flags = parseFlags(args.slice(2), { boolean: ['json'] });
+    const decisionId = flags.positional[0];
+    if (!decisionId) {
+      throw new Error('Usage: memorize project decision show <id> [--json]');
+    }
+    const decision = readDecision(projectId, decisionId);
+    if (!decision) {
+      throw new Error(
+        `decision show: no decision found with id ${decisionId}.`,
+      );
+    }
+    if (flags.boolean.json) {
+      console.log(JSON.stringify(decision, null, 2));
+      return;
+    }
+    const lines: string[] = [
+      `id:        ${decision.id}`,
+      `status:    ${decision.status}`,
+      `title:     ${decision.title}`,
+    ];
+    if (decision.supersededBy) {
+      lines.push(`superseded by: ${decision.supersededBy}`);
+    }
+    lines.push('', `decision:  ${decision.decision}`);
+    if (decision.rationale) lines.push(`rationale: ${decision.rationale}`);
+    console.log(lines.join('\n'));
+    return;
+  }
+
   if (subcommand === 'decision' && args[1] === 'add') {
     const projectId = await requireBoundProjectId(cwd);
     const flags = parseFlags(args.slice(2), {
@@ -194,6 +244,37 @@ export async function runProjectCommand(
       actor: ACTOR_USER,
     });
     console.log(`Recorded decision ${recorded.id} (${recorded.title})`);
+    return;
+  }
+
+  if (subcommand === 'decision' && args[1] === 'supersede') {
+    const projectId = await requireBoundProjectId(cwd);
+    const oldDecisionId = args[2];
+    if (!oldDecisionId || oldDecisionId.startsWith('--')) {
+      throw new Error(
+        'Usage: memorize project decision supersede <oldDecisionId> ' +
+          '--title <text> --decision <text> [--rationale <text>] [--reason <text>]',
+      );
+    }
+    const flags = parseFlags(args.slice(3), {
+      single: ['title', 'decision', 'rationale', 'reason'],
+    });
+    const title = flags.single.title?.trim();
+    const decisionText = flags.single.decision?.trim();
+    if (!title) throw new Error('--title is required.');
+    if (!decisionText) throw new Error('--decision is required.');
+    const { decision, supersededId } = await supersedeDecision({
+      projectId,
+      supersedesId: oldDecisionId,
+      title,
+      decision: decisionText,
+      ...(flags.single.rationale ? { rationale: flags.single.rationale } : {}),
+      ...(flags.single.reason ? { reason: flags.single.reason } : {}),
+      actor: ACTOR_USER,
+    });
+    console.log(
+      `Superseded decision ${supersededId} with ${decision.id} (${decision.title})`,
+    );
     return;
   }
 
