@@ -1,0 +1,63 @@
+[
+  {
+    "question_id": "q1",
+    "question_type": "single-session-user",
+    "question": "What did I name my dog?",
+    "answer": "Max",
+    "haystack_session_ids": ["q1-s0", "q1-s1", "q1-s2"],
+    "haystack_sessions": [
+      [{ "role": "user", "content": "I went hiking near Boulder last weekend." }],
+      [{ "role": "user", "content": "We adopted a puppy and named the dog Max." }],
+      [{ "role": "user", "content": "My favorite coffee is a flat white." }]
+    ],
+    "answer_session_ids": ["q1-s1"]
+  },
+  {
+    "question_id": "q2",
+    "question_type": "single-session-preference",
+    "question": "Which programming language do I prefer?",
+    "answer": "Rust",
+    "haystack_session_ids": ["q2-s0", "q2-s1"],
+    "haystack_sessions": [
+      [{ "role": "user", "content": "I really prefer the Rust programming language for systems work." }],
+      [{ "role": "user", "content": "The weather has been rainy all week." }]
+    ],
+    "answer_session_ids": ["q2-s0"]
+  },
+  {
+    "question_id": "q3",
+    "question_type": "temporal-reasoning",
+    "question": "When is my dentist appointment?",
+    "answer": "Tuesday",
+    "haystack_session_ids": ["q3-s0", "q3-s1"],
+    "haystack_sessions": [
+      [{ "role": "user", "content": "Remind me my dentist appointment is on Tuesday." }],
+      [{ "role": "user", "content": "I finished reading a great novel yesterday." }]
+    ],
+    "answer_session_ids": ["q3-s0"]
+  },
+  {
+    "question_id": "q4",
+    "question_type": "knowledge-update",
+    "question": "Where do I work now?",
+    "answer": "Acme",
+    "haystack_session_ids": ["q4-s0", "q4-s1"],
+    "haystack_sessions": [
+      [{ "role": "user", "content": "I used to work at Globex." }],
+      [{ "role": "user", "content": "I just started a new job at Acme as an engineer." }]
+    ],
+    "answer_session_ids": ["q4-s1"]
+  },
+  {
+    "question_id": "q5",
+    "question_type": "multi-session",
+    "question": "What city am I moving to?",
+    "answer": "Denver",
+    "haystack_session_ids": ["q5-s0", "q5-s1"],
+    "haystack_sessions": [
+      [{ "role": "user", "content": "I have been thinking about relocating for a while." }],
+      [{ "role": "user", "content": "I signed a lease and am moving to Denver next month." }]
+    ],
+    "answer_session_ids": ["q5-s1"]
+  }
+]
