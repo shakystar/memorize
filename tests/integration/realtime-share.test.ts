@@ -31,6 +31,7 @@ import { appendEvent, readEvents } from '../../src/storage/event-store.js';
 
 const projectId = 'proj_rt_share';
 const ts = '2026-06-08T00:00:00.000Z';
+const OLD_WINDOW = '2000-01-01T00:00:00.000Z';
 
 let sandbox: string;
 
@@ -133,6 +134,26 @@ async function appendObservation(
   return event.id;
 }
 
+async function appendGitOp(sessionId: string, command: string): Promise<string> {
+  const observation = createObservation({
+    projectId,
+    signal: 'mutating-bash',
+    sessionId,
+    toolName: 'Bash',
+    summary: command,
+  });
+  const event = await appendEvent({
+    type: 'observation.captured',
+    projectId,
+    scopeType: 'session',
+    scopeId: sessionId,
+    actor: 'claude',
+    payload: observation,
+  });
+  await rebuildProjectProjection(projectId, { reindexSearch: false });
+  return event.id;
+}
+
 /** Append a memory.consolidated event directly (as the detached background
  *  consolidation child would) — for the Part B (#46) live-injection tests. */
 async function appendMemory(
@@ -212,6 +233,8 @@ describe('realtime-share — buildLiveUpdate', () => {
       sinceEventId: since,
       selfRecentFilePaths: new Set(),
       cwd: sandbox,
+      selfRecentGitOp: false,
+      gitOpWindowStartIso: OLD_WINDOW,
     });
 
     expect(update.hasContent).toBe(true);
@@ -230,6 +253,8 @@ describe('realtime-share — buildLiveUpdate', () => {
       sinceEventId: since,
       selfRecentFilePaths: new Set(),
       cwd: sandbox,
+      selfRecentGitOp: false,
+      gitOpWindowStartIso: OLD_WINDOW,
     });
     expect(update.hasContent).toBe(false);
     expect(update.observations).toHaveLength(0);
@@ -247,6 +272,8 @@ describe('realtime-share — buildLiveUpdate', () => {
       sinceEventId: since,
       selfRecentFilePaths: new Set(),
       cwd: sandbox,
+      selfRecentGitOp: false,
+      gitOpWindowStartIso: OLD_WINDOW,
     });
     expect(update.observations).toHaveLength(MAX_LIVE_OBSERVATIONS);
     // Watermark covers the WHOLE window (last event), not just the kept slice.
@@ -268,6 +295,8 @@ describe('realtime-share — buildLiveUpdate', () => {
       sinceEventId: since,
       selfRecentFilePaths: new Set(),
       cwd: sandbox,
+      selfRecentGitOp: false,
+      gitOpWindowStartIso: OLD_WINDOW,
     });
 
     expect(update.hasContent).toBe(true);
@@ -294,10 +323,60 @@ describe('realtime-share — buildLiveUpdate', () => {
         normalizeFilePath('/repo/shared.ts', sandbox),
       ]),
       cwd: sandbox,
+      selfRecentGitOp: false,
+      gitOpWindowStartIso: OLD_WINDOW,
     });
     expect(update.conflicts).toHaveLength(1);
     expect(update.conflicts[0]!.filePath).toBe('/repo/shared.ts');
     expect(update.conflicts[0]!.siblingSessionId).toBe('B');
+  });
+
+  it('warns on a git collision only when self is also doing destructive git ops', async () => {
+    await seedProject();
+    const since = await appendObservation('A', '/repo/seed.ts');
+    await appendGitOp('B', 'git worktree remove .worktrees/x');
+
+    // self NOT doing git ops → no warning (noise guard)
+    const quiet = await buildLiveUpdate({
+      projectId, selfSessionId: 'A', sinceEventId: since,
+      selfRecentFilePaths: new Set(), cwd: sandbox,
+      selfRecentGitOp: false, gitOpWindowStartIso: OLD_WINDOW,
+    });
+    expect(quiet.gitOpWarnings).toHaveLength(0);
+
+    // self IS doing git ops → warning
+    const loud = await buildLiveUpdate({
+      projectId, selfSessionId: 'A', sinceEventId: since,
+      selfRecentFilePaths: new Set(), cwd: sandbox,
+      selfRecentGitOp: true, gitOpWindowStartIso: OLD_WINDOW,
+    });
+    expect(loud.gitOpWarnings).toHaveLength(1);
+    expect(loud.gitOpWarnings[0]!.siblingSessionId).toBe('B');
+    expect(loud.gitOpWarnings[0]!.command).toContain('git worktree remove');
+    expect(loud.hasContent).toBe(true);
+  });
+
+  it('drops sibling git ops older than the freshness window, and dedups per session', async () => {
+    await seedProject();
+    const since = await appendObservation('A', '/repo/seed.ts');
+    await appendGitOp('B', 'git worktree remove .worktrees/x');
+    await appendGitOp('B', 'git branch -D feature/x'); // same session → dedup
+
+    // window start in the FUTURE → every sibling git op is "too old"
+    const future = '2999-01-01T00:00:00.000Z';
+    const stale = await buildLiveUpdate({
+      projectId, selfSessionId: 'A', sinceEventId: since,
+      selfRecentFilePaths: new Set(), cwd: sandbox,
+      selfRecentGitOp: true, gitOpWindowStartIso: future,
+    });
+    expect(stale.gitOpWarnings).toHaveLength(0);
+
+    const fresh = await buildLiveUpdate({
+      projectId, selfSessionId: 'A', sinceEventId: since,
+      selfRecentFilePaths: new Set(), cwd: sandbox,
+      selfRecentGitOp: true, gitOpWindowStartIso: OLD_WINDOW,
+    });
+    expect(fresh.gitOpWarnings).toHaveLength(1); // deduped to one per session
   });
 });
 

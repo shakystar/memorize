@@ -53,6 +53,7 @@ export { type MemoryIndex } from './entities/memory-index.js';
 export {
   type FileConflictWarning,
   type LiveUpdate,
+  type SiblingGitOpWarning,
   type SiblingMemoryItem,
   type SiblingObservationItem,
 } from './entities/live-update.js';
