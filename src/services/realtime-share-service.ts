@@ -195,6 +195,25 @@ function siblingActor(
   }
 }
 
+/** True if this session ran a destructive-shared-git op within the window. */
+function hasRecentSelfGitOp(
+  projectId: string,
+  selfSessionId: string,
+  windowStartIso: string,
+): boolean {
+  const observations = listRecentObservations(projectId, {
+    sessionId: selfSessionId,
+    limit: SELF_FILE_TOUCH_LIMIT,
+    sinceIso: windowStartIso,
+  });
+  return observations.some(
+    (obs) =>
+      obs.signal === 'mutating-bash' &&
+      !!obs.summary &&
+      DESTRUCTIVE_GIT_PATTERN.test(obs.summary),
+  );
+}
+
 /** Normalized recent file paths this session touched (collision input). */
 function recentSelfFilePaths(
   projectId: string,
@@ -462,6 +481,11 @@ export async function composeLiveUpdate(params: {
   const gitOpWindowStartIso = new Date(
     nowMs - GIT_OP_COLLISION_WINDOW_MINUTES * 60 * 1000,
   ).toISOString();
+  const selfRecentGitOp = hasRecentSelfGitOp(
+    params.projectId,
+    selfSessionId,
+    gitOpWindowStartIso,
+  );
 
   const update = await buildLiveUpdate({
     projectId: params.projectId,
@@ -469,7 +493,7 @@ export async function composeLiveUpdate(params: {
     sinceEventId,
     selfRecentFilePaths,
     cwd: params.cwd,
-    selfRecentGitOp: false, // composeLiveUpdate callers opt in via future param
+    selfRecentGitOp,
     gitOpWindowStartIso,
   });
 

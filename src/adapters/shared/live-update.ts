@@ -21,6 +21,24 @@ export function renderLiveUpdateBlocks(
   const budget = opts.budget ?? LIVE_UPDATE_BUDGET_CHARS;
   const blocks: RenderBlock[] = [];
 
+  if (update.gitOpWarnings.length > 0) {
+    const lines: string[] = [
+      'Parallel destructive git activity — serialize, do not run concurrently:',
+    ];
+    for (const warning of update.gitOpWarnings) {
+      lines.push(
+        `- ⚠ session ${warning.siblingSessionId} (${warning.siblingActor}): ${warning.command}`,
+      );
+    }
+    blocks.push({
+      priority: 0,
+      source: 'memorize.live.gitops',
+      content: wrapUntrusted(lines.join('\n'), {
+        source: 'memorize.live.gitops',
+      }),
+    });
+  }
+
   if (update.conflicts.length > 0) {
     const lines: string[] = ['File overlap with parallel sessions:'];
     for (const conflict of update.conflicts) {

@@ -82,6 +82,20 @@ async function captureWriteAs(
   });
 }
 
+async function captureBashAs(sessionId: string, command: string): Promise<void> {
+  asSession(sessionId);
+  await captureObservation({
+    projectId,
+    agent: 'claude',
+    cwd: sandbox,
+    rawPayload: JSON.stringify({
+      session_id: `agent-${sessionId}`,
+      tool_name: 'Bash',
+      tool_input: { command },
+    }),
+  });
+}
+
 async function applyPatchAs(
   sessionId: string,
   agent: 'claude' | 'codex',
@@ -515,6 +529,46 @@ describe('realtime-share — composeLiveUpdate (two-session e2e)', () => {
     expect(conflictEvents.length).toBeGreaterThan(0);
     const open = listOpenConflicts(projectId);
     expect(open.some((c) => c.fieldPath === '/repo/shared.ts')).toBe(true);
+  });
+
+  it('surfaces a destructive-git collision when both sessions touch shared git', async () => {
+    await seedProject();
+    const sessionA = await startSession(sandbox, { actor: 'claude', projectId });
+    const sessionB = await startSession(sandbox, { actor: 'claude', projectId });
+
+    // A does a destructive git op and seeds its watermark.
+    await captureBashAs(sessionA, 'git worktree remove .worktrees/a');
+    asSession(sessionA);
+    await composeLiveUpdate({ projectId, agent: 'claude', cwd: sandbox });
+
+    // B does a destructive git op too.
+    await captureBashAs(sessionB, 'git worktree remove .worktrees/b');
+
+    // A's next tool call sees the collision warning.
+    asSession(sessionA);
+    const injected = await composeLiveUpdate({ projectId, agent: 'claude', cwd: sandbox });
+    expect(injected).toBeTruthy();
+    expect(injected).toContain('Parallel destructive git activity');
+    expect(injected).toContain('git worktree remove .worktrees/b');
+    // A must not see its own op echoed.
+    expect(injected).not.toContain('.worktrees/a');
+  });
+
+  it('stays silent when only ONE session does destructive git ops', async () => {
+    await seedProject();
+    const sessionA = await startSession(sandbox, { actor: 'claude', projectId });
+    const sessionB = await startSession(sandbox, { actor: 'claude', projectId });
+
+    // A is NOT doing git ops (just a file write); B is.
+    await captureWriteAs(sessionA, '/repo/x.ts');
+    asSession(sessionA);
+    await composeLiveUpdate({ projectId, agent: 'claude', cwd: sandbox });
+
+    await captureBashAs(sessionB, 'git worktree remove .worktrees/b');
+    asSession(sessionA);
+    const injected = await composeLiveUpdate({ projectId, agent: 'claude', cwd: sandbox });
+    // B's git op shows as a normal sibling work signal, but NOT as a collision warning.
+    if (injected) expect(injected).not.toContain('Parallel destructive git activity');
   });
 
   it('reap drops the per-session watermark', async () => {
