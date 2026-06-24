@@ -72,6 +72,7 @@
     "benchmark:startup": "tsx scripts/benchmarks/run-startup-benchmark.ts",
     "benchmark:handoff": "tsx scripts/benchmarks/run-handoff-benchmark.ts",
     "benchmark:conflict": "tsx scripts/benchmarks/run-conflict-benchmark.ts",
+    "benchmark:retrieval": "tsx scripts/benchmarks/retrieval/run-retrieval-benchmark.ts",
     "benchmark:all": "pnpm benchmark:import && pnpm benchmark:startup && pnpm benchmark:handoff && pnpm benchmark:conflict",
     "dogfood:stats": "tsx scripts/dogfood-stats.ts",
     "dogfood:capture-audit": "tsx scripts/decision-capture-audit.ts",

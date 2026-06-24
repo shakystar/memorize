@@ -67,3 +67,6 @@ gitPAT.txt
 # they are local-only too; the converged result is recorded in issue #99.
 scripts/dogfood/labels/
 scripts/dogfood/*.out.txt
+
+# LongMemEval-S benchmark dataset (≈264 MB, downloaded on demand)
+/scripts/benchmarks/retrieval/data/
