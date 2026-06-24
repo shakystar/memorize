@@ -25,7 +25,7 @@ describe('benchmark/e2e reader', () => {
 
   it('stops adding sessions once the char budget is exceeded', async () => {
     const c = capturingChat();
-    const big = 'x'.repeat(11000);
+    const big = 'x'.repeat(13000);
     await answer(c.chat, 'q', [
       { sessionId: 's1', text: big },
       { sessionId: 's2', text: 'SENTINEL second session' },

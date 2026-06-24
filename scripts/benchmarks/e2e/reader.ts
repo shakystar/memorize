@@ -4,7 +4,7 @@ import type { Chat } from './chat-client.js';
 
 /** Char cap on the assembled context so the reader request fits the model
  *  window (esp. local qwen). ~12k chars ≈ 3k tokens. */
-export const READER_CONTEXT_CHAR_BUDGET = 11_000;
+export const READER_CONTEXT_CHAR_BUDGET = 12_000;
 
 export async function answer(
   chat: Chat,
