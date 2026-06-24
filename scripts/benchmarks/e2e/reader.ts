@@ -13,11 +13,17 @@ export async function answer(
 ): Promise<string> {
   let context = '';
   for (const session of sessions) {
-    const block = `--- session ${session.sessionId} ---\n${session.text}\n\n`;
-    if (context.length > 0 && context.length + block.length > READER_CONTEXT_CHAR_BUDGET) {
+    const remaining = READER_CONTEXT_CHAR_BUDGET - context.length;
+    if (remaining <= 0) break;
+    const header = `--- session ${session.sessionId} ---\n`;
+    const full = `${header}${session.text}\n\n`;
+    if (full.length <= remaining) {
+      context += full;
+    } else {
+      const keep = Math.max(0, remaining - header.length - 2);
+      context += `${header}${session.text.slice(0, keep)}\n\n`;
       break;
     }
-    context += block;
   }
   const prompt =
     `You answer the question using ONLY the chat-history excerpts below. ` +

@@ -32,4 +32,16 @@ describe('benchmark/e2e reader', () => {
     ]);
     expect(c.last()).not.toContain('SENTINEL');
   });
+
+  it('includes text from multiple small sessions when each fits within budget', async () => {
+    const c = capturingChat();
+    const text1 = 'A'.repeat(5000);
+    const text2 = 'B'.repeat(5000);
+    await answer(c.chat, 'q', [
+      { sessionId: 'sA', text: text1 },
+      { sessionId: 'sB', text: text2 },
+    ]);
+    expect(c.last()).toContain('session sA');
+    expect(c.last()).toContain('session sB');
+  });
 });

@@ -10,7 +10,7 @@ export interface E2EReport {
 
 export function renderTable(report: E2EReport): string {
   const fmt = (r: AccuracyRow): string =>
-    [r.label, String(r.n), r.accuracy.toFixed(4)].join('\t');
+    [r.label, String(r.n), r.n === 0 ? '-' : r.accuracy.toFixed(4)].join('\t');
   return [
     'type\tn\taccuracy',
     fmt(report.overall),

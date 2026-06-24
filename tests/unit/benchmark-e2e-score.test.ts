@@ -27,4 +27,13 @@ describe('benchmark/e2e scoring', () => {
     expect(out).toContain('accuracy');
     expect(out).toContain('skipped 4');
   });
+
+  it('renders - for accuracy when abstention row has n=0', () => {
+    const noAbstentionResults = [
+      { questionType: 'a', isAbstention: false, correct: true },
+      { questionType: 'a', isAbstention: false, correct: false },
+    ];
+    const out = renderTable({ ...aggregate(noAbstentionResults), skipped: 0 });
+    expect(out).toContain('abstention\t0\t-');
+  });
 });

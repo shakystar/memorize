@@ -70,4 +70,60 @@ describe('benchmark/e2e chat-client', () => {
     expect(reader).toBeInstanceOf(HttpChat);
     expect(judge).toBeInstanceOf(CliChat);
   });
+
+  it('CliChat timeout calls killImpl and rejects with /timed out/', async () => {
+    let killImplCalls = 0;
+    let closeHandler: ((code: number | null) => void) | undefined;
+    const fakeKillImpl = () => {
+      killImplCalls++;
+      // Simulate the OS firing 'close' after the process tree is killed
+      Promise.resolve().then(() => closeHandler?.(null));
+    };
+    const fakeSpawn = ((_cmd: string, _args: string[], _opts: unknown) => {
+      return {
+        stdout: { on: () => {} },
+        stderr: { on: () => {} },
+        stdin: { end: () => {} },
+        kill: () => {},
+        pid: 12345,
+        on: (e: string, cb: (arg?: unknown) => void) => {
+          if (e === 'close') closeHandler = cb as (code: number | null) => void;
+          // Never fire 'error' or 'close' spontaneously — simulates a hung process
+        },
+      };
+    }) as unknown as typeof import('cross-spawn');
+
+    await expect(
+      new CliChat('claude', 30, fakeSpawn, fakeKillImpl).chat('PROMPT'),
+    ).rejects.toThrow(/timed out/);
+    expect(killImplCalls).toBe(1);
+  });
+
+  it('HttpChat includes options.num_ctx when num_ctx is set', async () => {
+    let capturedBody: Record<string, unknown> | undefined;
+    const fetchImpl = (async (_url: string, init: { body: string }) => {
+      capturedBody = JSON.parse(init.body) as Record<string, unknown>;
+      return {
+        ok: true,
+        json: async () => ({ choices: [{ message: { content: 'ok' } }] }),
+      };
+    }) as unknown as typeof fetch;
+
+    await new HttpChat({ endpoint: 'http://x/v1', model: 'm', fetchImpl, num_ctx: 8192 }).chat('hi');
+    expect((capturedBody!.options as Record<string, unknown>).num_ctx).toBe(8192);
+  });
+
+  it('HttpChat omits options field when num_ctx is not set', async () => {
+    let capturedBody: Record<string, unknown> | undefined;
+    const fetchImpl = (async (_url: string, init: { body: string }) => {
+      capturedBody = JSON.parse(init.body) as Record<string, unknown>;
+      return {
+        ok: true,
+        json: async () => ({ choices: [{ message: { content: 'ok' } }] }),
+      };
+    }) as unknown as typeof fetch;
+
+    await new HttpChat({ endpoint: 'http://x/v1', model: 'm', fetchImpl }).chat('hi');
+    expect(capturedBody!.options).toBeUndefined();
+  });
 });

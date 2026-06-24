@@ -78,7 +78,11 @@ export function parseDataset(raw: unknown): BenchQuestion[] {
       })),
       goldSessionIds: q.answer_session_ids,
       answer:
-        typeof q.answer === 'string' && q.answer.length > 0 ? q.answer : null,
+        typeof q.answer === 'string' && q.answer.length > 0
+          ? q.answer
+          : typeof q.answer === 'number'
+            ? String(q.answer)
+            : null,
       isAbstention: q.question_id.endsWith('_abs'),
     };
   });

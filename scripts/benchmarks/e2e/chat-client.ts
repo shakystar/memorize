@@ -1,5 +1,6 @@
 // scripts/benchmarks/e2e/chat-client.ts
 import spawn from 'cross-spawn';
+import { killExtractorTree, type CliExtractorChild } from '../../../src/services/consolidate-service.js';
 
 export interface Chat {
   chat(prompt: string): Promise<string>;
@@ -14,6 +15,7 @@ export interface HttpChatConfig {
   apiKey?: string;
   timeoutMs?: number;
   fetchImpl?: typeof fetch;
+  num_ctx?: number;
 }
 
 export class HttpChat implements Chat {
@@ -36,6 +38,7 @@ export class HttpChat implements Chat {
           model: this.config.model,
           temperature: 0,
           messages: [{ role: 'user', content: prompt }],
+          ...(this.config.num_ctx !== undefined ? { options: { num_ctx: this.config.num_ctx } } : {}),
         }),
         signal: AbortSignal.timeout(this.config.timeoutMs ?? HTTP_TIMEOUT_MS),
       },
@@ -66,6 +69,7 @@ export class CliChat implements Chat {
     private readonly command: CliCommand,
     private readonly timeoutMs: number = CLI_TIMEOUT_MS,
     private readonly spawnImpl: typeof spawn = spawn,
+    private readonly killImpl: (child: CliExtractorChild) => void = killExtractorTree,
   ) {}
 
   chat(prompt: string): Promise<string> {
@@ -81,7 +85,7 @@ export class CliChat implements Chat {
       let timedOut = false;
       const timer = setTimeout(() => {
         timedOut = true;
-        child.kill();
+        this.killImpl(child as unknown as CliExtractorChild);
       }, this.timeoutMs);
       child.stdout?.on('data', (chunk) => {
         stdout += String(chunk);
@@ -136,7 +140,13 @@ export function resolveChat(
       );
     }
     const apiKey = env[`${prefix}_API_KEY`];
-    return new HttpChat({ endpoint, model, ...(apiKey ? { apiKey } : {}) });
+    const numCtxRaw = env[`${prefix}_NUM_CTX`];
+    return new HttpChat({
+      endpoint,
+      model,
+      ...(apiKey ? { apiKey } : {}),
+      ...(numCtxRaw ? { num_ctx: Number(numCtxRaw) } : {}),
+    });
   }
   throw new Error(`${prefix}_BACKEND must be 'http' or 'cli'`);
 }
