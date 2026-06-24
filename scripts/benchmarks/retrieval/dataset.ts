@@ -48,8 +48,8 @@ export function parseDataset(raw: unknown): BenchQuestion[] {
     const ids = q.haystack_session_ids;
     const sessions = q.haystack_sessions;
     if (
-      !q.question_id ||
-      !q.question ||
+      q.question_id == null ||
+      q.question == null ||
       !Array.isArray(ids) ||
       !Array.isArray(sessions) ||
       !Array.isArray(q.answer_session_ids)
