@@ -47,6 +47,9 @@ jobs:
       - run: pnpm typecheck
       - run: pnpm lint
 
+  # Node is pinned to 22 (no Node 20). better-sqlite3/SQLite and
+  # package.json `engines.node` ">=22" require Node 22+; #14's Node-20 matrix
+  # entry was intentionally dropped for this reason.
   test:
     strategy:
       fail-fast: false
@@ -66,9 +69,16 @@ jobs:
       - run: pnpm test:integration
       - run: pnpm test:golden
 
+  # Also run on Windows so the Windows-sensitive build steps — pnpm build
+  # (write-cli-shebang) and pnpm pack:check (tarball packing) — are exercised
+  # there too, not just on ubuntu.
   build:
     needs: lint-typecheck
-    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
@@ -79,7 +89,10 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm build
       - run: pnpm pack:check
-      - uses: actions/upload-artifact@v4
+      # One copy of the build output suffices; upload only from ubuntu to avoid
+      # a duplicate-artifact-name collision across matrix legs.
+      - if: matrix.os == 'ubuntu-latest'
+        uses: actions/upload-artifact@v4
         with:
           name: dist
           path: dist/
