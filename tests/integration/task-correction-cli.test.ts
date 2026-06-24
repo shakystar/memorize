@@ -1,4 +1,4 @@
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp, realpath, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
@@ -40,7 +40,9 @@ async function seedTask(): Promise<{ projectId: string; taskId: string }> {
 }
 
 beforeEach(async () => {
-  sandbox = await mkdtemp(join(tmpdir(), 'memorize-task-correction-'));
+  // macOS os.tmpdir() is a symlink (/var -> /private/var); canonicalize so the
+  // path we bind in-process matches the realpath the spawned CLI sees as cwd.
+  sandbox = await realpath(await mkdtemp(join(tmpdir(), 'memorize-task-correction-')));
   memorizeRoot = join(sandbox, '.memorize-home');
   process.env.MEMORIZE_ROOT = memorizeRoot;
 });

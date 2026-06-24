@@ -1,4 +1,4 @@
-import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, mkdir, realpath, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
@@ -28,7 +28,9 @@ function runCli(args: string[], input?: string) {
 }
 
 beforeEach(async () => {
-  sandbox = await mkdtemp(join(tmpdir(), 'memorize-conflict-memlist-'));
+  // macOS os.tmpdir() is a symlink (/var -> /private/var); canonicalize so the
+  // path we bind in-process matches the realpath the spawned CLI sees as cwd.
+  sandbox = await realpath(await mkdtemp(join(tmpdir(), 'memorize-conflict-memlist-')));
   memorizeRoot = join(sandbox, '.memorize-home');
   process.env.MEMORIZE_ROOT = memorizeRoot;
   delete process.env.MEMORIZE_LLM_API_KEY;
