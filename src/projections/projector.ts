@@ -299,7 +299,7 @@ export function reduceProjectState(events: DomainEvent[]): ProjectState {
         .filter((workstream) => workstream.status !== 'closed')
         .map((workstream) => workstream.id),
       activeTaskIds: Object.values(state.tasks)
-        .filter((task) => task.status !== 'done')
+        .filter((task) => task.status !== 'done' && task.status !== 'cancelled')
         .map((task) => task.id),
       acceptedDecisionIds: Object.values(state.decisions)
         .filter((decision) => decision.status === 'accepted')
@@ -350,7 +350,7 @@ export function buildMemoryIndex(state: ProjectState): MemoryIndex {
         status: workstream.status,
       })),
     topTasks: Object.values(state.tasks)
-      .filter((task) => task.status !== 'done')
+      .filter((task) => task.status !== 'done' && task.status !== 'cancelled')
       .sort(byUpdatedAtDesc)
       .slice(0, MAX_TOP_TASKS)
       .map((task) => ({

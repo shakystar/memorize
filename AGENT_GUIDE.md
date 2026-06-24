@@ -312,6 +312,23 @@ outside the project tree.
   configured), contradiction-checked against existing decisions, and
   ranked for injection exactly like consolidated ones.
 
+### `memorize memory list [--json] [--limit <N>]`
+
+#148 — whole-store observation. Lists the project's **currently valid**
+memories (those whose validity window is still open; superseded ones are
+excluded, which is the correct default). Pure read of the derived
+projection — it appends and mutates nothing. Scope is the cwd-bound
+project.
+
+- Default (human) form: one tab-separated line per memory —
+  `id\tkind\tsalience\t<snippet>` where the snippet is the first ~80
+  characters of the memory text on a single line.
+- `--json` (boolean) — emit the raw rows (memory + access metadata) as a
+  JSON array instead of the human-readable lines.
+- `--limit <N>` (single) — cap the output at N rows (positive integer).
+  Rows are ordered salience-desc, then newest-first, so the cap keeps the
+  most important memories.
+
 ### `memorize memory show <memoryId> [--json]`
 
 #111 — prints a recalled memory's **full** text plus metadata. `search`
@@ -503,6 +520,37 @@ task status to `handoff_ready`.
 | `--warning <text>` | multi | Item added to `warnings` |
 | `--question <text>` | multi | Item added to `unresolvedQuestions` |
 
+### `memorize task update [<taskId>] [--title <text>] [--note <text>]`
+
+#148 — append-only correction of a task's title and/or note. Calls the
+existing `updateTask`, which **appends** a `task.updated` event and
+rebuilds the projection; the original `task.created` event and every
+prior update stay in the log untouched (the events log is the immutable
+source of truth — nothing is mutated or deleted). Status changes are not
+permitted here; status has its own verbs (`start` / `handoff` / `done` /
+`cancel`).
+
+- `<taskId>` (positional) or `--task <taskId>` (single) — the target;
+  falls back to the session's claimed task, then the active task, the
+  same way `task done` resolves.
+- `--title <text>` (single) — set the task title.
+- `--note <text>` (single) — set the task description.
+- At least one of `--title` / `--note` is required, else it errors.
+
+### `memorize task cancel [<taskId>]`
+
+#148 — drives a task to the terminal `cancelled` state by **appending** a
+`task.updated` event (a correction, NOT a delete). The cancelled task
+drops out of `activeTaskIds` and startup context because it is terminal,
+but its full history remains in the immutable event log. Resolves the
+target the same way `task update` / `task done` do. Cancelling an already
+`done` task fails with an invalid-transition error (`done` is terminal
+success).
+
+| Flag | Shape | Purpose |
+|---|---|---|
+| `--task <taskId>` | single | Overrides the auto-selected task |
+
 ### `memorize task done [--task <taskId>]`
 
 #118 — drives a task to the terminal `done` state. Resolves the target
@@ -674,12 +722,20 @@ directly. See `src/services/hook-service.ts` for the stdin contract.
 
 Lists all open conflicts for the bound project as JSON.
 
+### `memorize conflict list`
+
+#148 — prints the project's open conflicts as JSON. Bare `memorize
+conflict` (no args) does the same. Any other first argument is rejected
+with `Unknown conflict subcommand: <x>` rather than silently falling
+through to the list (so a typo like `conflict resovle` errors instead of
+printing the list).
+
 ### `memorize conflict resolve <id> [--summary <text>]`
 
 Marks an open conflict resolved, appending a `conflict.resolved` event.
-`<id>` (positional, required) is a conflict id from `conflict list`;
-`--summary <text>` (single) records how it was resolved. Resolving a
-conflict that does not exist fails.
+`<id>` (positional, required) is a conflict id from `memorize conflict
+list`; `--summary <text>` (single) records how it was resolved. Resolving
+a conflict that does not exist fails.
 
 ### `memorize search "<query>" [--limit N] [--lexical] [--json]`
 

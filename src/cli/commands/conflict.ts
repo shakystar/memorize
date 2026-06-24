@@ -26,6 +26,17 @@ export async function runConflictCommand(
     return;
   }
 
-  const payload = await loadStartContext({ projectId });
-  console.log(JSON.stringify(payload.openConflicts, null, 2));
+  // Bare `conflict` and explicit `conflict list` both print the open-conflict
+  // list. Any OTHER first arg is a typo/unknown verb — reject it instead of
+  // silently falling through to the list (e.g. `conflict resovle`).
+  if (args.length === 0 || args[0] === 'list') {
+    const payload = await loadStartContext({ projectId });
+    console.log(JSON.stringify(payload.openConflicts, null, 2));
+    return;
+  }
+
+  throw new Error(
+    `Unknown conflict subcommand: ${args[0]}. ` +
+      'Usage: memorize conflict list | conflict resolve <id> [--summary <text>]',
+  );
 }

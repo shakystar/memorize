@@ -7,6 +7,7 @@ import { requireBoundProjectId } from '../../services/project-service.js';
 import {
   getMemory,
   getSession,
+  listValidMemories,
   type ValidMemoryRow,
 } from '../../services/projection-store.js';
 import type { CliContext } from '../context.js';
@@ -18,7 +19,9 @@ const IMPORT_USAGE =
 
 const SHOW_USAGE = 'Usage: memorize memory show <memoryId> [--json]';
 
-const USAGE = `${IMPORT_USAGE}\n${SHOW_USAGE}`;
+const LIST_USAGE = 'Usage: memorize memory list [--json] [--limit <N>]';
+
+const USAGE = `${IMPORT_USAGE}\n${SHOW_USAGE}\n${LIST_USAGE}`;
 
 async function readStdin(): Promise<string | undefined> {
   if (process.stdin.isTTY) {
@@ -51,7 +54,49 @@ export async function runMemoryCommand(
     await runMemoryShow(args.slice(1), ctx);
     return;
   }
+  if (subcommand === 'list') {
+    await runMemoryList(args.slice(1), ctx);
+    return;
+  }
   throw new Error(USAGE);
+}
+
+/**
+ * `memorize memory list [--json] [--limit <N>]` — whole-store observation.
+ * Lists the memories whose validity window is still open (superseded ones are
+ * excluded — that is the correct default). Pure read of the derived
+ * projection; appends nothing, mutates nothing.
+ */
+async function runMemoryList(args: string[], ctx: CliContext): Promise<void> {
+  const flags = parseFlags(args, { single: ['limit'], boolean: ['json'] });
+
+  let limit: number | undefined;
+  if (flags.single.limit !== undefined) {
+    limit = Number(flags.single.limit);
+    if (!Number.isInteger(limit) || limit <= 0) {
+      throw new Error('--limit must be a positive integer.');
+    }
+  }
+
+  const projectId = await requireBoundProjectId(ctx.cwd);
+  const rows = listValidMemories(projectId).sort((a, b) => {
+    if (b.memory.salience !== a.memory.salience) {
+      return b.memory.salience - a.memory.salience;
+    }
+    return a.memory.createdAt < b.memory.createdAt ? 1 : -1;
+  });
+  const capped = limit !== undefined ? rows.slice(0, limit) : rows;
+
+  if (flags.boolean.json) {
+    console.log(JSON.stringify(capped, null, 2));
+    return;
+  }
+
+  for (const row of capped) {
+    const { memory } = row;
+    const snippet = memory.text.replace(/\s+/g, ' ').trim().slice(0, 80);
+    console.log(`${memory.id}\t${memory.kind}\t${memory.salience}\t${snippet}`);
+  }
 }
 
 async function runMemoryImport(
