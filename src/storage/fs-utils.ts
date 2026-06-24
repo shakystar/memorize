@@ -7,6 +7,12 @@ export function isEnoent(error: unknown): boolean {
   return (error as NodeJS.ErrnoException | undefined)?.code === 'ENOENT';
 }
 
+/** Strip a leading UTF-8 BOM (0xFEFF). Windows editors and PowerShell 5.1
+ * (Out-File -Encoding utf8, Set-Content) prepend one; memorize never writes it. */
+export function stripBom(s: string): string {
+  return s.charCodeAt(0) === 0xfeff ? s.slice(1) : s;
+}
+
 export async function ensureDir(targetPath: string): Promise<void> {
   await fs.mkdir(targetPath, { recursive: true });
 }
@@ -90,7 +96,7 @@ export async function readJson<T>(filePath: string): Promise<T | undefined> {
     const raw = await fs.readFile(filePath, 'utf8');
     // Tolerate a leading UTF-8 BOM: Windows editors and PowerShell 5.1
     // (ConvertTo-Json | Out-File) prepend one; memorize itself never writes it.
-    return JSON.parse(raw.charCodeAt(0) === 0xfeff ? raw.slice(1) : raw) as T;
+    return JSON.parse(stripBom(raw)) as T;
   } catch (error) {
     if (isEnoent(error)) {
       return undefined;

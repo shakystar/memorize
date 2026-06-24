@@ -818,4 +818,39 @@ describe('install integration', () => {
       expect(memorizeCmds[0]).toMatch(new RegExp(`hook claude ${event}$`));
     }
   });
+
+  it('doctor tolerates a UTF-8 BOM in .claude/settings.local.json (#102 follow-up)', async () => {
+    runCli(['install', 'claude']);
+
+    // Re-save the valid settings with a leading UTF-8 BOM, the way Windows
+    // editors / PowerShell 5.1 (Out-File -Encoding utf8, Set-Content) do.
+    const settingsPath = join(sandbox, '.claude', 'settings.local.json');
+    const content = await readFile(settingsPath, 'utf8');
+    await writeFile(settingsPath, '\uFEFF' + content, 'utf8');
+
+    const result = runCli(['doctor', '--json']);
+    const report = JSON.parse(String(result.stdout)) as {
+      checks: Array<{ id: string; status: string; message: string }>;
+    };
+    const claudeCheck = report.checks.find((c) => c.id === 'install.claude');
+    // A BOM must NOT trip the "not valid JSON" false-negative; the check
+    // proceeds to its normal ok/probe path (all 4 hooks present → ok).
+    expect(claudeCheck === undefined || claudeCheck.status === 'ok').toBe(true);
+    expect(claudeCheck?.message ?? '').not.toContain('not valid JSON');
+  });
+
+  it('doctor tolerates a UTF-8 BOM in ~/.codex/hooks.json (#102 follow-up)', async () => {
+    runCli(['install', 'codex']);
+
+    const hooksPath = join(codexHome, '.codex', 'hooks.json');
+    const content = await readFile(hooksPath, 'utf8');
+    await writeFile(hooksPath, '\uFEFF' + content, 'utf8');
+
+    const result = runCli(['doctor', '--json']);
+    const report = JSON.parse(String(result.stdout)) as {
+      checks: Array<{ id: string; status: string; message: string }>;
+    };
+    const codexCheck = report.checks.find((c) => c.id === 'install.codex');
+    expect(codexCheck?.message ?? '').not.toContain('not valid JSON');
+  });
 });

@@ -6,7 +6,7 @@ import { spawnSync } from 'node:child_process';
 
 import { getDb } from '../storage/db.js';
 import { readEventsWithIntegrity } from '../storage/event-store.js';
-import { isEnoent } from '../storage/fs-utils.js';
+import { isEnoent, stripBom } from '../storage/fs-utils.js';
 import { getProjectRoot } from '../storage/path-resolver.js';
 import {
   CLAUDE_HOOK_EVENTS,
@@ -119,7 +119,7 @@ async function checkClaudeInstall(
     >;
   };
   try {
-    settings = JSON.parse(raw);
+    settings = JSON.parse(stripBom(raw));
   } catch {
     return {
       id: 'install.claude',
@@ -289,7 +289,7 @@ async function checkCodexInstall(
     >;
   };
   try {
-    parsed = JSON.parse(raw);
+    parsed = JSON.parse(stripBom(raw));
   } catch {
     return {
       id: 'install.codex',
