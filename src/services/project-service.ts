@@ -20,6 +20,7 @@ import {
   getDecision,
   getProjectProjection,
   getWorkstream,
+  listDecisions,
   rebuildProjectProjection,
 } from './projection-store.js';
 import { ACTOR_SYSTEM } from '../domain/common.js';
@@ -247,6 +248,20 @@ export async function requireBoundProjectId(rootPath: string): Promise<string> {
 
 export async function readProject(projectId: string): Promise<Project | undefined> {
   return getProjectProjection(projectId);
+}
+
+export function readDecision(
+  projectId: string,
+  decisionId: string,
+): Decision | undefined {
+  return getDecision(projectId, decisionId);
+}
+
+export function readDecisions(
+  projectId: string,
+  opts: { includeSuperseded?: boolean } = {},
+): Decision[] {
+  return listDecisions(projectId, opts);
 }
 
 export async function readDefaultWorkstreamForProject(

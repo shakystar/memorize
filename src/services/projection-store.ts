@@ -554,6 +554,25 @@ export function getDecision(
   return parse<Decision>(row);
 }
 
+/**
+ * List a project's decisions, newest first. By default returns only the live
+ * (accepted) set — the same decisions `acceptedDecisionIds` carries; pass
+ * `includeSuperseded` to also surface the preserved superseded ones. Pure
+ * read of the projection, mirroring `listOpenConflicts`.
+ */
+export function listDecisions(
+  projectId: string,
+  opts: { includeSuperseded?: boolean } = {},
+): Decision[] {
+  const where = opts.includeSuperseded ? '' : " WHERE status = 'accepted'";
+  const rows = db(projectId)
+    .prepare(`SELECT data FROM decisions${where}`)
+    .all() as Array<{ data: string }>;
+  return parseAll<Decision>(rows).sort((a, b) =>
+    a.createdAt < b.createdAt ? 1 : -1,
+  );
+}
+
 export function getConflict(
   projectId: string,
   conflictId: string,

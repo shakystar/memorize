@@ -435,6 +435,30 @@ Pulls existing events on clone; if the source has not pushed yet it binds
 and tells you to run `project sync --pull` once it has. Same experimental
 caveats as `project sync`.
 
+### `memorize project decision list [--all] [--json]`
+
+Lists the project's decisions, newest first. By default it shows only the live
+(accepted) set — the same decisions startup context carries. Pass `--all` to
+also include superseded ones (preserved by design, never deleted). Read-only:
+a pure projection read that writes no events. Human output is tab-separated
+(`id\tstatus\ttitle`); `--json` emits the raw decision array.
+
+| Flag | Shape | Purpose |
+|---|---|---|
+| `--all` | boolean | Include superseded decisions, not just the accepted set |
+| `--json` | boolean | Emit the raw decision array instead of tab-separated lines |
+
+### `memorize project decision show <id> [--json]`
+
+Prints a single decision in full (title, decision, rationale, status, plus
+`supersededBy` when it was replaced). Read-only. Fails with a clear error if
+the id is unknown.
+
+| Flag | Shape | Purpose |
+|---|---|---|
+| `<id>` | positional, required | The decision to print |
+| `--json` | boolean | Emit the raw decision object instead of formatted text |
+
 ### `memorize project decision add --title <text> --decision <text> [--rationale <text>]`
 
 Records an explicit project decision as a first-class event. The decision
