@@ -7,6 +7,7 @@ import {
   type FileConflictWarning,
   type LiveUpdate,
   type Observation,
+  type SiblingGitOpWarning,
   type SiblingMemoryItem,
   type SiblingObservationItem,
   createConflict,
@@ -20,6 +21,7 @@ import {
   listRecentObservations,
   rebuildProjectProjection,
 } from './projection-store.js';
+import { DESTRUCTIVE_GIT_PATTERN } from './capture-service.js';
 import { resolveSessionContext } from './session-context.js';
 
 /**
@@ -58,6 +60,12 @@ export const SELF_FILE_TOUCH_MAX_AGE_HOURS = 2;
  *  is very stale (idle while siblings churned) jumps straight to head rather
  *  than scanning thousands of events on a hot path. */
 export const MAX_DELTA_SCAN = 200;
+
+/** Max sibling git-op collision warnings surfaced per delivery. */
+export const MAX_LIVE_GIT_WARNINGS = 3;
+/** A sibling destructive-git op older than this many minutes is no longer an
+ *  active concurrency hazard and is not warned about. */
+export const GIT_OP_COLLISION_WINDOW_MINUTES = 10;
 
 /** Opt-in: promote detected live file collisions to `conflict.detected`
  *  events (persisted, surfaced at every startup). Off by default so dogfood
@@ -187,6 +195,25 @@ function siblingActor(
   }
 }
 
+/** True if this session ran a destructive-shared-git op within the window. */
+function hasRecentSelfGitOp(
+  projectId: string,
+  selfSessionId: string,
+  windowStartIso: string,
+): boolean {
+  const observations = listRecentObservations(projectId, {
+    sessionId: selfSessionId,
+    limit: SELF_FILE_TOUCH_LIMIT,
+    sinceIso: windowStartIso,
+  });
+  return observations.some(
+    (obs) =>
+      obs.signal === 'mutating-bash' &&
+      !!obs.summary &&
+      DESTRUCTIVE_GIT_PATTERN.test(obs.summary),
+  );
+}
+
 /** Normalized recent file paths this session touched (collision input). */
 function recentSelfFilePaths(
   projectId: string,
@@ -227,11 +254,14 @@ export async function buildLiveUpdate(params: {
   sinceEventId: string | undefined;
   selfRecentFilePaths: ReadonlySet<string>;
   cwd: string;
+  selfRecentGitOp: boolean;
+  gitOpWindowStartIso: string;
 }): Promise<LiveUpdate> {
   const empty: LiveUpdate = {
     observations: [],
     memories: [],
     conflicts: [],
+    gitOpWarnings: [],
     newWatermarkEventId: params.sinceEventId,
     hasContent: false,
   };
@@ -307,6 +337,33 @@ export async function buildLiveUpdate(params: {
     });
   }
 
+  // Git-collision detection: a sibling destructive-git op while THIS session is
+  // also doing destructive-git work — the shared-.git race. Gated on
+  // selfRecentGitOp so sessions not touching git get zero noise; the shared
+  // `.git`/`.worktrees` is one resource, so this is presence-in-window, not
+  // path equality. One warning per sibling session.
+  const gitOpWarnings: SiblingGitOpWarning[] = [];
+  if (params.selfRecentGitOp) {
+    const seenGitSessions = new Set<string>();
+    for (const event of scanned) {
+      if (event.type !== 'observation.captured') continue;
+      const obs = event.payload as Observation;
+      if (obs.sessionId === params.selfSessionId) continue;
+      if (obs.signal !== 'mutating-bash') continue;
+      if (!obs.summary || !DESTRUCTIVE_GIT_PATTERN.test(obs.summary)) continue;
+      if (obs.createdAt < params.gitOpWindowStartIso) continue;
+      const sid = obs.sessionId ?? '(unknown)';
+      if (seenGitSessions.has(sid)) continue;
+      seenGitSessions.add(sid);
+      gitOpWarnings.push({
+        command: obs.summary,
+        siblingSessionId: sid,
+        siblingActor: siblingActor(params.projectId, obs.sessionId, event.actor),
+      });
+    }
+  }
+  const cappedGitOpWarnings = gitOpWarnings.slice(0, MAX_LIVE_GIT_WARNINGS);
+
   // Rank + cap. Conflicts are highest signal; memories by salience; raw
   // observations newest first. The char budget is applied later at render.
   observations.sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1));
@@ -316,13 +373,17 @@ export async function buildLiveUpdate(params: {
   const cappedMemories = memories.slice(0, MAX_LIVE_MEMORIES);
   const cappedConflicts = conflicts.slice(0, MAX_LIVE_CONFLICTS);
   const hasContent =
-    cappedObservations.length + cappedMemories.length + cappedConflicts.length >
+    cappedObservations.length +
+      cappedMemories.length +
+      cappedConflicts.length +
+      cappedGitOpWarnings.length >
     0;
 
   return {
     observations: cappedObservations,
     memories: cappedMemories,
     conflicts: cappedConflicts,
+    gitOpWarnings: cappedGitOpWarnings,
     newWatermarkEventId: fullWindowLastId,
     hasContent,
   };
@@ -420,12 +481,23 @@ export async function composeLiveUpdate(params: {
     nowMs,
   );
 
+  const gitOpWindowStartIso = new Date(
+    nowMs - GIT_OP_COLLISION_WINDOW_MINUTES * 60 * 1000,
+  ).toISOString();
+  const selfRecentGitOp = hasRecentSelfGitOp(
+    params.projectId,
+    selfSessionId,
+    gitOpWindowStartIso,
+  );
+
   const update = await buildLiveUpdate({
     projectId: params.projectId,
     selfSessionId,
     sinceEventId,
     selfRecentFilePaths,
     cwd: params.cwd,
+    selfRecentGitOp,
+    gitOpWindowStartIso,
   });
 
   // Advance the watermark over the entire scanned window (even when capped or

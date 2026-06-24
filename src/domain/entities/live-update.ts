@@ -36,10 +36,18 @@ export interface FileConflictWarning {
   siblingSummary?: string;
 }
 
+export interface SiblingGitOpWarning {
+  /** The sibling's clipped destructive-git command (untrusted — rendered wrapped). */
+  command: string;
+  siblingSessionId: string;
+  siblingActor: string;
+}
+
 export interface LiveUpdate {
   observations: SiblingObservationItem[];
   memories: SiblingMemoryItem[];
   conflicts: FileConflictWarning[];
+  gitOpWarnings: SiblingGitOpWarning[];
   /** Highest event id covered by this delta — becomes the new watermark AFTER
    *  delivery (advances over the whole scanned window, including capped/dropped
    *  items, so nothing is ever re-read → no duplicate injection). */
