@@ -1,5 +1,5 @@
 // tests/unit/benchmark-e2e-judge.test.ts
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import { judge } from '../../scripts/benchmarks/e2e/judge.js';
 import type { Chat } from '../../scripts/benchmarks/e2e/chat-client.js';
@@ -17,6 +17,16 @@ describe('benchmark/e2e judge', () => {
     expect(await judge(fixedChat('garbled'), {
       question: 'q', gold: 'Max', answer: 'Rex', isAbstention: false,
     })).toBe(false);
+  });
+
+  it('emits a stderr WARN for an unparseable verdict', async () => {
+    const warnSpy = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
+    const correct = await judge(fixedChat('garbled'), {
+      question: 'q', gold: 'Max', answer: 'Rex', isAbstention: false,
+    });
+    expect(correct).toBe(false);
+    expect(warnSpy).toHaveBeenCalledWith(expect.stringMatching(/WARN.*unparseable/i));
+    warnSpy.mockRestore();
   });
 
   it('includes the abstention criterion in the prompt for _abs questions', async () => {
