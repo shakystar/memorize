@@ -37,6 +37,8 @@ const Q: BenchQuestion = {
     { sessionId: 's2', text: 'user: My favorite coffee is a flat white.' },
   ],
   goldSessionIds: ['s1'],
+  answer: 'Max',
+  isAbstention: false,
 };
 
 describe('benchmark/retrieval seed', () => {

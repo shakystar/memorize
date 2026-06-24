@@ -26,4 +26,42 @@ describe('benchmark/retrieval dataset', () => {
   it('parseDataset throws a descriptive error on a missing field', () => {
     expect(() => parseDataset([{ question_id: 'x' }])).toThrow(/answer_session_ids|haystack/);
   });
+
+  it('captures the gold answer and abstention flag', () => {
+    const qs = loadDataset(MINI);
+    const q1 = qs[0]!;
+    expect(q1.answer).toBe('Max'); // mini fixture q1 answer
+    expect(q1.isAbstention).toBe(false);
+  });
+
+  it('flags abstention by _abs question id and coerces a numeric answer to string', () => {
+    const parsed = parseDataset([
+      {
+        question_id: 'q_abs',
+        question_type: 'single-session-user',
+        question: 'unanswerable?',
+        haystack_session_ids: ['s0'],
+        haystack_sessions: [[{ role: 'user', content: 'hi' }]],
+        answer_session_ids: [],
+        answer: 42,
+      },
+    ]);
+    expect(parsed[0]!.isAbstention).toBe(true);
+    expect(parsed[0]!.answer).toBe('42');
+  });
+
+  it('nulls an answer that is neither string nor number', () => {
+    const parsed = parseDataset([
+      {
+        question_id: 'q1',
+        question_type: 'single-session-user',
+        question: 'something?',
+        haystack_session_ids: ['s0'],
+        haystack_sessions: [[{ role: 'user', content: 'hi' }]],
+        answer_session_ids: [],
+        answer: null,
+      },
+    ]);
+    expect(parsed[0]!.answer).toBeNull();
+  });
 });
