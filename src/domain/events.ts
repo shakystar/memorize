@@ -4,6 +4,7 @@ import type {
   Conflict,
   ConsolidatedMemory,
   Decision,
+  DecisionSupersededPayload,
   Handoff,
   MemorySupersededPayload,
   Observation,
@@ -26,6 +27,7 @@ export type DomainEventType =
   | 'checkpoint.created'
   | 'decision.proposed'
   | 'decision.accepted'
+  | 'decision.superseded'
   | 'rule.upserted'
   | 'conflict.detected'
   | 'conflict.resolved'
@@ -63,6 +65,7 @@ export type DomainEventPayload =
   | Handoff
   | Checkpoint
   | Decision
+  | DecisionSupersededPayload
   | Rule
   | Conflict
   | Session

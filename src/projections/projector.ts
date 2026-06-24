@@ -5,6 +5,7 @@ import type {
   Conflict,
   ConsolidatedMemory,
   Decision,
+  DecisionSupersededPayload,
   Handoff,
   MemoryIndex,
   MemorySupersededPayload,
@@ -179,6 +180,22 @@ export function reduceProjectState(events: DomainEvent[]): ProjectState {
       case 'decision.proposed':
       case 'decision.accepted':
         state.decisions[event.scopeId] = event.payload as Decision;
+        break;
+      case 'decision.superseded':
+        {
+          // Invalidate-not-delete (mirror memory.superseded): mark the old
+          // decision superseded so acceptedDecisionIds drops it, but keep the
+          // entry so point-in-time replays still see what was decided then.
+          // The new (superseding) decision enters via its own decision.accepted.
+          const payload = event.payload as DecisionSupersededPayload;
+          const existing = state.decisions[payload.supersedes];
+          if (!existing) break;
+          state.decisions[payload.supersedes] = {
+            ...existing,
+            status: 'superseded',
+            supersededBy: payload.supersededBy,
+          };
+        }
         break;
       case 'rule.upserted':
         state.rules[(event.payload as Rule).id] = event.payload as Rule;

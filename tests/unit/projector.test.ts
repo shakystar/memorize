@@ -169,6 +169,35 @@ describe('projector', () => {
     ]);
   });
 
+  it('decision.superseded marks the old decision superseded and keeps the new one accepted', () => {
+    const state = reduceProjectState([
+      projectCreated(),
+      decisionEvent('dec_old', 'accepted', '2026-04-12T00:00:00.000Z'),
+      decisionEvent('dec_new', 'accepted', '2026-04-15T00:00:00.000Z'),
+      makeEvent({
+        id: 'evt_supersede',
+        type: 'decision.superseded',
+        scopeType: 'project',
+        scopeId: 'dec_old',
+        createdAt: '2026-04-16T00:00:00.000Z',
+        payload: {
+          supersedes: 'dec_old',
+          supersededBy: 'dec_new',
+          reason: 'replaced',
+        },
+      }),
+    ]);
+
+    expect(state.decisions['dec_old']?.status).toBe('superseded');
+    expect(state.decisions['dec_old']?.supersededBy).toBe('dec_new');
+    // Original row preserved (point-in-time replays still see it).
+    expect(state.decisions['dec_old']).toBeDefined();
+    // New decision stays accepted.
+    expect(state.decisions['dec_new']?.status).toBe('accepted');
+    // Projection drops the superseded one, keeps the new one.
+    expect(state.project?.acceptedDecisionIds).toEqual(['dec_new']);
+  });
+
   it('reduces session.started events into the sessions map', () => {
     const state = reduceProjectState([
       projectCreated(),

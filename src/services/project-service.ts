@@ -17,6 +17,7 @@ import {
 import type { BindingMatch } from '../storage/bindings-store.js';
 import { isEnoent, readJson, writeJson } from '../storage/fs-utils.js';
 import {
+  getDecision,
   getProjectProjection,
   getWorkstream,
   rebuildProjectProjection,
@@ -30,10 +31,12 @@ import {
 } from '../domain/entities.js';
 import type {
   Decision,
+  DecisionSupersededPayload,
   Project,
   ProjectSyncState,
   Workstream,
 } from '../domain/entities.js';
+import type { DomainEventPayload } from '../domain/events.js';
 import { getProjectsRoot, getSyncFile } from '../storage/path-resolver.js';
 
 export async function createProject(input: CreateProjectInput): Promise<Project> {
@@ -125,6 +128,82 @@ export async function recordDecision(input: {
   ]);
   await rebuildProjectProjection(input.projectId);
   return accepted;
+}
+
+/**
+ * Correct/replace a recorded decision by superseding it — append-only,
+ * mirroring `memory.superseded`. We record the replacement as a brand-new
+ * decision (`decision.proposed` + `decision.accepted`) and append a
+ * `decision.superseded` marker that closes out the old one; the original
+ * decision row is preserved (the projector flips its status to `superseded`
+ * and stamps `supersededBy`), so point-in-time replays still see what was
+ * decided then and `acceptedDecisionIds` automatically drops it.
+ */
+export async function supersedeDecision(input: {
+  projectId: string;
+  supersedesId: string;
+  title: string;
+  decision: string;
+  rationale?: string;
+  reason?: string;
+  actor?: string;
+}): Promise<{ decision: Decision; supersededId: string }> {
+  const actor = input.actor ?? ACTOR_SYSTEM;
+  const existing = getDecision(input.projectId, input.supersedesId);
+  if (!existing) {
+    throw new Error(
+      `Decision ${input.supersedesId} not found in project ${input.projectId}.`,
+    );
+  }
+  if (existing.status === 'superseded') {
+    throw new Error(
+      `Decision ${input.supersedesId} is already superseded (by ${existing.supersededBy ?? 'unknown'}).`,
+    );
+  }
+
+  const replacement = createDecisionEntity({
+    scopeType: 'project',
+    scopeId: input.projectId,
+    title: input.title,
+    decision: input.decision,
+    rationale: input.rationale ?? '',
+    createdBy: actor,
+  });
+  const accepted: Decision = { ...replacement, status: 'accepted' };
+
+  const supersededPayload: DecisionSupersededPayload = {
+    supersedes: input.supersedesId,
+    supersededBy: replacement.id,
+    ...(input.reason ? { reason: input.reason } : {}),
+  };
+  await appendEvents<DomainEventPayload>(input.projectId, [
+    {
+      type: 'decision.proposed',
+      projectId: input.projectId,
+      scopeType: 'project',
+      scopeId: replacement.id,
+      actor,
+      payload: replacement,
+    },
+    {
+      type: 'decision.accepted',
+      projectId: input.projectId,
+      scopeType: 'project',
+      scopeId: replacement.id,
+      actor,
+      payload: accepted,
+    },
+    {
+      type: 'decision.superseded',
+      projectId: input.projectId,
+      scopeType: 'project',
+      scopeId: input.supersedesId,
+      actor,
+      payload: supersededPayload,
+    },
+  ]);
+  await rebuildProjectProjection(input.projectId);
+  return { decision: accepted, supersededId: input.supersedesId };
 }
 
 export async function getBoundProjectId(

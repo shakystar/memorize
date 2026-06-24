@@ -447,6 +447,25 @@ decisions exactly like a consolidated decision memory.
 | `--decision <text>` | single, required | The decision itself |
 | `--rationale <text>` | single | Why it was made — recommended; feeds contradiction detection |
 
+### `memorize project decision supersede <oldDecisionId> --title <text> --decision <text> [--rationale <text>] [--reason <text>]`
+
+Corrects/replaces a previously recorded decision — append-only, the way you
+fix a decision in an event-sourced log. It records the replacement as a
+brand-new accepted decision and appends a `decision.superseded` marker that
+closes out the old one: the original decision is preserved (its status flips
+to `superseded` and it gains `supersededBy`), so point-in-time replays still
+see what was decided then, while `acceptedDecisionIds` automatically drops it
+in favour of the replacement. Nothing is mutated or deleted. Fails if the
+decision id is unknown or already superseded.
+
+| Flag | Shape | Purpose |
+|---|---|---|
+| `<oldDecisionId>` | positional, required | The decision being superseded |
+| `--title <text>` | single, required | Short title of the replacement decision |
+| `--decision <text>` | single, required | The replacement decision itself |
+| `--rationale <text>` | single | Why the replacement was made |
+| `--reason <text>` | single | Why the old decision was superseded |
+
 ## Tasks & handoffs — the OPTIONAL explicit-coordination layer
 
 Everything above this point (memory capture, consolidation, retrieval,
