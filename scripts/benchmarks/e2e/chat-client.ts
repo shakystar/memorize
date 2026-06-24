@@ -46,7 +46,11 @@ export class HttpChat implements Chat {
     const body = (await response.json()) as {
       choices?: Array<{ message?: { content?: string } }>;
     };
-    return body.choices?.[0]?.message?.content ?? '';
+    const content = body.choices?.[0]?.message?.content;
+    if (content === undefined) {
+      throw new Error('chat response missing choices[0].message.content');
+    }
+    return content;
   }
 }
 

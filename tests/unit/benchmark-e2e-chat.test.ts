@@ -42,7 +42,7 @@ describe('benchmark/e2e chat-client', () => {
         stdin: { end: (d: string) => { stdinData = d; } },
         on: (e: string, cb: (arg?: unknown) => void) => {
           handlers[e] = cb;
-          if (e === 'close') cb(0);
+          if (e === 'close') Promise.resolve().then(() => cb(0));
         },
         kill: () => {},
       };
@@ -55,6 +55,13 @@ describe('benchmark/e2e chat-client', () => {
     expect(spawnArgs!.args).toEqual(['-p', '--output-format', 'text']);
     expect(spawnArgs!.env.MEMORIZE_SUPPRESS_HOOKS).toBe('1');
     expect(stdinData).toBe('PROMPT');
+  });
+
+  it('HttpChat throws when the response has no content (fail loud, not empty string)', async () => {
+    const fetchImpl = (async () => ({ ok: true, json: async () => ({ choices: [] }) })) as unknown as typeof fetch;
+    await expect(
+      new HttpChat({ endpoint: 'http://x/v1', model: 'm', fetchImpl }).chat('hi'),
+    ).rejects.toThrow(/missing choices/);
   });
 
   it('resolveChat defaults reader to http/Ollama and judge to cli/claude', () => {
