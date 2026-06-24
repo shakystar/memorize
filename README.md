@@ -117,10 +117,10 @@ Every other command lives in [AGENT_GUIDE.md](./AGENT_GUIDE.md), which your AI r
 Here is the honest state of what is verified so far. Every item is on the near-term roadmap.
 
 - **Confirmed at three-day scale.** Performance at months and hundreds of memories is not proven yet.
-- **Embedding-based search is not validated yet.**
+- **Embedding-based search is validated on the benchmark above, not yet in long-run production use.**
 - **Decision capture leans toward file writes and commands** (99.8% of signals). Catching explicit decision keywords is in progress.
 
-Benchmarks, embedding search, and decision capture are the next things we are building.
+Embedding search and decision capture are the next things we are building.
 
 ## For AI assistants
 
