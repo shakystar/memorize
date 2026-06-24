@@ -22,6 +22,7 @@ export function renderScaffoldUsage(): string {
     '  memorize task done ...       Mark a task complete (handoff_ready -> done)',
     '  memorize task cancel ...     Cancel a task (terminal, append-only)',
     '  memorize project decision add ...  Record a project decision',
+    '  memorize project decision supersede ...  Correct/replace a recorded decision (append-only)',
     '  memorize conflict list       List open conflicts (JSON)',
     '  memorize conflict resolve <id> ... Resolve an open conflict',
     '',

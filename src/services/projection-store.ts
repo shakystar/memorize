@@ -3,6 +3,7 @@ import type Database from 'better-sqlite3';
 import type {
   Checkpoint,
   Conflict,
+  Decision,
   Handoff,
   MemoryIndex,
   Observation,
@@ -541,6 +542,16 @@ export function listImportedRules(projectId: string): Rule[] {
     .prepare("SELECT data FROM rules WHERE source = 'imported'")
     .all() as Array<{ data: string }>;
   return parseAll<Rule>(rows);
+}
+
+export function getDecision(
+  projectId: string,
+  decisionId: string,
+): Decision | undefined {
+  const row = db(projectId)
+    .prepare('SELECT data FROM decisions WHERE id = ?')
+    .get(decisionId) as { data: string } | undefined;
+  return parse<Decision>(row);
 }
 
 export function getConflict(
