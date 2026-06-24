@@ -13,6 +13,8 @@ export interface BenchQuestion {
   questionType: string;
   sessions: BenchSession[];
   goldSessionIds: string[];
+  answer: string | null;
+  isAbstention: boolean;
 }
 
 export const DATASET_PATH = path.join(
@@ -31,6 +33,7 @@ interface RawQuestion {
   haystack_session_ids?: string[];
   haystack_sessions?: RawTurn[][];
   answer_session_ids?: string[];
+  answer?: unknown;
 }
 
 function flattenSession(turns: RawTurn[]): string {
@@ -74,6 +77,9 @@ export function parseDataset(raw: unknown): BenchQuestion[] {
         text: flattenSession(sessions[j] ?? []),
       })),
       goldSessionIds: q.answer_session_ids,
+      answer:
+        typeof q.answer === 'string' && q.answer.length > 0 ? q.answer : null,
+      isAbstention: q.question_id.endsWith('_abs'),
     };
   });
 }
