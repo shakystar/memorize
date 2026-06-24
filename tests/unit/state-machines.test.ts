@@ -27,6 +27,27 @@ describe('domain state machines', () => {
     ).toThrow(/invalid task status transition/i);
   });
 
+  it('allows cancelling a task from any non-terminal status', () => {
+    expect(() =>
+      assertTaskStatusTransition('todo', 'cancelled'),
+    ).not.toThrow();
+    expect(() =>
+      assertTaskStatusTransition('in_progress', 'cancelled'),
+    ).not.toThrow();
+    expect(() =>
+      assertTaskStatusTransition('blocked', 'cancelled'),
+    ).not.toThrow();
+    expect(() =>
+      assertTaskStatusTransition('handoff_ready', 'cancelled'),
+    ).not.toThrow();
+  });
+
+  it('rejects cancelling an already-done task (done is terminal success)', () => {
+    expect(() =>
+      assertTaskStatusTransition('done', 'cancelled'),
+    ).toThrow(/invalid task status transition/i);
+  });
+
   it('allows valid workstream transitions', () => {
     expect(() =>
       assertWorkstreamStatusTransition('active', 'paused'),

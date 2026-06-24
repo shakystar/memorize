@@ -8,11 +8,12 @@ import type {
 } from './entities.js';
 
 const taskTransitions: Record<TaskStatus, TaskStatus[]> = {
-  todo: ['in_progress', 'blocked'],
-  in_progress: ['handoff_ready', 'blocked'],
-  handoff_ready: ['in_progress', 'done'],
-  blocked: ['in_progress', 'handoff_ready'],
+  todo: ['in_progress', 'blocked', 'cancelled'],
+  in_progress: ['handoff_ready', 'blocked', 'cancelled'],
+  handoff_ready: ['in_progress', 'done', 'cancelled'],
+  blocked: ['in_progress', 'handoff_ready', 'cancelled'],
   done: [],
+  cancelled: [],
 };
 
 const workstreamTransitions: Record<WorkstreamStatus, WorkstreamStatus[]> = {

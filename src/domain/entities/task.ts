@@ -6,7 +6,8 @@ export type TaskStatus =
   | 'in_progress'
   | 'blocked'
   | 'handoff_ready'
-  | 'done';
+  | 'done'
+  | 'cancelled';
 
 export type Priority = 'low' | 'medium' | 'high';
 export type OwnerType = 'human' | 'agent' | 'unassigned';

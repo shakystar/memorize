@@ -248,6 +248,85 @@ async function runDoneTask(
   console.log(`Task ${resolvedTaskId} marked done`);
 }
 
+async function resolveTaskId(
+  flags: { single: { task?: string } },
+  ctx: CliContext,
+  projectId: string,
+  positional: string | undefined,
+): Promise<string | undefined> {
+  const sessionCtx = await resolveSessionContext(ctx.cwd, {
+    debugLabel: 'task-correction',
+  });
+  return (
+    positional?.trim() ||
+    flags.single.task?.trim() ||
+    sessionCtx.taskId ||
+    (await resolveActiveTaskId(projectId)) ||
+    undefined
+  );
+}
+
+/**
+ * `memorize task update` — append-only correction of a task's title/note.
+ * Calls updateTask, which APPENDS a `task.updated` event; the task.created
+ * event and every prior update stay in the log untouched. Status changes are
+ * NOT permitted here — status has its own verbs (start/handoff/done/cancel).
+ */
+async function runUpdateTask(
+  args: string[],
+  ctx: CliContext,
+  projectId: string,
+): Promise<void> {
+  const flags = parseFlags(args, { single: ['task', 'title', 'note'] });
+  const positional = flags.positional[0];
+  const resolvedTaskId = await resolveTaskId(flags, ctx, projectId, positional);
+  if (!resolvedTaskId) {
+    throw new Error(
+      'Update requires a taskId (pass it positionally or via --task, or ensure an active task exists).',
+    );
+  }
+  const patch: Partial<Task> = {};
+  if (flags.single.title !== undefined) patch.title = flags.single.title;
+  if (flags.single.note !== undefined) patch.description = flags.single.note;
+  if (Object.keys(patch).length === 0) {
+    throw new Error('task update requires at least one of --title or --note.');
+  }
+  const sessionCtx = await resolveSessionContext(ctx.cwd, {
+    debugLabel: 'task-update',
+  });
+  const actor = sessionCtx.actor ?? ACTOR_USER;
+  await updateTask(projectId, resolvedTaskId, patch, actor);
+  console.log(`Task ${resolvedTaskId} updated`);
+}
+
+/**
+ * `memorize task cancel` — terminal correction reached by APPENDING a
+ * `task.updated` event that sets status to `cancelled`. Nothing is deleted;
+ * the task drops out of activeTaskIds because it is now terminal. Cancelling
+ * a `done` task throws the invalid-transition error (done is terminal
+ * success), which is the intended behaviour.
+ */
+async function runCancelTask(
+  args: string[],
+  ctx: CliContext,
+  projectId: string,
+): Promise<void> {
+  const flags = parseFlags(args, { single: ['task'] });
+  const positional = flags.positional[0];
+  const resolvedTaskId = await resolveTaskId(flags, ctx, projectId, positional);
+  if (!resolvedTaskId) {
+    throw new Error(
+      'Cancel requires a taskId (pass it positionally or via --task, or ensure an active task exists).',
+    );
+  }
+  const sessionCtx = await resolveSessionContext(ctx.cwd, {
+    debugLabel: 'task-cancel',
+  });
+  const actor = sessionCtx.actor ?? ACTOR_USER;
+  await updateTask(projectId, resolvedTaskId, { status: 'cancelled' }, actor);
+  console.log(`Task ${resolvedTaskId} cancelled`);
+}
+
 const taskHandlers: Record<string, TaskHandler> = {
   create: runCreateTask,
   show: runShowTask,
@@ -258,6 +337,8 @@ const taskHandlers: Record<string, TaskHandler> = {
   handoff: runHandoffTask,
   done: runDoneTask,
   complete: runDoneTask,
+  update: runUpdateTask,
+  cancel: runCancelTask,
 };
 
 export async function runTaskCommand(
