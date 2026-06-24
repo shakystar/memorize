@@ -2,6 +2,7 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { pathToFileURL } from 'node:url';
 
 import { closeAll } from '../../../src/storage/db.js';
 import { resolveEmbeddingsConfig } from '../../../src/services/embeddings-service.js';
@@ -77,7 +78,7 @@ function parseArgs(argv: string[]): {
 }
 
 // Entry point (only when run directly, not when imported by the smoke test).
-if (process.argv[1] && import.meta.url === `file://${process.argv[1].replace(/\\/g, '/')}`) {
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   const args = parseArgs(process.argv.slice(2));
   if (args.mode === 'hybrid' && !resolveEmbeddingsConfig()) {
     throw new Error(
