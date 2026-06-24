@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import {
   bindProject,
+  resolveBindingForPath,
   resolveProjectIdForPath,
 } from '../../src/storage/bindings-store.js';
 
@@ -59,5 +60,37 @@ describe('resolveProjectIdForPath', () => {
 
     const deepInOuter = join(outer, 'src');
     expect(await resolveProjectIdForPath(deepInOuter)).toBe('proj_outer_1');
+  });
+});
+
+describe('resolveBindingForPath', () => {
+  it("returns kind 'exact' for the bound path itself", async () => {
+    const projectRoot = join(sandbox, 'myproj');
+    await bindProject(projectRoot, 'proj_abc_1');
+
+    const match = await resolveBindingForPath(projectRoot);
+    expect(match).toEqual({
+      projectId: 'proj_abc_1',
+      matchedPath: projectRoot,
+      kind: 'exact',
+    });
+  });
+
+  it("returns kind 'ancestor' for a subdirectory of the bound path", async () => {
+    const projectRoot = join(sandbox, 'myproj');
+    await bindProject(projectRoot, 'proj_abc_1');
+
+    const deep = join(projectRoot, 'src', 'components');
+    const match = await resolveBindingForPath(deep);
+    expect(match).toEqual({
+      projectId: 'proj_abc_1',
+      matchedPath: projectRoot,
+      kind: 'ancestor',
+    });
+  });
+
+  it('returns undefined for an unrelated path', async () => {
+    const elsewhere = join(sandbox, 'unrelated', 'nested');
+    expect(await resolveBindingForPath(elsewhere)).toBeUndefined();
   });
 });
