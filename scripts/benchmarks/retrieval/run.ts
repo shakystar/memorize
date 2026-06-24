@@ -52,7 +52,7 @@ async function rankedEntityIds(
   limit: number,
 ): Promise<string[]> {
   // Pull a wider slice so RRF has overlap to reward; slice to `limit` at the end.
-  const pool = Math.max(limit * 2, limit);
+  const pool = limit * 2;
   const lexical = bm25EntityIds(projectId, query, pool);
   if (mode === 'bm25') return lexical.slice(0, limit);
 

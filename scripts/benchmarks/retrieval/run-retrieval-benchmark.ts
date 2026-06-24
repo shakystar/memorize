@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
+import { closeAll } from '../../../src/storage/db.js';
 import { resolveEmbeddingsConfig } from '../../../src/services/embeddings-service.js';
 
 import { DATASET_PATH, ensureDataset, loadDataset } from './dataset.js';
@@ -59,10 +60,17 @@ function parseArgs(argv: string[]): {
   };
   const sampleRaw = get('--sample');
   const ksRaw = get('--k');
+  const ks = ksRaw ? ksRaw.split(',').map(Number) : [5, 10, 20];
+  if (ks.some((k) => !Number.isInteger(k) || k <= 0)) {
+    throw new Error('--k must be positive integers, e.g. --k 5,10,20');
+  }
+  if (sampleRaw !== undefined && (!Number.isInteger(Number(sampleRaw)) || Number(sampleRaw) <= 0)) {
+    throw new Error('--sample must be a positive integer');
+  }
   return {
     mode,
     ...(sampleRaw ? { sample: Number(sampleRaw) } : {}),
-    ks: ksRaw ? ksRaw.split(',').map(Number) : [5, 10, 20],
+    ks,
     ...(get('--out') ? { out: get('--out')! } : {}),
     datasetPath: get('--dataset') ?? DATASET_PATH,
   };
@@ -96,6 +104,7 @@ if (process.argv[1] && import.meta.url === `file://${process.argv[1].replace(/\\
       console.log(`\nwrote ${args.out}`);
     }
   } finally {
-    fs.rmSync(root, { recursive: true, force: true });
+    closeAll(); // release SQLite handles before rmSync (Windows EBUSY; full run opens ~500 projects)
+    fs.rmSync(root, { recursive: true, force: true, maxRetries: 3 });
   }
 }

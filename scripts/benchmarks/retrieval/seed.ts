@@ -50,7 +50,17 @@ export async function seedQuestion(
 
   await appendEvents(projectId, inputs);
   await rebuildProjectProjection(projectId, { reindexSearch: true });
-  if (opts.embed) await ensureEmbeddings(projectId);
+  if (opts.embed) {
+    const { embedded } = await ensureEmbeddings(projectId);
+    // Fail loud: a fresh project always has memories to embed, so 0 means the
+    // embedder is unreachable — refuse to record a silently-degraded hybrid run.
+    if (embedded === 0 && q.sessions.length > 0) {
+      throw new Error(
+        `hybrid embeddings produced 0 vectors for question ${q.questionId} — ` +
+          `is MEMORIZE_EMBEDDINGS_ENDPOINT reachable?`,
+      );
+    }
+  }
 
   return { projectId, sessionIdByMemoryId };
 }
