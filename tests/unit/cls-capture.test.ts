@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  DESTRUCTIVE_GIT_PATTERN,
   evaluateCapture,
   extractApplyPatchPaths,
   parsePostToolUsePayload,
@@ -100,6 +101,32 @@ describe('CLS capture filter (decision ③ — conservative whitelist)', () => {
   it('clips over-long summaries', () => {
     const verdict = evaluateCapture('Write', 'x'.repeat(1000));
     expect(verdict.summary!.length).toBeLessThanOrEqual(240);
+  });
+
+  it('admits destructive shared-git ops as mutating-bash (worktree/branch/.git rm)', () => {
+    for (const cmd of [
+      'git worktree remove .worktrees/foo',
+      'git worktree prune',
+      'git branch -D feature/x',
+      'git branch --delete feature/x',
+      'rm -rf .worktrees/foo',
+    ]) {
+      expect(evaluateCapture('Bash', cmd).signal).toBe('mutating-bash');
+    }
+  });
+
+  it('does NOT admit read-only worktree/branch listings', () => {
+    expect(evaluateCapture('Bash', 'git worktree list').capture).toBe(false);
+    expect(evaluateCapture('Bash', 'git branch').capture).toBe(false);
+    expect(evaluateCapture('Bash', 'git branch -a').capture).toBe(false);
+  });
+
+  it('DESTRUCTIVE_GIT_PATTERN flags shared-git destroyers but not safe ops', () => {
+    expect(DESTRUCTIVE_GIT_PATTERN.test('git worktree remove x')).toBe(true);
+    expect(DESTRUCTIVE_GIT_PATTERN.test('git branch -D x')).toBe(true);
+    expect(DESTRUCTIVE_GIT_PATTERN.test('rm -rf .git')).toBe(true);
+    expect(DESTRUCTIVE_GIT_PATTERN.test('rm -rf build')).toBe(false);
+    expect(DESTRUCTIVE_GIT_PATTERN.test('git worktree list')).toBe(false);
   });
 });
 

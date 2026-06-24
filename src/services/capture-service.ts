@@ -103,6 +103,22 @@ const MUTATING_BASH_PATTERN = new RegExp(
   ].join('|'),
 );
 
+/**
+ * Destructive operations on the SHARED git state (the common `.git` dir or the
+ * `.worktrees/` set). Concurrent sessions running any two of these race and can
+ * corrupt the shared repo (2026-06-22 incident). Used both to ADMIT these as
+ * mutating-bash observations and, in realtime-share, to DETECT cross-session
+ * collisions — one source of truth so the two never drift. Read-only forms
+ * (`git worktree list`, `git branch`, `rm -rf build`) intentionally do not match.
+ */
+export const DESTRUCTIVE_GIT_PATTERN = new RegExp(
+  [
+    String.raw`\bgit\s+worktree\s+(remove|prune)\b`,
+    String.raw`\bgit\s+branch\s+(-d\b|-D\b|--delete\b)`,
+    String.raw`\b(rm|rmdir)\s+[^\n]*(\.git\b|\.worktrees\b)`,
+  ].join('|'),
+);
+
 /** `memorize task …` invocations that mark a task state transition. */
 const TASK_TRANSITION_PATTERN =
   /\bmemorize\s+task\s+(update|handoff|checkpoint|claim|complete|create)\b/;
@@ -178,7 +194,10 @@ export function evaluateCapture(
         summary: clip(toolInputText),
       };
     }
-    if (MUTATING_BASH_PATTERN.test(toolInputText)) {
+    if (
+      MUTATING_BASH_PATTERN.test(toolInputText) ||
+      DESTRUCTIVE_GIT_PATTERN.test(toolInputText)
+    ) {
       return {
         capture: true,
         signal: 'mutating-bash',
