@@ -70,6 +70,12 @@ export class CliChat implements Chat {
     readonly timeoutMs: number = CLI_TIMEOUT_MS,
     private readonly spawnImpl: typeof spawn = spawn,
     private readonly killImpl: (child: CliExtractorChild) => void = killExtractorTree,
+    /** Working directory for the spawned CLI. Pass a project-free dir for the
+     *  EXTRACTOR role: run from the memorize repo, `claude -p` reads CLAUDE.md /
+     *  .git and decides it is "the coding agent for this repo", then refuses or
+     *  empties extraction of non-coding (LongMemEval) conversation. A neutral
+     *  cwd removes that project-context contamination. */
+    private readonly cwd?: string,
   ) {}
 
   chat(prompt: string): Promise<string> {
@@ -79,6 +85,7 @@ export class CliChat implements Chat {
         // re-trigger them (literal of consolidate-service's SUPPRESS_HOOKS_ENV_VAR).
         env: { ...process.env, MEMORIZE_SUPPRESS_HOOKS: '1' },
         windowsHide: true,
+        ...(this.cwd ? { cwd: this.cwd } : {}),
       });
       let stdout = '';
       let stderr = '';

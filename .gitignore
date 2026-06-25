@@ -70,3 +70,6 @@ scripts/dogfood/*.out.txt
 
 # LongMemEval-S benchmark dataset (≈264 MB, downloaded on demand)
 /scripts/benchmarks/retrieval/data/
+
+# local secrets (never commit)
+api_key.txt
