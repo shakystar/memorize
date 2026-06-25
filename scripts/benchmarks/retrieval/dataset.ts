@@ -5,6 +5,10 @@ import path from 'node:path';
 export interface BenchSession {
   sessionId: string;
   text: string;
+  /** Raw turns, preserved alongside flattened `text`, so the consolidation-ON
+   *  seed can re-emit each session as a JSONL transcript `consolidate()` reads.
+   *  `parseDataset` always populates it; optional only for hand-built fixtures. */
+  turns?: { role: string; content: string }[];
   /** When the session took place (LongMemEval haystack_dates). Optional so the
    *  retrieval fixtures, which carry no dates, still parse. */
   date?: string;
@@ -84,6 +88,10 @@ export function parseDataset(raw: unknown): BenchQuestion[] {
       sessions: ids.map((sessionId, j) => ({
         sessionId,
         text: flattenSession(sessions[j] ?? []),
+        turns: (sessions[j] ?? []).map((t) => ({
+          role: t.role ?? 'user',
+          content: t.content ?? '',
+        })),
         ...(Array.isArray(dates) && dates[j] ? { date: dates[j] } : {}),
       })),
       goldSessionIds: q.answer_session_ids,
