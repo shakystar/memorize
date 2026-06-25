@@ -25,8 +25,9 @@ export const DEFAULT_SEARCH_LIMIT = 20;
  * unquoted text as query syntax (operators like AND/OR/NEAR, prefixes,
  * column filters, and punctuation can raise "fts5: syntax error"). We split on
  * whitespace and wrap each token as an FTS5 *string* (double-quoted, with
- * embedded `"` doubled), then join with a space — an implicit AND of phrase
- * tokens. This makes any punctuation literal and injection-proof while still
+ * embedded `"` doubled), then join with ` OR ` so a natural-language query
+ * matches documents containing ANY of its tokens (BM25 ranks the results by
+ * relevance). This makes punctuation literal and injection-proof while still
  * being passed as a bound parameter. Returns undefined when the query has no
  * searchable tokens (e.g. empty or punctuation-only).
  */
@@ -40,7 +41,7 @@ export function toFtsMatch(query: string): string | undefined {
     // useful, and an empty quoted string `""` is a syntax error.
     .filter((token) => /[\p{L}\p{N}]/u.test(token));
   if (tokens.length === 0) return undefined;
-  return tokens.map((token) => `"${token.replace(/"/g, '""')}"`).join(' ');
+  return tokens.map((token) => `"${token.replace(/"/g, '""')}"`).join(' OR ');
 }
 
 /**
