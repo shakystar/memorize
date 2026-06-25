@@ -203,12 +203,26 @@ describe('search (FTS5)', () => {
     expect(() => searchProject(projectId, 'some-thing! (else)')).not.toThrow();
   });
 
-  it('toFtsMatch quotes tokens and rejects content-free queries', () => {
-    expect(toFtsMatch('hello world')).toBe('"hello" "world"');
+  it('toFtsMatch OR-joins tokens and rejects content-free queries', () => {
+    expect(toFtsMatch('hello world')).toBe('"hello" OR "world"');
     // Embedded double-quotes are doubled (FTS5 string escaping).
-    expect(toFtsMatch('say "hi"')).toBe('"say" """hi"""');
+    expect(toFtsMatch('say "hi"')).toBe('"say" OR """hi"""');
     expect(toFtsMatch('   ')).toBeUndefined();
     expect(toFtsMatch('!!!')).toBeUndefined();
+  });
+
+  it('matches a document that contains only SOME of a multi-word query (OR, not AND)', async () => {
+    await seedProject();
+    const task = await createTask({
+      projectId,
+      title: 'Quokka habitat notes',
+      description: 'A distinctive marsupial keyword: quokka',
+      actor: 'test',
+    });
+    // The query has words that do NOT all appear in the task; under the old
+    // AND-join this returned nothing. OR-join must still surface the task.
+    const hits = searchProject(projectId, 'where does the quokka sleep at night');
+    expect(hits.some((h) => h.entityId === task.id)).toBe(true);
   });
 });
 
