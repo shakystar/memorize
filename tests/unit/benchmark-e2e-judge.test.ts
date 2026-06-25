@@ -35,4 +35,16 @@ describe('benchmark/e2e judge', () => {
     await judge(chat, { question: 'q', gold: 'not provided', answer: "I don't know", isAbstention: true });
     expect(prompt.toLowerCase()).toContain('unanswerable');
   });
+
+  it('selects the official per-type rubric (temporal off-by-one, preference)', async () => {
+    let prompt = '';
+    const chat: Chat = { chat: async (p) => { prompt = p; return 'yes'; } };
+
+    await judge(chat, { question: 'q', gold: '18', answer: '19', isAbstention: false, questionType: 'temporal-reasoning' });
+    expect(prompt).toContain('off-by-one');
+
+    await judge(chat, { question: 'q', gold: 'rubric', answer: 'a', isAbstention: false, questionType: 'single-session-preference' });
+    expect(prompt).toContain('rubric for desired personalized response');
+    expect(prompt).toContain('Rubric: rubric');
+  });
 });

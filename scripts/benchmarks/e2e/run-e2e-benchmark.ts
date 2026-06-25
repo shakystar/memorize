@@ -70,12 +70,13 @@ export async function runE2E(opts: E2EOptions): Promise<E2EReport> {
     const topSessions = rankedSessionIds
       .map((id) => byId.get(id))
       .filter((s): s is NonNullable<typeof s> => Boolean(s));
-    const candidate = await answer(opts.reader, q.question, topSessions);
+    const candidate = await answer(opts.reader, q.question, topSessions, q.questionDate);
     const correct = await judge(opts.judge, {
       question: q.question,
       gold: q.answer,
       answer: candidate,
       isAbstention: q.isAbstention,
+      questionType: q.questionType,
     });
     const result: QuestionResult = {
       questionType: q.questionType,

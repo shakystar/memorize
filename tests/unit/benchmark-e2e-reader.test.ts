@@ -13,14 +13,29 @@ function capturingChat(): { chat: Chat; last: () => string } {
 }
 
 describe('benchmark/e2e reader', () => {
-  it('puts the session text and question in the prompt and trims the answer', async () => {
+  it('puts the session text and question in the official CoT prompt and trims the answer', async () => {
     const c = capturingChat();
     const out = await answer(c.chat, 'What did I name my dog?', [
       { sessionId: 's1', text: 'user: We named the dog Max.' },
     ]);
     expect(out).toBe('the answer');
     expect(c.last()).toContain('We named the dog Max');
-    expect(c.last()).toContain('What did I name my dog?');
+    expect(c.last()).toContain('Question: What did I name my dog?');
+    // Official direct + chain-of-thought instruction drives extract-then-reason.
+    expect(c.last()).toContain('first extract all the relevant information');
+    expect(c.last()).toContain('Answer (step by step):');
+  });
+
+  it('includes the session date and the question (current) date when provided', async () => {
+    const c = capturingChat();
+    await answer(
+      c.chat,
+      'q',
+      [{ sessionId: 's1', text: 'fact', date: '2023/05/20 (Sat) 02:21' }],
+      '2023/05/30 (Tue) 23:40',
+    );
+    expect(c.last()).toContain('Session Date: 2023/05/20 (Sat) 02:21');
+    expect(c.last()).toContain('Current Date: 2023/05/30 (Tue) 23:40');
   });
 
   it('stops adding sessions once the char budget is exceeded', async () => {
@@ -41,7 +56,7 @@ describe('benchmark/e2e reader', () => {
       { sessionId: 'sA', text: text1 },
       { sessionId: 'sB', text: text2 },
     ]);
-    expect(c.last()).toContain('session sA');
-    expect(c.last()).toContain('session sB');
+    expect(c.last()).toContain('Session sA');
+    expect(c.last()).toContain('Session sB');
   });
 });
