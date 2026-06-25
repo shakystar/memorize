@@ -3,8 +3,11 @@ import type { BenchSession } from '../retrieval/dataset.js';
 import type { Chat } from './chat-client.js';
 
 /** Char cap on the assembled context so the reader request fits the model
- *  window (esp. local qwen). ~12k chars ≈ 3k tokens. */
-export const READER_CONTEXT_CHAR_BUDGET = 12_000;
+ *  window. Default ~12k chars (≈ 3k tokens) keeps a local qwen request safe;
+ *  a strong reader (claude -p) can lift it via BENCH_READER_CHAR_BUDGET so the
+ *  top-K gold sessions are not truncated. */
+export const READER_CONTEXT_CHAR_BUDGET =
+  Number(process.env.BENCH_READER_CHAR_BUDGET) || 12_000;
 
 export async function answer(
   chat: Chat,

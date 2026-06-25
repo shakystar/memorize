@@ -7,10 +7,11 @@ import { pathToFileURL } from 'node:url';
 import { resolveEmbeddingsConfig } from '../../../src/services/embeddings-service.js';
 import { closeAll } from '../../../src/storage/db.js';
 
-import { loadDataset } from '../retrieval/dataset.js';
+import { loadDataset, type BenchQuestion } from '../retrieval/dataset.js';
 import { retrieve, type Mode } from '../retrieval/run.js';
 import { seedQuestion } from '../retrieval/seed.js';
 
+import { appendCheckpoint, loadCheckpoint, type CheckpointRecord } from './checkpoint.js';
 import { resolveChat, type Chat } from './chat-client.js';
 import { judge } from './judge.js';
 import { answer } from './reader.js';
@@ -25,19 +26,41 @@ export interface E2EOptions {
   reader: Chat;
   judge: Chat;
   sample?: number;
+  /** When set, each scored question is appended here as JSONL and a restart
+   *  resumes from it (skipping already-scored questionIds). Must live outside
+   *  the temp MEMORIZE_ROOT, which is deleted at the end of a run. */
+  checkpointPath?: string;
+  /** Per-question progress sink (X/total + running accuracy). Defaults to a
+   *  no-op so the smoke test and library callers stay silent. */
+  progress?: (message: string) => void;
 }
 
 export async function runE2E(opts: E2EOptions): Promise<E2EReport> {
   const all = loadDataset(opts.datasetPath);
   const questions = opts.sample ? all.slice(0, opts.sample) : all;
-  const results: QuestionResult[] = [];
-  let skipped = 0;
+  const log = opts.progress ?? (() => {});
 
-  for (const q of questions) {
-    if (q.answer === null) {
-      skipped += 1;
-      continue;
-    }
+  // Non-string gold answers are unscoreable; count them once and never seed,
+  // retrieve, or checkpoint them.
+  const answerable = questions.filter(
+    (q): q is BenchQuestion & { answer: string } => q.answer !== null,
+  );
+  const skipped = questions.length - answerable.length;
+  const total = answerable.length;
+
+  const done = opts.checkpointPath
+    ? loadCheckpoint(opts.checkpointPath)
+    : new Map<string, CheckpointRecord>();
+  const results: QuestionResult[] = [];
+  // Resumed results feed both the running accuracy and the final aggregate.
+  for (const rec of done.values()) {
+    results.push({ questionType: rec.questionType, isAbstention: rec.isAbstention, correct: rec.correct });
+  }
+  let processed = results.length;
+  if (done.size > 0) log(`resumed ${done.size} completed question(s) from ${opts.checkpointPath}`);
+
+  for (const q of answerable) {
+    if (done.has(q.questionId)) continue; // already scored in a prior run
     const seeded = await seedQuestion(q, {
       rootPath: path.join(opts.rootPath, `proj-${q.questionId}`),
       embed: opts.retrieval === 'hybrid',
@@ -54,7 +77,21 @@ export async function runE2E(opts: E2EOptions): Promise<E2EReport> {
       answer: candidate,
       isAbstention: q.isAbstention,
     });
-    results.push({ questionType: q.questionType, isAbstention: q.isAbstention, correct });
+    const result: QuestionResult = {
+      questionType: q.questionType,
+      isAbstention: q.isAbstention,
+      correct,
+    };
+    results.push(result);
+    if (opts.checkpointPath) {
+      appendCheckpoint(opts.checkpointPath, { questionId: q.questionId, ...result });
+    }
+    processed += 1;
+    const hits = results.filter((r) => r.correct).length;
+    log(
+      `[${processed}/${total}] ${q.questionType} ${q.questionId} correct=${correct} ` +
+        `| acc ${(hits / results.length).toFixed(4)} (${hits}/${results.length})`,
+    );
   }
 
   return { ...aggregate(results), skipped };
@@ -65,6 +102,7 @@ function parseArgs(argv: string[]): {
   k: number;
   sample?: number;
   out?: string;
+  checkpoint?: string;
   datasetPath: string;
 } {
   const get = (flag: string): string | undefined => {
@@ -90,6 +128,7 @@ function parseArgs(argv: string[]): {
     k,
     ...(sampleRaw ? { sample: Number(sampleRaw) } : {}),
     ...(get('--out') ? { out: get('--out')! } : {}),
+    ...(get('--checkpoint') ? { checkpoint: get('--checkpoint')! } : {}),
     datasetPath,
   };
 }
@@ -116,6 +155,8 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
       reader,
       judge: judgeChat,
       ...(args.sample ? { sample: args.sample } : {}),
+      ...(args.checkpoint ? { checkpointPath: args.checkpoint } : {}),
+      progress: (message) => process.stderr.write(`${message}\n`),
     });
     console.log(renderTable(report));
     if (args.out) {
