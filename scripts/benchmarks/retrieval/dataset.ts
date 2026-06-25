@@ -5,6 +5,9 @@ import path from 'node:path';
 export interface BenchSession {
   sessionId: string;
   text: string;
+  /** When the session took place (LongMemEval haystack_dates). Optional so the
+   *  retrieval fixtures, which carry no dates, still parse. */
+  date?: string;
 }
 
 export interface BenchQuestion {
@@ -15,6 +18,9 @@ export interface BenchQuestion {
   goldSessionIds: string[];
   answer: string | null;
   isAbstention: boolean;
+  /** "Current date" the question is asked on (LongMemEval question_date);
+   *  the QA reader needs it for temporal-reasoning. Optional for fixtures. */
+  questionDate?: string;
 }
 
 export const DATASET_PATH = path.join(
@@ -30,8 +36,10 @@ interface RawQuestion {
   question_id?: string;
   question_type?: string;
   question?: string;
+  question_date?: string;
   haystack_session_ids?: string[];
   haystack_sessions?: RawTurn[][];
+  haystack_dates?: string[];
   answer_session_ids?: string[];
   answer?: unknown;
 }
@@ -68,6 +76,7 @@ export function parseDataset(raw: unknown): BenchQuestion[] {
           `!= haystack_sessions (${sessions.length})`,
       );
     }
+    const dates = q.haystack_dates;
     return {
       questionId: q.question_id,
       question: q.question,
@@ -75,6 +84,7 @@ export function parseDataset(raw: unknown): BenchQuestion[] {
       sessions: ids.map((sessionId, j) => ({
         sessionId,
         text: flattenSession(sessions[j] ?? []),
+        ...(Array.isArray(dates) && dates[j] ? { date: dates[j] } : {}),
       })),
       goldSessionIds: q.answer_session_ids,
       answer:
@@ -84,6 +94,7 @@ export function parseDataset(raw: unknown): BenchQuestion[] {
             ? String(q.answer)
             : null,
       isAbstention: q.question_id.endsWith('_abs'),
+      ...(q.question_date ? { questionDate: q.question_date } : {}),
     };
   });
 }

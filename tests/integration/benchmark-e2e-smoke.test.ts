@@ -30,6 +30,11 @@ afterEach(() => {
 });
 
 const fixed = (reply: string): Chat => ({ chat: async () => reply });
+const exploding = (): Chat => ({
+  chat: async () => {
+    throw new Error('reader/judge must not be called for an already-scored question');
+  },
+});
 
 describe('benchmark/e2e smoke', () => {
   it('runs the pipeline with fake reader/judge (bm25, offline) and scores', async () => {
@@ -45,6 +50,38 @@ describe('benchmark/e2e smoke', () => {
     expect(report.overall.n).toBe(3);
     expect(report.overall.accuracy).toBeCloseTo(1, 10); // judge says yes for all
     expect(report.skipped).toBe(0);
+  });
+
+  it('resumes from a checkpoint, skipping already-scored questions', async () => {
+    const checkpointPath = path.join(root, 'resume.jsonl');
+    const first = await runE2E({
+      datasetPath: MINI,
+      retrieval: 'bm25',
+      k: 5,
+      rootPath: path.join(root, 'run1'),
+      reader: fixed('the answer'),
+      judge: fixed('yes'),
+      sample: 3,
+      checkpointPath,
+    });
+    expect(first.overall.n).toBe(3);
+    // Three scored questions persisted as JSONL lines.
+    expect(fs.readFileSync(checkpointPath, 'utf8').trim().split('\n')).toHaveLength(3);
+
+    // A second run over the same checkpoint must not touch reader/judge — every
+    // question is already scored — yet still reports the full result set.
+    const resumed = await runE2E({
+      datasetPath: MINI,
+      retrieval: 'bm25',
+      k: 5,
+      rootPath: path.join(root, 'run2'),
+      reader: exploding(),
+      judge: exploding(),
+      sample: 3,
+      checkpointPath,
+    });
+    expect(resumed.overall.n).toBe(3);
+    expect(resumed.overall.accuracy).toBeCloseTo(1, 10);
   });
 
   it('CLI entry guard fires: hybrid with no embedder fails fast (proves the guard runs)', () => {

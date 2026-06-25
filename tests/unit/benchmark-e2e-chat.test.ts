@@ -71,6 +71,17 @@ describe('benchmark/e2e chat-client', () => {
     expect(judge).toBeInstanceOf(CliChat);
   });
 
+  it('resolveChat honors a CLI timeout override and rejects a bad value', () => {
+    const reader = resolveChat('reader', {
+      BENCH_READER_BACKEND: 'cli',
+      BENCH_READER_CLI_TIMEOUT_MS: '300000',
+    });
+    expect((reader as CliChat).timeoutMs).toBe(300000);
+    expect(() =>
+      resolveChat('reader', { BENCH_READER_BACKEND: 'cli', BENCH_READER_CLI_TIMEOUT_MS: 'nope' }),
+    ).toThrow(/positive number/);
+  });
+
   it('CliChat timeout calls killImpl and rejects with /timed out/', async () => {
     let killImplCalls = 0;
     let closeHandler: ((code: number | null) => void) | undefined;

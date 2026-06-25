@@ -67,7 +67,7 @@ const CLI_ARGS: Record<CliCommand, string[]> = {
 export class CliChat implements Chat {
   constructor(
     private readonly command: CliCommand,
-    private readonly timeoutMs: number = CLI_TIMEOUT_MS,
+    readonly timeoutMs: number = CLI_TIMEOUT_MS,
     private readonly spawnImpl: typeof spawn = spawn,
     private readonly killImpl: (child: CliExtractorChild) => void = killExtractorTree,
   ) {}
@@ -126,7 +126,15 @@ export function resolveChat(
     if (command !== 'claude' && command !== 'codex') {
       throw new Error(`${prefix}_CLI must be 'claude' or 'codex'`);
     }
-    return new CliChat(command);
+    // A strong reader over a large context can exceed the 120s default; allow
+    // raising the per-call ceiling so an occasional slow claude -p call does
+    // not fail the whole run.
+    const timeoutRaw = env[`${prefix}_CLI_TIMEOUT_MS`];
+    const timeoutMs = timeoutRaw ? Number(timeoutRaw) : CLI_TIMEOUT_MS;
+    if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) {
+      throw new Error(`${prefix}_CLI_TIMEOUT_MS must be a positive number of ms`);
+    }
+    return new CliChat(command, timeoutMs);
   }
   if (backend === 'http') {
     const endpoint =
