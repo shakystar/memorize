@@ -7,6 +7,10 @@ import {
   renderCodexLiveUpdate,
   renderCodexStartupContext,
 } from './codex/renderer.js';
+import {
+  renderOpencodeLiveUpdate,
+  renderOpencodeStartupContext,
+} from './opencode/renderer.js';
 import type { AdapterRuntime } from './types.js';
 
 /** @deprecated alias of {@link HarnessId} — kept for existing call sites. */
@@ -22,5 +26,10 @@ export const adapterRegistry: Record<AdapterAgent, AdapterRuntime> = {
     name: 'codex',
     renderStartupContext: renderCodexStartupContext,
     renderLiveUpdate: renderCodexLiveUpdate,
+  },
+  opencode: {
+    name: 'opencode',
+    renderStartupContext: renderOpencodeStartupContext,
+    renderLiveUpdate: renderOpencodeLiveUpdate,
   },
 };

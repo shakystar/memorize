@@ -11,6 +11,7 @@ interface Calls {
   setup: Array<{ cwd: string; allowNested: boolean | undefined }>;
   installClaude: string[];
   installCodex: string[];
+  installOpencode: string[];
 }
 
 function presence(present: boolean): AgentDetectionResult['claude'] {
@@ -18,10 +19,15 @@ function presence(present: boolean): AgentDetectionResult['claude'] {
 }
 
 function fakeDeps(
-  agents: { claude: boolean; codex: boolean },
+  agents: { claude: boolean; codex: boolean; opencode: boolean },
   overrides: Partial<OnboardDeps> = {},
 ): { deps: OnboardDeps; calls: Calls } {
-  const calls: Calls = { setup: [], installClaude: [], installCodex: [] };
+  const calls: Calls = {
+    setup: [],
+    installClaude: [],
+    installCodex: [],
+    installOpencode: [],
+  };
   const deps: OnboardDeps = {
     setupProject: async (cwd, opts = {}) => {
       calls.setup.push({ cwd, allowNested: opts.allowNested });
@@ -36,14 +42,21 @@ function fakeDeps(
     detectAgents: (): AgentDetectionResult => ({
       claude: presence(agents.claude),
       codex: presence(agents.codex),
+      opencode: presence(agents.opencode),
     }),
-    installClaude: async (cwd) => {
-      calls.installClaude.push(cwd);
-      return `${cwd}/.claude/settings.local.json`;
-    },
-    installCodex: async (cwd) => {
-      calls.installCodex.push(cwd);
-      return '/home/user/.codex/hooks.json';
+    installers: {
+      claude: async (cwd) => {
+        calls.installClaude.push(cwd);
+        return `${cwd}/.claude/settings.local.json`;
+      },
+      codex: async (cwd) => {
+        calls.installCodex.push(cwd);
+        return '/home/user/.codex/hooks.json';
+      },
+      opencode: async (cwd) => {
+        calls.installOpencode.push(cwd);
+        return '/home/user/.config/opencode/opencode.json';
+      },
     },
     ...overrides,
   };
@@ -51,54 +64,68 @@ function fakeDeps(
 }
 
 describe('onboardProject', () => {
-  it('wires neither agent when none is present, but still binds + imports', async () => {
-    const { deps, calls } = fakeDeps({ claude: false, codex: false });
+  it('wires nothing when no harness is present, but still binds + imports', async () => {
+    const { deps, calls } = fakeDeps({ claude: false, codex: false, opencode: false });
     const result = await onboardProject('/repo', {}, deps);
 
     expect(calls.setup).toHaveLength(1);
     expect(calls.installClaude).toHaveLength(0);
     expect(calls.installCodex).toHaveLength(0);
-    expect(result.wiredClaude).toBe(false);
-    expect(result.wiredCodex).toBe(false);
+    expect(calls.installOpencode).toHaveLength(0);
+    expect(result.wired).toEqual([]);
     expect(result.importedContextCount).toBe(2);
-    expect(result.claudeSettingsPath).toBeUndefined();
-    expect(result.codexHooksPath).toBeUndefined();
   });
 
   it('wires only claude when only claude is present', async () => {
-    const { deps, calls } = fakeDeps({ claude: true, codex: false });
+    const { deps, calls } = fakeDeps({ claude: true, codex: false, opencode: false });
     const result = await onboardProject('/repo', {}, deps);
 
     expect(calls.installClaude).toEqual(['/repo']);
     expect(calls.installCodex).toHaveLength(0);
-    expect(result.wiredClaude).toBe(true);
-    expect(result.wiredCodex).toBe(false);
-    expect(result.claudeSettingsPath).toBe('/repo/.claude/settings.local.json');
+    expect(result.wired).toEqual([
+      {
+        id: 'claude',
+        label: 'Claude Code',
+        configPath: '/repo/.claude/settings.local.json',
+      },
+    ]);
   });
 
-  it('wires only codex when only codex is present', async () => {
-    const { deps, calls } = fakeDeps({ claude: false, codex: true });
+  it('wires only opencode when only opencode is present', async () => {
+    const { deps, calls } = fakeDeps({ claude: false, codex: false, opencode: true });
     const result = await onboardProject('/repo', {}, deps);
 
-    expect(calls.installClaude).toHaveLength(0);
-    expect(calls.installCodex).toEqual(['/repo']);
-    expect(result.wiredClaude).toBe(false);
-    expect(result.wiredCodex).toBe(true);
-    expect(result.codexHooksPath).toBe('/home/user/.codex/hooks.json');
+    expect(calls.installOpencode).toEqual(['/repo']);
+    expect(result.wired).toEqual([
+      {
+        id: 'opencode',
+        label: 'opencode',
+        configPath: '/home/user/.config/opencode/opencode.json',
+      },
+    ]);
   });
 
-  it('wires both agents when both are present', async () => {
-    const { deps, calls } = fakeDeps({ claude: true, codex: true });
+  it('wires all present harnesses in registry order', async () => {
+    const { deps } = fakeDeps({ claude: true, codex: true, opencode: true });
     const result = await onboardProject('/repo', {}, deps);
 
-    expect(calls.installClaude).toEqual(['/repo']);
-    expect(calls.installCodex).toEqual(['/repo']);
-    expect(result.wiredClaude).toBe(true);
-    expect(result.wiredCodex).toBe(true);
+    expect(result.wired.map((w) => w.id)).toEqual(['claude', 'codex', 'opencode']);
+  });
+
+  it('detects a harness but does not wire it when no installer is registered', async () => {
+    const { deps, calls } = fakeDeps(
+      { claude: false, codex: false, opencode: true },
+      { installers: {} },
+    );
+    const result = await onboardProject('/repo', {}, deps);
+
+    expect(calls.installOpencode).toHaveLength(0);
+    expect(result.wired).toEqual([]);
+    expect(result.agents.opencode.present).toBe(true);
   });
 
   it('threads --nested through to setupProject', async () => {
-    const { deps, calls } = fakeDeps({ claude: false, codex: false });
+    const { deps, calls } = fakeDeps({ claude: false, codex: false, opencode: false });
     const result = await onboardProject('/repo', { nested: true }, deps);
 
     expect(calls.setup[0]?.allowNested).toBe(true);
@@ -106,7 +133,7 @@ describe('onboardProject', () => {
   });
 
   it('defaults allowNested to false', async () => {
-    const { deps, calls } = fakeDeps({ claude: false, codex: false });
+    const { deps, calls } = fakeDeps({ claude: false, codex: false, opencode: false });
     await onboardProject('/repo', {}, deps);
     expect(calls.setup[0]?.allowNested).toBe(false);
   });

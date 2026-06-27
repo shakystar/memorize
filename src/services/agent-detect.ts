@@ -3,7 +3,7 @@ import os from 'node:os';
 import path from 'node:path';
 import process from 'node:process';
 
-import { type HarnessId, harnessIds } from '../harness/registry.js';
+import { type HarnessId, getHarness, harnessIds } from '../harness/registry.js';
 
 /** @deprecated alias of {@link HarnessId} — kept for existing call sites. */
 export type AgentName = HarnessId;
@@ -33,8 +33,10 @@ export interface DetectDeps {
 }
 
 function detectAgent(name: HarnessId, deps: DetectDeps): AgentPresence {
-  // Config dir is the strongest signal that the agent has actually run.
-  const configDir = path.join(deps.homedir, `.${name}`);
+  // Config dir is the strongest signal that the agent has actually run. The
+  // path is descriptor-driven (NOT always `.${name}`: opencode uses
+  // `.config/opencode`).
+  const configDir = path.join(deps.homedir, getHarness(name).configDirRel);
   if (deps.exists(configDir)) return { present: true, via: 'config-dir' };
 
   // Otherwise look for the launcher on PATH. Windows resolves binaries

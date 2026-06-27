@@ -1,4 +1,5 @@
 import type { Project } from '../domain/entities.js';
+import { type HarnessId, harnessRegistry } from '../harness/registry.js';
 import {
   defaultDetectDeps,
   detectAgents,
@@ -7,18 +8,28 @@ import {
 import {
   installClaudeIntegration,
   installCodexIntegration,
+  installOpencodeIntegration,
 } from './install-service.js';
 import { setupProject } from './setup-service.js';
 
 /**
  * One-shot project onboarding (`memorize init`): bind/adopt the cwd + import
- * context, then wire whichever agent(s) are present on this machine. Composes
- * the existing idempotent primitives (setupProject + detectAgents + the two
- * install integrations) so the four historical steps collapse into one, with
- * no behavior change to any of them. Mirrors the deps-injection shape of
- * `runRefresh` (update-service) so the orchestration is unit-testable without
- * touching the real machine or spawning a CLI.
+ * context, then wire whichever harness(es) are present on this machine. Composes
+ * the existing idempotent primitives (setupProject + detectAgents + the per-
+ * harness install integrations) so the historical multi-step flow collapses into
+ * one. Registry-driven: each present harness with a registered installer is
+ * wired, so adding a harness needs no change here. Mirrors the deps-injection
+ * shape of `runRefresh` (update-service) so it is unit-testable without touching
+ * the real machine or spawning a CLI.
  */
+export interface WiredHarness {
+  id: HarnessId;
+  /** Display label from the registry descriptor. */
+  label: string;
+  /** Primary config path the installer wrote (for the install summary). */
+  configPath: string;
+}
+
 export interface OnboardingResult {
   project: Project;
   importedContextCount: number;
@@ -29,29 +40,31 @@ export interface OnboardingResult {
   /** Relocation-candidate warnings surfaced by setupProject. */
   warnings: string[];
   agents: AgentDetectionResult;
-  wiredClaude: boolean;
-  wiredCodex: boolean;
-  /** Path written by installClaudeIntegration (when wiredClaude). */
-  claudeSettingsPath?: string;
-  /** Path written by installCodexIntegration (when wiredCodex). */
-  codexHooksPath?: string;
+  /** Harnesses detected-present AND wired, in registry order. */
+  wired: WiredHarness[];
 }
+
+export type HarnessInstaller = (cwd: string) => Promise<string>;
 
 export interface OnboardDeps {
   setupProject: typeof setupProject;
   detectAgents: () => AgentDetectionResult;
-  installClaude: (cwd: string) => Promise<string>;
-  installCodex: (cwd: string) => Promise<string>;
+  /** Installer per harness id; onboarding calls the one matching each present
+   *  harness. A harness with no installer here is detected but not wired. */
+  installers: Partial<Record<HarnessId, HarnessInstaller>>;
 }
 
 export function defaultOnboardDeps(): OnboardDeps {
   return {
     setupProject,
     detectAgents: () => detectAgents(defaultDetectDeps()),
-    installClaude: installClaudeIntegration,
-    // The integration variant (not bare installCodexHooks) — it also plants
-    // THIS project's AGENTS.md ground-rule block, matching `install codex`.
-    installCodex: installCodexIntegration,
+    installers: {
+      claude: installClaudeIntegration,
+      // The integration variants (not bare hook installers) — they also plant
+      // THIS project's AGENTS.md/CLAUDE.md ground-rule block.
+      codex: installCodexIntegration,
+      opencode: installOpencodeIntegration,
+    },
   };
 }
 
@@ -66,18 +79,13 @@ export async function onboardProject(
 
   const agents = deps.detectAgents();
 
-  let wiredClaude = false;
-  let wiredCodex = false;
-  let claudeSettingsPath: string | undefined;
-  let codexHooksPath: string | undefined;
-
-  if (agents.claude.present) {
-    claudeSettingsPath = await deps.installClaude(cwd);
-    wiredClaude = true;
-  }
-  if (agents.codex.present) {
-    codexHooksPath = await deps.installCodex(cwd);
-    wiredCodex = true;
+  const wired: WiredHarness[] = [];
+  for (const descriptor of harnessRegistry) {
+    if (!agents[descriptor.id]?.present) continue;
+    const installer = deps.installers[descriptor.id];
+    if (!installer) continue;
+    const configPath = await installer(cwd);
+    wired.push({ id: descriptor.id, label: descriptor.label, configPath });
   }
 
   return {
@@ -87,9 +95,6 @@ export async function onboardProject(
     nested: setup.nested,
     warnings: setup.warnings,
     agents,
-    wiredClaude,
-    wiredCodex,
-    ...(claudeSettingsPath ? { claudeSettingsPath } : {}),
-    ...(codexHooksPath ? { codexHooksPath } : {}),
+    wired,
   };
 }
