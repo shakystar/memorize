@@ -291,8 +291,15 @@ export class LlmConsolidator implements Consolidator {
 
 // --- host-CLI extractor (claude -p / codex exec) — #44 ------------------------
 
-/** @deprecated alias of {@link HarnessId} — kept for existing call sites. */
-export type HostCliCommand = HarnessId;
+/**
+ * The host CLIs memorize can drive headlessly to run LLM extraction. This is a
+ * DELIBERATE SUBSET of {@link HarnessId}, not an alias: a harness counts here
+ * only if it has a one-shot, pipe-a-prompt-on-stdin mode (claude `-p`,
+ * codex `exec -`). Harnesses without that (e.g. opencode, IDE harnesses) are
+ * valid {@link HarnessId}s but cannot be extractors, so adding them to the
+ * registry must NOT force an entry in CLI_EXTRACTOR_ARGS.
+ */
+export type HostCliCommand = Extract<HarnessId, 'claude' | 'codex'>;
 
 /**
  * Env var set on the spawned host CLI so the memorize hooks ITS session

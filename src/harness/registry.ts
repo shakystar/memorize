@@ -33,10 +33,27 @@ export interface HarnessDescriptor {
   /** Events whose runtime handler is kept as a no-op so pre-upgrade installs
    *  that still fire them don't error (currently just `Stop`). */
   legacyHandledEvents: readonly string[];
+  /**
+   * Config-mechanism FAMILY — how the harness loads memorize's hooks. Harnesses
+   * cluster into families, not one uniform writer:
+   *   - 'json-hooks-map': a JSON settings file mapping event → command entries
+   *     (Claude `.claude/settings.local.json`, Codex `~/.codex/hooks.json`;
+   *     later Gemini/Cursor/Copilot).
+   *   - 'ts-plugin': a TypeScript plugin module that subscribes to lifecycle
+   *     events and shells out (opencode `.opencode/plugins/*.ts`; later pi).
+   * The install writer dispatches on this.
+   */
+  mechanism: 'json-hooks-map' | 'ts-plugin';
+  /** Whether install should register the memorize MCP server in this harness's
+   *  config. Used where MCP fills a gap the hook mechanism can't (e.g. opencode
+   *  has no session-start-injection hook, so session-start context arrives via
+   *  the MCP `memorize_context` tool / `session-context` prompt). */
+  registersMcp: boolean;
   /** Where the harness reads its hooks: per-project config vs machine-global. */
   hookScope: 'project' | 'global';
   /** New memorize entries appended after the user's hooks (claude) or
-   *  prepended before them so our context is established first (codex). */
+   *  prepended before them so our context is established first (codex).
+   *  Only meaningful for the 'json-hooks-map' mechanism. */
   hookPlacement: 'append' | 'prepend';
   /** The standing-instruction file the ground-rule block is planted in. */
   groundRuleFile: string;
@@ -60,6 +77,8 @@ const CLAUDE: HarnessDescriptor = {
   hookEvents: ['SessionStart', 'PostCompact', 'SessionEnd', 'PostToolUse'],
   legacyHookEvents: ['Stop', 'PreCompact'],
   legacyHandledEvents: ['Stop'],
+  mechanism: 'json-hooks-map',
+  registersMcp: false,
   hookScope: 'project',
   hookPlacement: 'append',
   groundRuleFile: 'CLAUDE.md',
@@ -80,6 +99,8 @@ const CODEX: HarnessDescriptor = {
   hookEvents: ['SessionStart', 'PostToolUse', 'PostCompact'],
   legacyHookEvents: ['Stop'],
   legacyHandledEvents: ['Stop'],
+  mechanism: 'json-hooks-map',
+  registersMcp: false,
   hookScope: 'global',
   hookPlacement: 'prepend',
   groundRuleFile: 'AGENTS.md',
