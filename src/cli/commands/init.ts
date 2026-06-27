@@ -1,3 +1,4 @@
+import { getHarness } from '../../harness/registry.js';
 import { onboardProject } from '../../services/onboarding-service.js';
 import type { CliContext } from '../context.js';
 import { parseFlags } from '../parse-flags.js';
@@ -5,10 +6,11 @@ import { codexPostInstallNotice } from './install.js';
 
 /**
  * `memorize init` — one-shot onboarding for the current directory. Replaces the
- * four-step flow (`project init` + `project setup` + `install claude` +
- * `install codex`) with a single idempotent command: bind/adopt the project,
- * import context, detect installed agents, and wire each present agent. The
- * lower-level commands remain as escape hatches.
+ * multi-step flow (`project init` + `project setup` + `install <agent>`) with a
+ * single idempotent command: bind/adopt the project, import context, detect
+ * installed harnesses, and wire each present one. The lower-level commands
+ * remain as escape hatches. Registry-driven — new harnesses surface here
+ * automatically via onboardProject's `wired` list.
  *
  * `--nested` (alias `--force`): when cwd sits inside an already-bound ancestor,
  * create a SEPARATE nested project here instead of refusing.
@@ -33,20 +35,16 @@ export async function runInitCommand(
     `Imported context files: ${result.importedContextCount}`,
   ];
 
-  if (result.wiredClaude) {
-    lines.push(
-      `OK  Claude Code wired (per-project): ${result.claudeSettingsPath}`,
-    );
-  }
-  if (result.wiredCodex) {
-    lines.push(`OK  Codex wired (global): ${result.codexHooksPath}`);
+  for (const w of result.wired) {
+    const scope = getHarness(w.id).hookScope === 'global' ? 'global' : 'per-project';
+    lines.push(`OK  ${w.label} wired (${scope}): ${w.configPath}`);
   }
 
-  if (!result.wiredClaude && !result.wiredCodex) {
+  if (result.wired.length === 0) {
     // The project bind + import still succeeded — this is guidance, not an error.
     lines.push(
       '',
-      'No supported AI agent detected yet (no Claude Code or Codex found).',
+      'No supported AI agent detected yet.',
       'Install one, then re-run `memorize init`. Or wire one manually:',
       '  memorize install codex     (global)',
       '  memorize install claude    (run inside a project)',
@@ -57,13 +55,22 @@ export async function runInitCommand(
     lines.push('', `⚠️  ${warning}`);
   }
 
-  if (result.wiredCodex) {
+  const wiredIds = new Set(result.wired.map((w) => w.id));
+  if (wiredIds.has('codex')) {
     lines.push(...codexPostInstallNotice());
+  }
+  if (wiredIds.has('opencode')) {
+    lines.push(
+      '',
+      'opencode: restart opencode to load the memorize plugin and MCP server.',
+      'Session-start memory is served via the `memorize_context` MCP tool',
+      '(opencode has no session-start hook); auto-capture runs via the plugin.',
+    );
   }
 
   lines.push(
     '',
-    'Next: use `claude` / `codex` as usual — context loads at session start.',
+    'Next: use your agent as usual — context loads at session start.',
   );
 
   console.log(lines.join('\n'));

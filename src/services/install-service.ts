@@ -825,3 +825,161 @@ export async function installCodexIntegration(cwd: string): Promise<string> {
 
   return hooksPath;
 }
+
+// --- opencode (TS-plugin mechanism) ------------------------------------------
+
+// opencode integrates via three surfaces, NOT a JSON hooks map:
+//   1. MCP server registered in opencode.json `mcp` — delivers session-start
+//      memory (memorize_context) + recall/record/diagnose. This is opencode's
+//      session-start path because its plugin API has no session-start hook.
+//   2. A TS plugin (~/.config/opencode/plugins/memorize.ts) that auto-captures
+//      tool use (tool.execute.after) and runs the consolidation boundary at
+//      compaction. Planted as a template string (NOT part of memorize's own
+//      build, so it is neither typechecked nor linted here).
+//   3. The AGENTS.md ground-rule block, surfaced via opencode's `instructions`.
+
+function opencodeConfigDir(): string {
+  return path.join(os.homedir(), '.config', 'opencode');
+}
+
+function opencodeConfigPath(): string {
+  return path.join(opencodeConfigDir(), 'opencode.json');
+}
+
+function opencodePluginPath(): string {
+  return path.join(opencodeConfigDir(), 'plugins', 'memorize.ts');
+}
+
+// Planted verbatim at install. opencode runs on Bun, which supports
+// node:child_process, so the spawn path avoids depending on Bun-shell stdin
+// specifics. LIVE-VERIFICATION NOTE: opencode's plugin payload field names and
+// built-in tool names are not fully pinned in the docs — the field reads and
+// the tool-name map below are best-effort and must be confirmed against a live
+// opencode session (tracked as the opencode dogfood item). Capture failing
+// must never break the opencode session, hence the broad try/catch + detached
+// fire-and-forget.
+const OPENCODE_PLUGIN = `// memorize opencode plugin — planted by \`memorize install opencode\`.
+// Do not edit by hand; re-running install overwrites it.
+import { spawn } from 'node:child_process';
+
+// opencode tool names -> the names memorize's capture filter recognizes.
+const TOOL_NAME_MAP = { write: 'Write', edit: 'Edit', patch: 'Edit', bash: 'shell' };
+
+function fireMemorizeHook(event, payload) {
+  try {
+    const child = spawn('npx', ['-y', '@shakystar/memorize', 'hook', 'opencode', event], {
+      stdio: ['pipe', 'ignore', 'ignore'],
+      detached: true,
+    });
+    child.on('error', () => {});
+    if (child.stdin) child.stdin.end(JSON.stringify(payload || {}));
+    child.unref();
+  } catch {
+    // capture is best-effort; never break the opencode session
+  }
+}
+
+export const MemorizePlugin = async () => ({
+  'tool.execute.after': async (input, output) => {
+    const rawTool = (input && (input.tool || input.toolName)) || (output && output.tool) || '';
+    fireMemorizeHook('PostToolUse', {
+      tool_name: TOOL_NAME_MAP[rawTool] || rawTool,
+      tool_input: (input && (input.args || input.input)) || {},
+    });
+  },
+  'experimental.session.compacting': async (input, output) => {
+    fireMemorizeHook('PostCompact', { compact_summary: (input && input.summary) || '' });
+    // opencode has no session-start-injection hook; after a compaction, point
+    // the model back at the memorize MCP server to reload project memory.
+    try {
+      if (output && output.context && typeof output.context.push === 'function') {
+        output.context.push('Memorize: call the \\\`memorize_context\\\` MCP tool to reload project memory.');
+      }
+    } catch {
+      // tolerate opencode API drift
+    }
+  },
+});
+`;
+
+interface OpencodeConfig {
+  $schema?: string;
+  instructions?: string[];
+  mcp?: Record<string, unknown>;
+  [key: string]: unknown;
+}
+
+const MEMORIZE_MCP_KEY = 'memorize';
+
+async function readOpencodeConfig(): Promise<OpencodeConfig> {
+  try {
+    const raw = await fs.readFile(opencodeConfigPath(), 'utf8');
+    const parsed = JSON.parse(raw) as OpencodeConfig;
+    return parsed && typeof parsed === 'object' ? parsed : {};
+  } catch (error) {
+    if (isEnoent(error)) return {};
+    throw error;
+  }
+}
+
+/**
+ * Register the memorize MCP server in opencode.json (idempotent merge) and
+ * ensure AGENTS.md is in the `instructions` list so opencode loads the
+ * ground-rule. Preserves the user's other config keys.
+ */
+async function mergeOpencodeConfig(): Promise<string> {
+  const config = await readOpencodeConfig();
+  config.$schema = config.$schema ?? 'https://opencode.ai/config.json';
+  config.mcp = { ...(config.mcp ?? {}) };
+  config.mcp[MEMORIZE_MCP_KEY] = {
+    type: 'local',
+    command: ['npx', '-y', '@shakystar/memorize', 'mcp'],
+    enabled: true,
+  };
+  const instructions = Array.isArray(config.instructions)
+    ? [...config.instructions]
+    : [];
+  if (!instructions.includes('AGENTS.md')) instructions.push('AGENTS.md');
+  config.instructions = instructions;
+  const configPath = opencodeConfigPath();
+  await writeJson(configPath, config);
+  return configPath;
+}
+
+async function writeOpencodePlugin(): Promise<void> {
+  const pluginPath = opencodePluginPath();
+  await fs.mkdir(path.dirname(pluginPath), { recursive: true });
+  await fs.writeFile(pluginPath, OPENCODE_PLUGIN, 'utf8');
+}
+
+/**
+ * Wire memorize into opencode: register the MCP server + AGENTS.md instruction
+ * (global opencode.json), plant the capture plugin (global), and plant the
+ * project's AGENTS.md ground-rule block. Idempotent. Returns the opencode.json
+ * path (the primary config surface) for the install summary.
+ */
+export async function installOpencodeIntegration(cwd: string): Promise<string> {
+  const configPath = await mergeOpencodeConfig();
+  await writeOpencodePlugin();
+  await upsertGroundRuleBlock(path.join(cwd, 'AGENTS.md'));
+  return configPath;
+}
+
+/**
+ * Reverse installOpencodeIntegration: drop the memorize MCP entry, remove the
+ * plugin file, and strip the AGENTS.md ground-rule. Preserves other opencode
+ * config and never deletes user-owned AGENTS.md. Idempotent.
+ */
+export async function uninstallOpencodeIntegration(cwd: string): Promise<string> {
+  const configPath = opencodeConfigPath();
+  const config = await readOpencodeConfig();
+  if (config.mcp && MEMORIZE_MCP_KEY in config.mcp) {
+    const mcp = { ...config.mcp };
+    delete mcp[MEMORIZE_MCP_KEY];
+    config.mcp = mcp;
+    await writeJson(configPath, config);
+  }
+  await fs.rm(opencodePluginPath(), { force: true });
+  await stripGroundRuleBlock(path.join(cwd, 'AGENTS.md'));
+  return configPath;
+}

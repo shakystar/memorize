@@ -17,14 +17,18 @@
  * in their own modules and are wired to descriptors by id.
  */
 
-export type HarnessId = 'claude' | 'codex';
+export type HarnessId = 'claude' | 'codex' | 'opencode';
 
 export interface HarnessDescriptor {
-  /** Stable id; also the home config-dir basename (`~/.${id}`) and the
-   *  `memorize hook <id> <event>` token. */
+  /** Stable id; also the `memorize hook <id> <event>` token and (for
+   *  claude/codex) the launcher binary name probed on PATH. */
   id: HarnessId;
   /** Human label for summaries/notices. */
   label: string;
+  /** Config dir relative to the home directory — the "this harness has run"
+   *  detection signal. NOT always `.${id}`: opencode uses `.config/opencode`,
+   *  not `.opencode`. */
+  configDirRel: string;
   /** Lifecycle hook events memorize registers at install time. */
   hookEvents: readonly string[];
   /** Events a prior install may have registered that the current contract
@@ -74,6 +78,7 @@ export interface HarnessDescriptor {
 const CLAUDE: HarnessDescriptor = {
   id: 'claude',
   label: 'Claude Code',
+  configDirRel: '.claude',
   hookEvents: ['SessionStart', 'PostCompact', 'SessionEnd', 'PostToolUse'],
   legacyHookEvents: ['Stop', 'PreCompact'],
   legacyHandledEvents: ['Stop'],
@@ -96,6 +101,7 @@ const CLAUDE: HarnessDescriptor = {
 const CODEX: HarnessDescriptor = {
   id: 'codex',
   label: 'Codex',
+  configDirRel: '.codex',
   hookEvents: ['SessionStart', 'PostToolUse', 'PostCompact'],
   legacyHookEvents: ['Stop'],
   legacyHandledEvents: ['Stop'],
@@ -108,10 +114,44 @@ const CODEX: HarnessDescriptor = {
   autoBindProject: false,
 };
 
-/** All supported harnesses, in display order. */
-export const harnessRegistry: readonly HarnessDescriptor[] = [CLAUDE, CODEX];
+// --- opencode ----------------------------------------------------------------
 
-const byId: Record<HarnessId, HarnessDescriptor> = { claude: CLAUDE, codex: CODEX };
+// opencode integrates via a TypeScript PLUGIN (`.opencode/plugins/*.ts`), not a
+// JSON hooks map. Its plugin API has `tool.execute.after` (→ PostToolUse
+// capture) and `experimental.session.compacting` (→ PostCompact boundary +
+// context push) but NO session-start-injection hook — so session-start memory
+// is delivered through the MCP pillar (registersMcp), not a hook. SessionStart
+// is therefore absent from hookEvents. The plugin is planted globally
+// (~/.config/opencode/plugins/), so like codex it bails when cwd is unbound.
+const OPENCODE: HarnessDescriptor = {
+  id: 'opencode',
+  label: 'opencode',
+  // opencode's config lives under ~/.config/opencode, NOT ~/.opencode.
+  configDirRel: '.config/opencode',
+  hookEvents: ['PostToolUse', 'PostCompact'],
+  legacyHookEvents: [],
+  legacyHandledEvents: ['Stop'],
+  mechanism: 'ts-plugin',
+  registersMcp: true,
+  hookScope: 'global',
+  hookPlacement: 'append',
+  groundRuleFile: 'AGENTS.md',
+  plantsSkill: false,
+  autoBindProject: false,
+};
+
+/** All supported harnesses, in display order. */
+export const harnessRegistry: readonly HarnessDescriptor[] = [
+  CLAUDE,
+  CODEX,
+  OPENCODE,
+];
+
+const byId: Record<HarnessId, HarnessDescriptor> = {
+  claude: CLAUDE,
+  codex: CODEX,
+  opencode: OPENCODE,
+};
 
 /** All harness ids, in registry order. */
 export const harnessIds: readonly HarnessId[] = harnessRegistry.map((h) => h.id);
