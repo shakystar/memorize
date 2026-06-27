@@ -34,28 +34,34 @@ function ageSuffix(sessionDate: string | undefined, questionDate?: string): stri
     : ` [${days} days before current date]`;
 }
 
-/** Assemble the retrieved sessions into the reader context.
- *
- *  Two stages, deliberately ordered:
- *  1. SELECT by retrieval RANK (input order) until the char budget is full —
- *     the ranking must decide WHAT the reader sees. (A prior version sorted
- *     chronologically BEFORE truncating, so a high-rank-but-recent gold session
- *     was dropped by the budget cut — gold present in top-K yet invisible to the
- *     reader.) Whole sessions only; the first session alone is truncated if it
- *     exceeds the budget.
- *  2. DISPLAY the selected sessions oldest→newest so cross-session temporal/
- *     count reasoning sees a timeline; each header carries the session's age. */
-function assembleHistory(sessions: BenchSession[], questionDate?: string): string {
-  const header = (s: BenchSession): string =>
+function sessionHeader(s: BenchSession, questionDate?: string): string {
+  return (
     `Session Date: ${s.date ?? 'Unknown'}${ageSuffix(s.date, questionDate)}\n` +
-    `Session ${s.sessionId}:\n`;
+    `Session ${s.sessionId}:\n`
+  );
+}
 
+/** Stage 1 of context assembly: SELECT sessions by retrieval RANK (input order)
+ *  until the char budget is full — the ranking must decide WHAT the reader sees.
+ *  (A prior version sorted chronologically BEFORE truncating, so a high-rank-but-
+ *  recent gold session was dropped by the budget cut — gold present in top-K yet
+ *  invisible to the reader.) Whole sessions only; the first session alone is
+ *  truncated if it exceeds the budget. Exported so the harness can measure which
+ *  gold sessions actually survived the budget (Phase 0 goldInBudget diagnostic),
+ *  using the same logic the reader sees rather than a re-derivation. */
+export function selectForBudget(
+  sessions: BenchSession[],
+  questionDate?: string,
+): { session: BenchSession; text: string }[] {
   const selected: { session: BenchSession; text: string }[] = [];
   let used = 0;
   for (const session of sessions) {
-    const block = `${header(session)}${session.text}\n\n`;
+    const block = `${sessionHeader(session, questionDate)}${session.text}\n\n`;
     if (used === 0 && block.length > READER_CONTEXT_CHAR_BUDGET) {
-      const keep = Math.max(0, READER_CONTEXT_CHAR_BUDGET - header(session).length - 2);
+      const keep = Math.max(
+        0,
+        READER_CONTEXT_CHAR_BUDGET - sessionHeader(session, questionDate).length - 2,
+      );
       selected.push({ session, text: session.text.slice(0, keep) });
       break;
     }
@@ -63,15 +69,24 @@ function assembleHistory(sessions: BenchSession[], questionDate?: string): strin
     selected.push({ session, text: session.text });
     used += block.length;
   }
+  return selected;
+}
 
-  return selected
+/** Assemble the retrieved sessions into the reader context.
+ *
+ *  Two stages, deliberately ordered:
+ *  1. SELECT by retrieval RANK within the char budget (`selectForBudget`).
+ *  2. DISPLAY the selected sessions oldest→newest so cross-session temporal/
+ *     count reasoning sees a timeline; each header carries the session's age. */
+function assembleHistory(sessions: BenchSession[], questionDate?: string): string {
+  return selectForBudget(sessions, questionDate)
     .map((s, i) => ({ ...s, i, t: parseBenchDate(s.session.date) }))
     .sort((a, b) => {
       const at = Number.isNaN(a.t) ? Infinity : a.t;
       const bt = Number.isNaN(b.t) ? Infinity : b.t;
       return at === bt ? a.i - b.i : at - bt;
     })
-    .map((x) => `${header(x.session)}${x.text}\n\n`)
+    .map((x) => `${sessionHeader(x.session, questionDate)}${x.text}\n\n`)
     .join('');
 }
 
