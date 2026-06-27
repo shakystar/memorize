@@ -7,6 +7,7 @@ import { runDoctorCommand } from './commands/doctor.js';
 import { runEventsCommand } from './commands/events.js';
 import { runExportCommand } from './commands/export.js';
 import { runHookCommand } from './commands/hook.js';
+import { runInitCommand } from './commands/init.js';
 import { runInstallCommand } from './commands/install.js';
 import { runMemoryCommand } from './commands/memory.js';
 import { runMemoryIndexCommand } from './commands/memory-index.js';
@@ -25,6 +26,7 @@ import { renderScaffoldUsage } from './usage.js';
 export { renderScaffoldUsage } from './usage.js';
 
 const handlers: Record<string, CommandHandler> = {
+  init: runInitCommand,
   project: runProjectCommand,
   projection: runProjectionCommand,
   memory: runMemoryCommand,
@@ -54,6 +56,7 @@ const handlers: Record<string, CommandHandler> = {
 // signal agent liveness on a session that may just have ended.
 const SESSION_MANAGING_COMMANDS = new Set([
   'hook',
+  'init',
   'install',
   'uninstall',
   'session',

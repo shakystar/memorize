@@ -300,21 +300,26 @@ function buildRelocationWarning(
   );
 }
 
-export async function setupProject(rootPath: string): Promise<{
+export async function setupProject(
+  rootPath: string,
+  opts: { allowNested?: boolean } = {},
+): Promise<{
   project: Project;
   importedContextCount: number;
   relocated: boolean;
+  nested: boolean;
   warnings: string[];
 }> {
   const warnings: string[] = [];
   let relocated = false;
+  let nested = false;
   let project: Project | undefined;
 
   const binding = await getBindingForPath(rootPath);
   if (binding?.kind === 'exact') {
     // This path IS a bound project root — adopt it (idempotent re-setup).
     project = await readProject(binding.projectId);
-  } else if (binding?.kind === 'ancestor') {
+  } else if (binding?.kind === 'ancestor' && !opts.allowNested) {
     // This path merely sits INSIDE a bound project. Adopting/importing here would
     // absorb the subdir into its parent and leak the subdir's CLAUDE.md/AGENTS.md
     // into the ancestor's memory (#151). Refuse and guide instead — create or
@@ -327,6 +332,19 @@ export async function setupProject(rootPath: string): Promise<{
         `To create a SEPARATE project for this directory instead, run:\n` +
         `  memorize project init`,
     );
+  } else if (binding?.kind === 'ancestor') {
+    // allowNested: the caller explicitly wants a SEPARATE nested project here,
+    // mirroring `project init` (which intentionally bypasses the refusal above).
+    // Capture git identity so the nested project is move-protected too (#145);
+    // skip relocation detection — an intentional create is not a move.
+    const identity = computeRepoIdentity(rootPath);
+    project = await createProject({
+      title: path.basename(rootPath),
+      rootPath,
+      ...(identity.originUrl ? { originUrl: identity.originUrl } : {}),
+      ...(identity.rootCommit ? { rootCommit: identity.rootCommit } : {}),
+    });
+    nested = true;
   } else {
     // No binding at this path — detect a moved repo BEFORE creating, so we never
     // silently orphan the original's memory (#145).
@@ -363,6 +381,7 @@ export async function setupProject(rootPath: string): Promise<{
     project: refreshedProject,
     importedContextCount,
     relocated,
+    nested,
     warnings,
   };
 }

@@ -346,9 +346,38 @@ project, mirroring how `search` resolves the project.
   superseded-by / deduped-by pointers), followed by the memory text.
 - Fails with `no memory found with id <id>` when the id is unknown.
 
+### `memorize init [--nested]`
+
+**The recommended one-shot onboarding command** — prefer it over running
+`project setup` + `install claude`/`install codex` separately. Composes the
+lower-level primitives in one idempotent step:
+
+1. `project setup` (bind/adopt cwd + auto-relocate a moved repo + import
+   `AGENTS.md` / `CLAUDE.md` / `GEMINI.md` / `.cursorrules` / `.cursor/rules/`).
+2. Detects which agent CLIs are installed (same detection as `setup`:
+   `~/.claude` / `~/.codex` config dirs, then PATH).
+3. Wires each **present** agent — `install claude` (per-project
+   `.claude/settings.local.json` + `CLAUDE.md` ground rule + `using-memorize`
+   skill) and/or `install codex` (global `~/.codex/hooks.json` + this project's
+   `AGENTS.md` ground rule).
+4. Prints a single summary. When Codex is wired, it appends the same
+   `ACTION REQUIRED` approval + sandbox `writable_roots` notice that
+   `install codex` prints.
+
+- `--nested` (alias `--force`): when cwd sits inside an already-bound ancestor,
+  create a SEPARATE nested project here instead of refusing (the case
+  `project init` exists for). Without it, the ancestor refusal is preserved.
+- Idempotent and safe to re-run; every sub-step is the same idempotent
+  primitive documented below.
+- When neither agent is detected, the project is still bound + context
+  imported (exit 0); the output guides the user to install an agent and
+  re-run, or wire one manually.
+
 ### `memorize project setup`
 
-Idempotent adoption command. Use this for existing projects.
+Idempotent adoption command. Lower-level primitive used by `memorize init`
+(prefer `init` for first-time onboarding); use `project setup` directly only
+when you specifically want adoption WITHOUT touching agent integration.
 
 - Binds cwd to a project (creates one if not already bound).
 - Imports context files if present: `AGENTS.md`, `CLAUDE.md`,
@@ -383,8 +412,10 @@ Low-level "create a fresh project, bind this cwd to it" command.
   remain on disk under their old id, but are no longer reachable via
   cwd). Use sparingly.
 
-Most callers should not use `init` directly. `setup` is the correct
-entry point.
+Most callers should not use `project init` directly. `memorize init` is the
+correct entry point for onboarding (it composes adoption + agent wiring);
+`memorize init --nested` covers the intentional nested-project case this
+command's `--force` was for.
 
 ### `memorize project show`
 
@@ -615,12 +646,17 @@ one-liner calls it). Detects installed agents and wires the global parts:
   `~/.codex`) exists or its launcher is on PATH.
 - Codex: if present, writes the global hook to `~/.codex/hooks.json`
   (same as `install codex`). Idempotent.
-- Claude: detection only; Claude hooks are per-project, so `setup`
-  prints the `memorize install claude` instruction rather than wiring.
+- Claude: detection only; Claude hooks are per-project, so `setup` cannot
+  wire them globally. Instead it plants the global `init-memorize` Agent
+  Skill at `~/.claude/skills/init-memorize/SKILL.md`, so in any project the
+  agent can be asked to "set up memorize" and will run `memorize init`.
 - No agent detected: prints guidance and exits 0.
 
 `setup` never touches the current working directory and never binds a
-project; that is `project setup`'s job. Test-only env override:
+project; that is `project setup`'s (or `memorize init`'s) job. For
+onboarding a specific project, prefer `memorize init` — it binds the
+project AND wires the detected agent(s) in one step, where `setup` only
+does the machine-global codex part. Test-only env override:
 `MEMORIZE_DETECT_PATH` replaces the PATH scanned for agent launchers.
 
 ### `memorize install claude`

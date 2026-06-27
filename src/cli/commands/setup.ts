@@ -2,7 +2,10 @@ import {
   defaultDetectDeps,
   detectAgents,
 } from '../../services/agent-detect.js';
-import { installCodexHooks } from '../../services/install-service.js';
+import {
+  installCodexHooks,
+  installInitMemorizeSkill,
+} from '../../services/install-service.js';
 import type { CliContext } from '../context.js';
 
 export async function runSetupCommand(
@@ -33,9 +36,13 @@ export async function runSetupCommand(
   }
 
   if (detection.claude.present) {
-    lines.push('--  Claude Code detected. Its hooks are per-project, so run');
-    lines.push('    this inside each project you want memorize in:');
-    lines.push('      memorize install claude');
+    // Claude hooks are per-project, so setup can't wire them globally. Instead
+    // plant a global skill so any project gains a "set up memorize here" →
+    // `memorize init` trigger — that's the one command that does the wiring.
+    await installInitMemorizeSkill();
+    lines.push('OK  Claude Code detected. Planted the global `init-memorize`');
+    lines.push('    skill — in any project, ask me to "set up memorize" and');
+    lines.push('    I will run `memorize init` (or run it yourself).');
   }
 
   lines.push('');

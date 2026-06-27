@@ -379,6 +379,74 @@ async function removeUsingMemorizeSkill(cwd: string): Promise<void> {
   await fs.rm(skillDir, { recursive: true, force: true });
 }
 
+// --- init-memorize Agent Skill (global) --------------------------------------
+
+const INIT_MEMORIZE_SKILL = `---
+name: init-memorize
+description: Use when the user wants to set up / onboard / install memorize in a project for the first time ("set up memorize here", "add memorize to this repo", "onboard memorize"). For a one-shot project onboarding. NOT for recalling memory or checking health — that is the using-memorize skill.
+---
+
+# Setting up memorize in a project
+
+## Overview
+memorize gives every agent session a shared, persistent project brain. Onboarding a project is a single idempotent command — do NOT hand-run the old four-step flow (\`project init\` + \`project setup\` + \`install claude\` + \`install codex\`).
+
+## When to use
+The user asks to set up, onboard, or install memorize in THIS project for the first time.
+
+## When NOT to use
+- Recalling decisions / progress, or checking capture health → that is the \`using-memorize\` skill.
+- The project is already set up (\`.claude/settings.local.json\` already has memorize hooks) → re-running \`init\` is safe but usually unnecessary; run \`memorize doctor\` instead.
+
+## Steps
+1. **Ensure \`memorize\` is on PATH.** Node project: \`npm install -D @shakystar/memorize\`. Otherwise: \`npm install -g @shakystar/memorize\`. (See AI_SETUP.md step 1 for monorepo / global-dir edge cases.)
+2. **Run the one-shot onboarding** from the project root:
+   \`npx @shakystar/memorize init\`
+   Binds the directory to a memorize project (creating one if needed), imports existing AGENTS.md/CLAUDE.md/GEMINI.md/.cursorrules, detects installed agent CLIs, and wires each present agent. Safe to re-run. Add \`--nested\` to create a SEPARATE project inside an already-bound directory.
+   If the output prints an **ACTION REQUIRED** notice for Codex, relay it verbatim — codex silently ignores externally-written hooks until the user approves them once interactively.
+3. **Verify:** \`npx @shakystar/memorize doctor --json\` — expect \`"status": "ok"\`. If \`warn\`/\`error\`, apply each issue's \`fix\` field and re-run.
+4. **Tell the user** memorize is set up and context now persists across sessions automatically. Do NOT tell them to create a task (an empty task list is normal).
+
+## Common mistake
+Running \`project init\` then \`project setup\` then \`install claude\`/\`install codex\` separately. \`memorize init\` does all of it in one idempotent step; the split commands are low-level escape hatches.
+`;
+
+/**
+ * Global Claude skills dir (~/.claude/skills). Unlike using-memorize (planted
+ * per-project by installClaudeIntegration), the init-memorize trigger must
+ * exist BEFORE any project is set up, so it lives user-global.
+ */
+function globalClaudeSkillsDir(): string {
+  return path.join(os.homedir(), '.claude', 'skills');
+}
+
+/**
+ * Plant the init-memorize skill at ~/.claude/skills/init-memorize/SKILL.md so
+ * any project gains a natural-language "set up memorize here" → `memorize init`
+ * trigger. Idempotent — overwrites on every call to keep content current.
+ * Called by `memorize setup` (the once-per-machine global onboarding) when
+ * Claude Code is detected.
+ */
+export async function installInitMemorizeSkill(): Promise<string> {
+  const skillDir = path.join(globalClaudeSkillsDir(), 'init-memorize');
+  await fs.mkdir(skillDir, { recursive: true });
+  const skillPath = path.join(skillDir, 'SKILL.md');
+  await fs.writeFile(skillPath, INIT_MEMORIZE_SKILL, 'utf8');
+  return skillPath;
+}
+
+/**
+ * Remove the global init-memorize skill dir (only that dir). Never throws when
+ * absent. Exported for an explicit teardown path; not wired into per-project
+ * `uninstall claude` (that would surprisingly affect every project).
+ */
+export async function removeInitMemorizeSkill(): Promise<void> {
+  await fs.rm(path.join(globalClaudeSkillsDir(), 'init-memorize'), {
+    recursive: true,
+    force: true,
+  });
+}
+
 // --- #68 ground-rule block ----------------------------------------------------
 
 const GROUND_RULE_START_MARKER = '<!-- memorize:ground-rule v=1 start -->';
