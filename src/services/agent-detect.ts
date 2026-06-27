@@ -3,17 +3,22 @@ import os from 'node:os';
 import path from 'node:path';
 import process from 'node:process';
 
-export type AgentName = 'claude' | 'codex';
+import { type HarnessId, harnessIds } from '../harness/registry.js';
+
+/** @deprecated alias of {@link HarnessId} — kept for existing call sites. */
+export type AgentName = HarnessId;
 
 export interface AgentPresence {
   present: boolean;
   via: 'config-dir' | 'path' | null;
 }
 
-export interface AgentDetectionResult {
-  claude: AgentPresence;
-  codex: AgentPresence;
-}
+/**
+ * Presence keyed by harness id. `Record<HarnessId, …>` is structurally the
+ * old `{ claude; codex }` shape, so `result.claude` / `result.codex` access
+ * (and object-literal construction in tests) keeps compiling unchanged.
+ */
+export type AgentDetectionResult = Record<HarnessId, AgentPresence>;
 
 /**
  * Injectable inputs so detection is unit-testable without touching the
@@ -27,7 +32,7 @@ export interface DetectDeps {
   isWindows: boolean;
 }
 
-function detectAgent(name: AgentName, deps: DetectDeps): AgentPresence {
+function detectAgent(name: HarnessId, deps: DetectDeps): AgentPresence {
   // Config dir is the strongest signal that the agent has actually run.
   const configDir = path.join(deps.homedir, `.${name}`);
   if (deps.exists(configDir)) return { present: true, via: 'config-dir' };
@@ -47,10 +52,9 @@ function detectAgent(name: AgentName, deps: DetectDeps): AgentPresence {
 }
 
 export function detectAgents(deps: DetectDeps): AgentDetectionResult {
-  return {
-    claude: detectAgent('claude', deps),
-    codex: detectAgent('codex', deps),
-  };
+  return Object.fromEntries(
+    harnessIds.map((id) => [id, detectAgent(id, deps)]),
+  ) as AgentDetectionResult;
 }
 
 export function defaultDetectDeps(): DetectDeps {

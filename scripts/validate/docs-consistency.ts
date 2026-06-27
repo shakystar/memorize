@@ -43,16 +43,32 @@ const read = (path: string): Promise<string> => readFile(path, 'utf8');
 
 // --- extract the source-of-truth contracts ----------------------------------
 
-/** Hook-event arrays from install-service.ts (the install contract). */
-function extractEventArray(source: string, constName: string): string[] {
-  const match = source.match(
-    new RegExp(`const ${constName} = \\[([^\\]]*)\\]`, 's'),
+/**
+ * Hook-event arrays from the harness registry (the install contract's single
+ * source of truth — install-service and doctor derive from it). Reads a named
+ * descriptor object (e.g. CLAUDE) and pulls one of its array fields
+ * (`hookEvents` / `legacyHookEvents`).
+ */
+function extractDescriptorArray(
+  source: string,
+  objectName: string,
+  field: string,
+): string[] {
+  const objMatch = source.match(
+    new RegExp(`const ${objectName}: HarnessDescriptor = \\{([\\s\\S]*?)\\n\\};`),
   );
-  if (!match) {
-    fail(`could not extract ${constName} from install-service.ts`);
+  if (!objMatch) {
+    fail(`could not extract ${objectName} descriptor from registry.ts`);
     return [];
   }
-  return [...match[1]!.matchAll(/'([^']+)'/g)].map((m) => m[1]!);
+  const fieldMatch = objMatch[1]!.match(
+    new RegExp(`${field}: \\[([^\\]]*)\\]`),
+  );
+  if (!fieldMatch) {
+    fail(`could not extract ${objectName}.${field} from registry.ts`);
+    return [];
+  }
+  return [...fieldMatch[1]!.matchAll(/'([^']+)'/g)].map((m) => m[1]!);
 }
 
 /** Command names from the cli/index.ts handlers map. */
@@ -67,15 +83,16 @@ function extractHandlerCommands(source: string): string[] {
   return [...match[1]!.matchAll(/^\s*'?([\w-]+)'?:/gm)].map((m) => m[1]!);
 }
 
-const installService = await read('src/services/install-service.ts');
+const registrySource = await read('src/harness/registry.ts');
 const cliIndex = await read('src/cli/index.ts');
 const usage = await read('src/cli/usage.ts');
 
-const claudeEvents = extractEventArray(installService, 'CLAUDE_HOOK_EVENTS');
-const codexEvents = extractEventArray(installService, 'CODEX_HOOK_EVENTS');
-const claudeLegacy = extractEventArray(
-  installService,
-  'CLAUDE_LEGACY_MEMORIZE_HOOK_EVENTS',
+const claudeEvents = extractDescriptorArray(registrySource, 'CLAUDE', 'hookEvents');
+const codexEvents = extractDescriptorArray(registrySource, 'CODEX', 'hookEvents');
+const claudeLegacy = extractDescriptorArray(
+  registrySource,
+  'CLAUDE',
+  'legacyHookEvents',
 );
 // `version` is special-cased in main() before the handlers map.
 const commands = new Set([...extractHandlerCommands(cliIndex), 'version']);
@@ -120,7 +137,7 @@ for (const doc of ALL_DOCS) {
 // Retired events must not reappear in the live contract.
 for (const event of claudeLegacy) {
   if (claudeEvents.includes(event)) {
-    fail(`install-service: '${event}' is both live and legacy for Claude`);
+    fail(`registry: '${event}' is both live and legacy for Claude`);
   }
 }
 

@@ -5,6 +5,7 @@ import { fileURLToPath } from 'node:url';
 
 import which from 'which';
 
+import { getHarness } from '../harness/registry.js';
 import { isEnoent, writeJson } from '../storage/fs-utils.js';
 import { POST_TOOL_USE_MATCHER } from './capture-service.js';
 
@@ -105,21 +106,11 @@ export function isMemorizeHookCommandForAgent(
   return re.test(command);
 }
 
-// Hook events the β contract registers for Claude. Stop is intentionally
-// absent — see hook-service.ts for the rationale (Stop fires per-turn,
-// not per-session, and lifecycle moved to SessionEnd + reapStaleSessions).
-// PreCompact is gone too (#85): its checkpoint-capture role was replaced
-// wholesale by the PostCompact consolidation boundary, the handler had
-// been a no-op for a while, and real stores show ZERO checkpoint events —
-// registering it only spawned a useless subprocess on every compaction.
-// PostToolUse (CLS capture) carries a tool matcher so the hook subprocess
-// only spawns for tools the decision-signal filter could ever admit.
-export const CLAUDE_HOOK_EVENTS = [
-  'SessionStart',
-  'PostCompact',
-  'SessionEnd',
-  'PostToolUse',
-] as const;
+// Hook event sets are owned by the harness registry (the single source of
+// truth) — see src/harness/registry.ts for the per-event rationale. Re-exported
+// here because repair-service (doctor) reads CLAUDE_HOOK_EVENTS to verify the
+// SAME set install registers, so the two can never drift.
+export const CLAUDE_HOOK_EVENTS = getHarness('claude').hookEvents;
 
 // Per-event matcher for Claude hook registration. PostToolUse fires for
 // every tool; matching here (instead of in the handler) saves a subprocess
@@ -130,12 +121,9 @@ const CLAUDE_HOOK_MATCHERS: Partial<Record<string, string>> = {
   PostToolUse: POST_TOOL_USE_MATCHER,
 };
 
-// Memorize hook events that previous installs may have registered but
-// the current β contract no longer wants. We strip these from the
-// merged settings on re-install. Keep narrow — only memorize-owned
-// entries; user-added entries for other tools under the same event
-// keys must be untouched.
-const CLAUDE_LEGACY_MEMORIZE_HOOK_EVENTS = ['Stop', 'PreCompact'] as const;
+// Legacy events a prior install may have registered that the current contract
+// strips on re-install (registry-owned; preserves other tools' entries).
+const CLAUDE_LEGACY_MEMORIZE_HOOK_EVENTS = getHarness('claude').legacyHookEvents;
 
 // Claude Code expects each hook event to hold an array of matcher
 // groups, where every group itself carries a `hooks` array of
@@ -541,19 +529,9 @@ const CODEX_END_MARKER = '<!-- memorize:bootstrap v=1 end -->';
 const LEGACY_CODEX_START_MARKER = '<!-- Memorize:START -->';
 const LEGACY_CODEX_END_MARKER = '<!-- Memorize:END -->';
 
-// Codex hook events the β contract registers. Codex has no SessionEnd /
-// Shutdown / Exit hook (verified against developers.openai.com/codex/hooks
-// 2026-05), so codex session lifecycle is owned by reapStaleSessions, and
-// the CLS consolidation boundary is PostCompact + the next SessionStart's
-// catch-up. PostToolUse is registered even though codex currently fires it
-// for Bash-like tools only — partial capture beats none, and coverage
-// widens automatically if the upstream issue is fixed.
-const CODEX_HOOK_EVENTS = ['SessionStart', 'PostToolUse', 'PostCompact'] as const;
-
-// Codex Stop fires per-turn just like Claude's, so the rc.X
-// auto-handoff path was wrong here too. Strip the legacy registration
-// on re-install.
-const CODEX_LEGACY_MEMORIZE_HOOK_EVENTS = ['Stop'] as const;
+// Codex hook event sets (registry-owned; see registry.ts for rationale).
+const CODEX_HOOK_EVENTS = getHarness('codex').hookEvents;
+const CODEX_LEGACY_MEMORIZE_HOOK_EVENTS = getHarness('codex').legacyHookEvents;
 
 function codexHooksPath(): string {
   return path.join(os.homedir(), '.codex', 'hooks.json');

@@ -14,6 +14,7 @@ import {
   createConsolidatedMemory,
 } from '../domain/entities.js';
 import type { DomainEventPayload } from '../domain/events.js';
+import type { HarnessId } from '../harness/registry.js';
 import { getDb } from '../storage/db.js';
 import {
   type AppendEventInput,
@@ -290,7 +291,8 @@ export class LlmConsolidator implements Consolidator {
 
 // --- host-CLI extractor (claude -p / codex exec) — #44 ------------------------
 
-export type HostCliCommand = 'claude' | 'codex';
+/** @deprecated alias of {@link HarnessId} — kept for existing call sites. */
+export type HostCliCommand = HarnessId;
 
 /**
  * Env var set on the spawned host CLI so the memorize hooks ITS session
