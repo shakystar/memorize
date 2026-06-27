@@ -9,6 +9,7 @@ import { runExportCommand } from './commands/export.js';
 import { runHookCommand } from './commands/hook.js';
 import { runInitCommand } from './commands/init.js';
 import { runInstallCommand } from './commands/install.js';
+import { runMcpCommand } from './commands/mcp.js';
 import { runMemoryCommand } from './commands/memory.js';
 import { runMemoryIndexCommand } from './commands/memory-index.js';
 import { runMigrateCommand } from './commands/migrate.js';
@@ -45,6 +46,7 @@ const handlers: Record<string, CommandHandler> = {
   consolidate: runConsolidateCommand,
   session: runSessionCommand,
   setup: runSetupCommand,
+  mcp: runMcpCommand,
 };
 
 // Commands that manage session lifecycle themselves — skip post-command
@@ -65,6 +67,9 @@ const SESSION_MANAGING_COMMANDS = new Set([
   // `update` is machine-wide maintenance that may run outside any bound
   // project (and re-execs itself); a heartbeat from it would be wrong.
   'update',
+  // `mcp` runs a long-lived stdio server; it is an MCP transport, not an agent
+  // session, so it must not bump session liveness.
+  'mcp',
 ]);
 
 async function main(): Promise<void> {

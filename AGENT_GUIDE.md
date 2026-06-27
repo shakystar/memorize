@@ -659,6 +659,33 @@ project AND wires the detected agent(s) in one step, where `setup` only
 does the machine-global codex part. Test-only env override:
 `MEMORIZE_DETECT_PATH` replaces the PATH scanned for agent launchers.
 
+### `memorize mcp`
+
+Runs the memorize **MCP server** over stdio — the cross-harness pillar. Any
+MCP-capable host (Cursor, Cline, Goose, opencode, …) can wire it as an
+`mcpServers` entry and call memorize without a per-harness hook adapter:
+
+```json
+{ "memorize": { "command": "npx", "args": ["-y", "@shakystar/memorize", "mcp"] } }
+```
+
+The server is cwd-scoped (it serves whatever project the launch directory binds
+to) and exposes:
+
+- `memorize_recall` — search the project brain for decisions/rationale/progress.
+- `memorize_context` — the session-start context (active tasks, recent
+  decisions, parallel-session activity). Also a `memorize://context` resource
+  and a `session-context` prompt for hosts that prefer those surfaces.
+- `memorize_record` — persist distilled decisions/rationale/progress (idempotent).
+- `memorize_consolidate` — run a consolidation boundary (real side effect).
+- `memorize_diagnose` — `doctor` as JSON.
+
+Limit vs hooks: MCP tools/resources are pulled on-demand by the agent — they are
+NOT auto-injected before the first turn the way a `SessionStart` hook is.
+Deterministic pre-turn injection + automatic capture still need the hook pillar
+(`install claude` / `install codex`); MCP is the universal fallback for hosts
+without a hook system.
+
 ### `memorize install claude`
 
 Idempotent. Writes hook entries into `.claude/settings.local.json`
