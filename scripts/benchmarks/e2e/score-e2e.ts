@@ -13,6 +13,20 @@ export interface QuestionResult {
   goldRank?: number;
   /** Valid memories after seeding (consolidation distill count). */
   memoryCount?: number;
+  /** Gold-coverage diagnostics (Phase 0 bottleneck localization). For multi-gold
+   *  questions these split a failure into recall-bound (gold never reached the
+   *  reader) vs aggregation-bound (gold reached the reader, answer still wrong):
+   *  - goldTotal:    number of gold sessions for the question
+   *  - goldInTopK:   how many of them survived retrieval into the top-K candidates
+   *                  (oracle mode bypasses retrieval, so this equals goldTotal)
+   *  - goldInBudget: how many of them survived the reader char-budget selection
+   *                  and were actually visible to the reader */
+  goldTotal?: number;
+  goldInTopK?: number;
+  goldInBudget?: number;
+  /** 'oracle' = gold sessions fed directly (retrieval+consolidation bypassed);
+   *  'real' = full retrieval pipeline. Lets the analyzer separate the two runs. */
+  mode?: 'oracle' | 'real';
   /** Reader answer (truncated) and gold, for eyeballing reader misses. */
   answer?: string;
   gold?: string | null;
