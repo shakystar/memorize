@@ -12,6 +12,16 @@ on:
         description: harness id (must exist in src/harness/registry.ts)
         required: true
         default: opencode
+  # Runs when harness-integration code changes, so a PR that breaks a harness
+  # adapter fails its own conformance check (catches breakage at the source).
+  pull_request:
+    paths:
+      - 'src/harness/**'
+      - 'src/adapters/**'
+      - 'src/services/install-service.ts'
+      - 'src/services/agent-detect.ts'
+      - 'docker/conformance/**'
+      - '.github/workflows/harness-conformance.yml'
   schedule:
     # Weekly, Monday 06:00 UTC — catch upstream harness releases.
     - cron: '0 6 * * 1'
