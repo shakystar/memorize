@@ -63,15 +63,24 @@ plugin_load_check() {
   kill "$pid" 2>/dev/null || true
 }
 
-# Gated: needs OPENCODE_CONFORMANCE_LIVE=1 and a configured provider (API key in
-# env). Drives a real edit and asserts memorize captured an observation.
+# Gated: needs OPENCODE_CONFORMANCE_LIVE=1 + a provider key in env (e.g.
+# ANTHROPIC_API_KEY) + OPENCODE_MODEL. Drives ONE real edit and asserts memorize
+# captured an observation. memorize's capture is LLM-free — the model is used
+# only so opencode performs a tool call; a tiny/cheap model (haiku) is enough.
 live_capture_check() {
   if [ "${OPENCODE_CONFORMANCE_LIVE:-}" != "1" ]; then
     skip "live capture (set OPENCODE_CONFORMANCE_LIVE=1 + a provider API key)"
     return
   fi
-  ( cd /work/sample && opencode run "create a file hello.txt containing the word hi" ) \
-    >/work/run.log 2>&1 || { ko "opencode run failed (provider/model configured?)"; return; }
+  local model="${OPENCODE_MODEL:-anthropic/claude-haiku-4-5}"
+  # A non-interactive `opencode run` needs a model; write it into the config
+  # memorize already created (the provider key is read from env by opencode).
+  node -e 'const fs=require("fs");const f=process.argv[1];const c=JSON.parse(fs.readFileSync(f,"utf8"));c.model=process.argv[2];fs.writeFileSync(f,JSON.stringify(c,null,2));' "$CFG" "$model" 2>/dev/null || true
+  if ! ( cd /work/sample && opencode run "create a file hello.txt containing the word hi" ) >/work/run.log 2>&1; then
+    ko "opencode run failed (model=$model; provider key set? see below)"
+    tail -n 4 /work/run.log | sed 's/^/      /'
+    return
+  fi
   sleep 3
   local pending
   pending="$(memorize doctor --json 2>/dev/null | node -e '
@@ -88,6 +97,7 @@ live_capture_check() {
   if [ "${pending:-0}" -ge 1 ]; then
     ok "live capture produced ${pending} observation(s)"
   else
-    ko "no observation captured after a live opencode run"
+    ko "no observation captured after a live opencode run (tool-name mapping?)"
+    tail -n 4 /work/run.log | sed 's/^/      /'
   fi
 }

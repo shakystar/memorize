@@ -38,5 +38,17 @@ jobs:
       - uses: actions/checkout@v4
       - name: Build conformance image
         run: docker build -f docker/conformance/Dockerfile -t memorize-conformance .
-      - name: Run tier A + A' (model-free)
-        run: docker run --rm memorize-conformance ${{ matrix.harness }}
+      - name: Run conformance (tier B auto-enables when ANTHROPIC_API_KEY secret exists)
+        env:
+          # memorize capture is LLM-free; this key only lets opencode perform one
+          # tool call in tier B. Absent → tiers A/A' only (live capture skips).
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: |
+          ARGS=(--rm)
+          if [ -n "$ANTHROPIC_API_KEY" ]; then
+            echo "tier B: live capture ENABLED (provider secret present)"
+            ARGS+=(-e OPENCODE_CONFORMANCE_LIVE=1 -e 'OPENCODE_MODEL=anthropic/claude-haiku-4-5' -e ANTHROPIC_API_KEY)
+          else
+            echo "tier B: SKIPPED (no ANTHROPIC_API_KEY secret)"
+          fi
+          docker run "${ARGS[@]}" memorize-conformance ${{ matrix.harness }}
