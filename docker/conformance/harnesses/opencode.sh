@@ -63,36 +63,11 @@ plugin_load_check() {
   kill "$pid" 2>/dev/null || true
 }
 
-# Gated: needs OPENCODE_CONFORMANCE_LIVE=1 + a provider key in env (e.g.
-# ANTHROPIC_API_KEY) + OPENCODE_MODEL. Drives ONE real edit and asserts memorize
-# captured an observation. memorize's capture is LLM-free — the model is used
-# only so opencode performs a tool call; a tiny/cheap model (haiku) is enough.
-live_capture_check() {
-  if [ "${OPENCODE_CONFORMANCE_LIVE:-}" != "1" ]; then
-    skip "live capture (set OPENCODE_CONFORMANCE_LIVE=1 + a provider API key)"
-    return
-  fi
-  local model="${OPENCODE_MODEL:-anthropic/claude-haiku-4-5}"
-  # A non-interactive `opencode run` needs a model; write it into the config
-  # memorize already created (the provider key is read from env by opencode).
-  node -e 'const fs=require("fs");const f=process.argv[1];const c=JSON.parse(fs.readFileSync(f,"utf8"));c.model=process.argv[2];fs.writeFileSync(f,JSON.stringify(c,null,2));' "$CFG" "$model" 2>/dev/null || true
-  # Turn on plugin diagnostics so we can see opencode's real tool.execute.after
-  # payload + spawn outcome (pins the field/tool-name mapping).
-  export MEMORIZE_OPENCODE_DEBUG=1
-  rm -f "$HOME/memorize-opencode-debug.log"
-  if ! ( cd /work/sample && opencode run "create a file hello.txt containing the word hi" ) >/work/run.log 2>&1; then
-    ko "opencode run failed (model=$model; provider key set? see below)"
-    tail -n 4 /work/run.log | sed 's/^/      /'
-    return
-  fi
-  sleep 3
-  echo "  --- plugin debug log (opencode payload shape) ---"
-  head -c 2500 "$HOME/memorize-opencode-debug.log" 2>/dev/null | sed 's/^/    /' || echo "    (no debug log — plugin tool.execute.after never fired)"
-  echo "  --- end debug log ---"
-  # doctor must run FROM the bound project dir — memorize resolves the project
-  # by walking UP from cwd, so querying /work (the parent) would find nothing.
-  local pending
-  pending="$( cd /work/sample && memorize doctor --json 2>/dev/null | node -e '
+# Pending-observation count for the memorize project bound at $1. doctor MUST
+# run FROM the bound dir — memorize resolves the project by walking UP from cwd,
+# so querying a parent dir would find nothing.
+_pending_count() {
+  ( cd "$1" && memorize doctor --json 2>/dev/null ) | node -e '
     let s = "";
     process.stdin.on("data", (d) => (s += d)).on("end", () => {
       try {
@@ -102,9 +77,66 @@ live_capture_check() {
         process.stdout.write(m ? m[1] : "0");
       } catch { process.stdout.write("0"); }
     });
-  ')"
-  if [ "${pending:-0}" -ge 1 ]; then
-    ok "live capture produced ${pending} observation(s)"
+  '
+}
+
+# Deterministic + model-free (runs every PR): feed the MAPPED tool payloads the
+# plugin emits (after TOOL_NAME_MAP) to the REAL `memorize hook opencode` and
+# assert each category is captured. Each tool uses a fresh bound project so the
+# counts are independent (no threshold-consolidation interference). Guards the
+# deployed binary's opencode capture path for write/edit/bash, no flakiness.
+synthetic_capture_check() {
+  local spec name payload dir cnt
+  for spec in \
+    'write|{"tool_name":"Write","tool_input":{"file_path":"a.ts","content":"x"}}' \
+    'edit|{"tool_name":"Edit","tool_input":{"file_path":"b.ts"}}' \
+    'bash|{"tool_name":"shell","tool_input":{"command":"rm -rf build"}}'; do
+    name="${spec%%|*}"
+    payload="${spec#*|}"
+    dir="/work/syn-$name"
+    rm -rf "$dir" && mkdir -p "$dir"
+    ( cd "$dir" && { git init -q 2>/dev/null || true; } && memorize init >/dev/null 2>&1 )
+    printf '%s' "$payload" | ( cd "$dir" && memorize hook opencode PostToolUse >/dev/null 2>&1 )
+    cnt="$(_pending_count "$dir")"
+    if [ "${cnt:-0}" -ge 1 ]; then
+      ok "synthetic capture [$name → mapped]: ${cnt} observation(s)"
+    else
+      ko "synthetic capture [$name] produced no observation (deployed hook path?)"
+    fi
+  done
+}
+
+# Gated (model; schedule/dispatch): drive REAL opencode tool use and assert
+# capture end-to-end. The debug dump reveals opencode's real tool names so the
+# plugin's TOOL_NAME_MAP is verified against the live harness. memorize capture
+# is LLM-free; the model only makes opencode perform tool calls (cheap model OK).
+live_capture_check() {
+  if [ "${OPENCODE_CONFORMANCE_LIVE:-}" != "1" ]; then
+    skip "live capture (set OPENCODE_CONFORMANCE_LIVE=1 + a provider API key)"
+    return
+  fi
+  local model="${OPENCODE_MODEL:-anthropic/claude-haiku-4-5}"
+  # A non-interactive `opencode run` needs a model; write it into the config
+  # memorize already created (the provider key is read from env by opencode).
+  node -e 'const fs=require("fs");const f=process.argv[1];const c=JSON.parse(fs.readFileSync(f,"utf8"));c.model=process.argv[2];fs.writeFileSync(f,JSON.stringify(c,null,2));' "$CFG" "$model" 2>/dev/null || true
+  export MEMORIZE_OPENCODE_DEBUG=1
+  rm -f "$HOME/memorize-opencode-debug.log"
+  local before after
+  before="$(_pending_count /work/sample)"
+  # Prompt encourages write THEN edit so the run exercises both tools — their
+  # real opencode tool names then appear in the debug dump for map verification.
+  if ! ( cd /work/sample && opencode run "create a file notes.txt containing 'hi', then edit notes.txt so it contains 'hello world'" ) >/work/run.log 2>&1; then
+    ko "opencode run failed (model=$model; provider key set? see below)"
+    tail -n 4 /work/run.log | sed 's/^/      /'
+    return
+  fi
+  sleep 3
+  echo "  --- plugin debug log (real opencode tool names / payloads) ---"
+  head -c 3000 "$HOME/memorize-opencode-debug.log" 2>/dev/null | sed 's/^/    /' || echo "    (no debug log — plugin tool.execute.after never fired)"
+  echo "  --- end debug log ---"
+  after="$(_pending_count /work/sample)"
+  if [ "${after:-0}" -gt "${before:-0}" ]; then
+    ok "live capture produced $(( ${after:-0} - ${before:-0} )) observation(s) from a real opencode run"
   else
     ko "no observation captured after a live opencode run (tool-name mapping?)"
     tail -n 4 /work/run.log | sed 's/^/      /'
