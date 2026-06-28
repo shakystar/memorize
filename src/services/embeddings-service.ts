@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 
 import { nowIso } from '../domain/common.js';
 import { listValidMemories } from './projection-store.js';
+import { listSegments } from './segment-store.js';
 import {
   listEmbeddings,
   upsertEmbedding,
@@ -295,6 +296,69 @@ export async function ensureEmbeddings(
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     process.stderr.write(`WARN: embeddings deferred (${message})\n`);
+    return { embedded: 0 };
+  }
+}
+
+/**
+ * Best-effort semantic index for raw transcript `segments` (v10) — the parallel
+ * of `ensureEmbeddings` over the segments table, keyed by segment id under
+ * kind='segment'. NEVER throws (unconfigured/failed embedder => silent no-op;
+ * FTS still covers segments). Called at the consolidation boundary after segments
+ * are written; cost bounded to the stale set.
+ */
+export async function ensureSegmentEmbeddings(
+  projectId: string,
+  opts: { embedder?: Embedder; timeoutMs?: number } = {},
+): Promise<EnsureEmbeddingsResult> {
+  try {
+    let embedder = opts.embedder;
+    if (!embedder) {
+      const config = resolveEmbeddingsConfig();
+      embedder = getEmbedder(
+        config && opts.timeoutMs ? { ...config, timeoutMs: opts.timeoutMs } : config,
+      );
+    }
+    if (!embedder) return { embedded: 0 };
+
+    const segments = listSegments(projectId);
+    if (segments.length === 0) return { embedded: 0 };
+
+    const existing = new Map<string, EmbeddingRow>(
+      listEmbeddings(projectId, 'segment').map((row) => [row.entityId, row]),
+    );
+    const stale = segments.filter((seg) => {
+      const current = existing.get(seg.id);
+      return (
+        !current ||
+        current.textHash !== hashText(seg.text) ||
+        current.model !== embedder.model
+      );
+    });
+    if (stale.length === 0) return { embedded: 0 };
+
+    const vectors = await embedder.embed(stale.map((seg) => seg.text));
+    const createdAt = nowIso();
+    let embedded = 0;
+    for (let i = 0; i < stale.length; i += 1) {
+      const seg = stale[i]!;
+      const vector = vectors[i];
+      if (!vector || vector.length === 0) continue;
+      upsertEmbedding(projectId, {
+        entityId: seg.id,
+        kind: 'segment',
+        model: embedder.model,
+        dim: vector.length,
+        vector,
+        textHash: hashText(seg.text),
+        createdAt,
+      });
+      embedded += 1;
+    }
+    return { embedded };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    process.stderr.write(`WARN: segment embeddings deferred (${message})\n`);
     return { embedded: 0 };
   }
 }

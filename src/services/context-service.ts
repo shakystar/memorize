@@ -11,6 +11,7 @@ import { freshnessLabel } from './freshness.js';
 import {
   reinforceInjectedMemories,
   retrieveMemoryContext,
+  retrieveSegments,
 } from './memory-retrieval-service.js';
 import { semanticMemoryScores } from './search-service.js';
 
@@ -177,7 +178,28 @@ export async function loadStartContext(params: {
   });
   reinforceInjectedMemories(params.projectId, retrieved.memories);
 
+  // Raw-detail channel (v10): verbatim transcript segments for the task, surfaced
+  // ALONGSIDE consolidated memories with their own budget. Best-effort; empty
+  // without a task title, segments, or embedder. Reuses the session-start embedder
+  // + tight timeout so SessionStart never blocks on the network.
+  let rawSegments: Array<{ id: string; text: string }> = [];
+  if (task?.title) {
+    try {
+      const config = resolveEmbeddingsConfig();
+      const embedder = config
+        ? getEmbedder({ ...config, timeoutMs: SESSION_START_EMBED_TIMEOUT_MS })
+        : undefined;
+      rawSegments = await retrieveSegments(params.projectId, {
+        taskTitle: task.title,
+        ...(embedder ? { embedder } : {}),
+      });
+    } catch {
+      // best-effort — segments are augmentative.
+    }
+  }
+
   return {
+    ...(rawSegments.length > 0 ? { rawSegments } : {}),
     ...(retrieved.memories.length > 0
       ? {
           consolidatedMemories: retrieved.memories.map(({ memory }) => ({

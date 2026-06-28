@@ -4,7 +4,7 @@ import path from 'node:path';
 import spawn from 'cross-spawn';
 import which from 'which';
 
-import { nowIso } from '../domain/common.js';
+import { createId, nowIso } from '../domain/common.js';
 import {
   type ConsolidatedMemory,
   type ConsolidatedMemoryKind,
@@ -23,8 +23,9 @@ import {
 import { withFileLock } from '../storage/file-lock.js';
 import { getProjectRoot } from '../storage/path-resolver.js';
 import { detectContradictions } from './contradiction-service.js';
-import { readConversationSince } from './transcript-reader.js';
-import { ensureEmbeddings } from './embeddings-service.js';
+import { chunkConversation, readConversationSince } from './transcript-reader.js';
+import { ensureEmbeddings, ensureSegmentEmbeddings } from './embeddings-service.js';
+import { insertSegments, pruneSegments, type SegmentRow } from './segment-store.js';
 import {
   listValidMemories,
   rebuildProjectProjection,
@@ -1241,16 +1242,51 @@ export async function consolidate(params: {
         }
       }
 
+      // Raw-detail buffer (v10): chunk this conversation slice into retrievable
+      // `segment` records ALONGSIDE the consolidated memories, so verbatim detail
+      // the extractor compressed away stays findable. Derived/best-effort: never
+      // block consolidation on it. Gated by MEMORIZE_RAW_SEGMENTS (default on).
+      let segmentsWritten = 0;
+      if (
+        process.env.MEMORIZE_RAW_SEGMENTS !== '0' &&
+        conversation &&
+        conversation.text.length > 0
+      ) {
+        try {
+          const chunks = chunkConversation(conversation.text);
+          if (chunks.length > 0) {
+            const createdAt = nowIso();
+            const source = transcriptPath ? path.basename(transcriptPath) : undefined;
+            const rows: SegmentRow[] = chunks.map((text, i) => ({
+              id: createId('seg'),
+              ...(params.sessionId ? { sessionId: params.sessionId } : {}),
+              createdAt,
+              ordinal: i,
+              ...(source ? { source } : {}),
+              text,
+            }));
+            insertSegments(params.projectId, rows);
+            segmentsWritten = rows.length;
+          }
+        } catch {
+          // Derived buffer must never fail the consolidation boundary.
+        }
+      }
+
       if (inputs.length > 0) {
         await appendEvents(params.projectId, inputs);
-        // Memories ARE searchable — this boundary rebuild is where the FTS
-        // reindex deferred by every capture (reindexSearch:false) happens.
-        // Skipped when the extractor returned nothing: no event was
-        // appended, so the projection (and FTS — observations are not
-        // searchable) is already current.
+      }
+      // Rebuild + FTS reindex when there are new memories OR new segments — the
+      // reindex (deferred by every capture as reindexSearch:false) repopulates
+      // search_fts for memories AND re-emits the kind='segment' rows from the
+      // segments table, so a memory-0-but-conversation boundary still indexes
+      // raw detail.
+      if (inputs.length > 0 || segmentsWritten > 0) {
         await rebuildProjectProjection(params.projectId, {
           reindexSearch: true,
         });
+      }
+      if (inputs.length > 0) {
         // P3-c — refresh the semantic index for the memories just consolidated.
         // Best-effort and never-throw: a missing/failing embeddings endpoint is
         // a silent no-op (FTS5 still covers these memories). Runs only at this
@@ -1263,6 +1299,16 @@ export async function consolidate(params: {
           actor: params.actor,
           ...(params.sessionId ? { sessionId: params.sessionId } : {}),
         });
+      }
+      // Segment semantic index + retention. Never-throw; embeddings are a no-op
+      // without an endpoint (segments still covered by FTS).
+      if (segmentsWritten > 0) {
+        try {
+          await ensureSegmentEmbeddings(params.projectId);
+          pruneSegments(params.projectId);
+        } catch {
+          // Derived buffer maintenance must never fail the boundary.
+        }
       }
       // Advance the event watermark past the observation window. Guarded:
       // a cat-1 conversation-only boundary has no observation events to mark.

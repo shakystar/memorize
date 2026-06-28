@@ -16,6 +16,7 @@ import type {
 import { buildMemoryIndex, reduceProjectState } from '../projections/projector.js';
 import type { MemoryRecord, ProjectState } from '../projections/projector.js';
 import { getDb } from '../storage/db.js';
+import { listSegments } from './segment-store.js';
 import { readEvents, readEventsUpTo } from '../storage/event-store.js';
 import { readJson, writeJson } from '../storage/fs-utils.js';
 import { getTopicFile } from '../storage/path-resolver.js';
@@ -39,7 +40,8 @@ export type SearchKind =
   | 'decision'
   | 'checkpoint'
   | 'topic'
-  | 'memory';
+  | 'memory'
+  | 'segment';
 
 /**
  * Flatten an entity's human-text fields into a single FTS document. Skips
@@ -400,6 +402,14 @@ export async function rebuildProjectProjection(
 
     for (const topic of topicSearchRows) {
       indexEntity(topic.entityId, 'topic', topic.text);
+    }
+
+    // Raw transcript segments (v10) live in a DERIVED table the projector does
+    // not know about, so the FTS wipe above would drop their rows. Re-emit them
+    // from the segments table on every reindex (same pattern as topicSearchRows
+    // reading external .md content). Empty table => zero rows => byte-identical.
+    for (const seg of listSegments(projectId)) {
+      indexEntity(seg.id, 'segment', seg.text);
     }
   });
   writeAll();

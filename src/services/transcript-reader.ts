@@ -34,6 +34,31 @@ export interface ConversationSlice {
   capped: boolean;
 }
 
+/** Target max chars per raw-transcript segment (turn-boundary greedy packing). */
+export const SEGMENT_MAX_CHARS = 1500;
+
+/**
+ * Split a stripped conversation (turns joined by "\n\n", as produced by
+ * readConversationSince) into retrievable segments, greedily packing whole turns
+ * up to `maxChars`. A single turn larger than the budget becomes its own segment
+ * (never split mid-turn). Empty/blank input -> []. Mirrors the benchmark's
+ * chunkTurns precedent; used to build the v10 `segments` buffer.
+ */
+export function chunkConversation(text: string, maxChars = SEGMENT_MAX_CHARS): string[] {
+  const turns = text.split('\n\n').map((t) => t.trim()).filter(Boolean);
+  const out: string[] = [];
+  let buf = '';
+  for (const turn of turns) {
+    if (buf && buf.length + 2 + turn.length > maxChars) {
+      out.push(buf);
+      buf = '';
+    }
+    buf = buf ? `${buf}\n\n${turn}` : turn;
+  }
+  if (buf) out.push(buf);
+  return out;
+}
+
 function stripJsonlToConversation(raw: string): string {
   const turns: string[] = [];
   for (const line of raw.split('\n')) {

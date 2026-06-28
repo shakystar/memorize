@@ -6,6 +6,7 @@ import {
   type Embedder,
 } from './embeddings-service.js';
 import { listEmbeddings } from './embeddings-store.js';
+import { listSegmentTexts } from './segment-store.js';
 import { listValidMemories, type SearchKind } from './projection-store.js';
 import { requireBoundProjectId } from './project-service.js';
 
@@ -102,26 +103,38 @@ function snippetFromText(text: string, max = 120): string {
  * degrades to lexical-only). This is the shared core for both semanticSearch and
  * the injection-time relevance boost.
  */
+export async function semanticScoresForKind(
+  projectId: string,
+  query: string,
+  kind: string,
+  embedder: Embedder | undefined = getEmbedder(),
+  queryVec?: number[],
+): Promise<Map<string, number>> {
+  if (!embedder || !query.trim()) return new Map();
+  const corpus = listEmbeddings(projectId, kind);
+  if (corpus.length === 0) return new Map();
+  let vec = queryVec;
+  if (!vec) {
+    try {
+      [vec] = await embedder.embed([query]);
+    } catch {
+      return new Map();
+    }
+  }
+  if (!vec || vec.length === 0) return new Map();
+  const scores = new Map<string, number>();
+  for (const row of corpus) {
+    scores.set(row.entityId, cosineSimilarity(vec, row.vector));
+  }
+  return scores;
+}
+
 export async function semanticMemoryScores(
   projectId: string,
   query: string,
   embedder: Embedder | undefined = getEmbedder(),
 ): Promise<Map<string, number>> {
-  if (!embedder || !query.trim()) return new Map();
-  const corpus = listEmbeddings(projectId, 'memory');
-  if (corpus.length === 0) return new Map();
-  let queryVec: number[] | undefined;
-  try {
-    [queryVec] = await embedder.embed([query]);
-  } catch {
-    return new Map();
-  }
-  if (!queryVec || queryVec.length === 0) return new Map();
-  const scores = new Map<string, number>();
-  for (const row of corpus) {
-    scores.set(row.entityId, cosineSimilarity(queryVec, row.vector));
-  }
-  return scores;
+  return semanticScoresForKind(projectId, query, 'memory', embedder);
 }
 
 /** Memory hits ranked by embedding similarity (best-first). Empty when off. */
@@ -190,4 +203,73 @@ export async function hybridSearchFromCwd(
 ): Promise<SearchHit[]> {
   const projectId = await requireBoundProjectId(cwd);
   return hybridSearch(projectId, query, limit ?? DEFAULT_SEARCH_LIMIT);
+}
+
+// --- v10 raw-segment retrieval ----------------------------------------------
+
+/** FTS over a single entity `kind` (e.g. 'segment'), bm25-ordered. */
+export function searchByKind(
+  projectId: string,
+  query: string,
+  kind: SearchKind,
+  limit: number = DEFAULT_SEARCH_LIMIT,
+): SearchHit[] {
+  const match = toFtsMatch(query);
+  if (!match) return [];
+  return getDb(projectId)
+    .prepare(
+      `SELECT entity_id   AS entityId,
+              kind        AS kind,
+              snippet(search_fts, 2, '[', ']', '…', 10) AS snippet,
+              bm25(search_fts) AS score
+         FROM search_fts
+        WHERE search_fts MATCH ? AND kind = ?
+        ORDER BY bm25(search_fts)
+        LIMIT ?`,
+    )
+    .all(match, kind, limit) as SearchHit[];
+}
+
+/**
+ * Hybrid (FTS + semantic RRF) search over raw transcript segments. Snippets are
+ * hydrated from the `segments` table (segment text is not in the projection). An
+ * optional precomputed `queryVec` lets a caller embed the query once and reuse it
+ * across the memory and segment corpora. Returns [] when there are no segments.
+ */
+export async function hybridSearchSegments(
+  projectId: string,
+  query: string,
+  limit: number = DEFAULT_SEARCH_LIMIT,
+  embedder: Embedder | undefined = getEmbedder(),
+  queryVec?: number[],
+): Promise<SearchHit[]> {
+  const poolSize = Math.max(limit * 2, DEFAULT_SEARCH_LIMIT);
+  const ftsHits = searchByKind(projectId, query, 'segment', poolSize);
+  const scores = await semanticScoresForKind(projectId, query, 'segment', embedder, queryVec);
+  const texts = listSegmentTexts(projectId);
+  const hydrate = (id: string, snippet: string): string =>
+    snippet || snippetFromText(texts.get(id) ?? '');
+
+  if (scores.size === 0) {
+    return ftsHits
+      .slice(0, limit)
+      .map((hit) => ({ ...hit, snippet: hydrate(hit.entityId, hit.snippet) }));
+  }
+  const semanticIds = [...scores.entries()]
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, poolSize)
+    .map(([id]) => id);
+  const fused = reciprocalRankFusion([ftsHits.map((h) => h.entityId), semanticIds]);
+  const byId = new Map<string, SearchHit>();
+  for (const id of semanticIds) {
+    byId.set(id, { entityId: id, kind: 'segment', score: scores.get(id) ?? 0, snippet: '' });
+  }
+  for (const hit of ftsHits) byId.set(hit.entityId, hit);
+  return [...fused.entries()]
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, limit)
+    .map(([id, score]) => {
+      const hit = byId.get(id)!;
+      return { ...hit, score, snippet: hydrate(id, hit.snippet) };
+    });
 }

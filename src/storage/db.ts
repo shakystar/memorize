@@ -228,6 +228,28 @@ const MIGRATIONS: ReadonlyArray<(db: Database.Database) => void> = [
       'ALTER TABLE memories ADD COLUMN injection_count INTEGER NOT NULL DEFAULT 0;',
     );
   },
+  // v10 — raw transcript segments: a DERIVED, bounded short-term detail buffer
+  // that makes the original conversation content retrievable ALONGSIDE the
+  // (lossy, salience-gated) consolidated memories. Like `embeddings` (v8) this is
+  // NOT rebuilt by the projector — it is filled out-of-band at the consolidation
+  // boundary from the same transcript slice, indexed into search_fts/embeddings
+  // under kind='segment', and pruned to a rolling window. A from-scratch replay
+  // loses segments (re-accumulated on the next consolidation), same grade as
+  // embeddings. Empty table => every retrieval surface is byte-identical to
+  // before, so this is purely augmentative.
+  (db) => {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS segments (
+        id         TEXT PRIMARY KEY,
+        session_id TEXT,
+        created_at TEXT NOT NULL,
+        ordinal    INTEGER,
+        source     TEXT,
+        text       TEXT NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_segments_created ON segments(created_at);
+    `);
+  },
 ];
 
 function runMigrations(db: Database.Database): void {
