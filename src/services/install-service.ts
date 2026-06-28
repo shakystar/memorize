@@ -875,10 +875,24 @@ function renderOpencodePlugin(spec: { cmd: string; argsPrefix: string[] }): stri
   return `// memorize opencode plugin — planted by \`memorize install opencode\`.
 // Do not edit by hand; re-running install overwrites it.
 import { spawn } from 'node:child_process';
+import { appendFileSync } from 'node:fs';
+import { homedir } from 'node:os';
+import { join } from 'node:path';
 
 // Baked at install time so the plugin reaches the same memorize the install used.
 const SPAWN_CMD = ${JSON.stringify(spec.cmd)};
 const SPAWN_ARGS_PREFIX = ${JSON.stringify(spec.argsPrefix)};
+
+// Diagnostics: MEMORIZE_OPENCODE_DEBUG=1 dumps payloads + spawn outcomes to
+// ~/memorize-opencode-debug.log. Off by default; used by the conformance
+// harness to pin opencode's real tool.execute.after shape and tool names.
+const DEBUG = !!process.env.MEMORIZE_OPENCODE_DEBUG;
+function dbg(obj) {
+  if (!DEBUG) return;
+  try {
+    appendFileSync(join(homedir(), 'memorize-opencode-debug.log'), JSON.stringify(obj) + '\\n');
+  } catch {}
+}
 
 // opencode tool names -> the names memorize's capture filter recognizes.
 const TOOL_NAME_MAP = { write: 'Write', edit: 'Edit', patch: 'Edit', bash: 'shell' };
@@ -889,10 +903,12 @@ function fireMemorizeHook(event, payload) {
       stdio: ['pipe', 'ignore', 'ignore'],
       detached: true,
     });
-    child.on('error', () => {});
+    child.on('error', (e) => dbg({ spawnError: String(e), cmd: SPAWN_CMD, args: SPAWN_ARGS_PREFIX }));
     if (child.stdin) child.stdin.end(JSON.stringify(payload || {}));
     child.unref();
-  } catch {
+    dbg({ fired: event, payload });
+  } catch (e) {
+    dbg({ fireError: String(e) });
     // capture is best-effort; never break the opencode session
   }
 }
@@ -900,6 +916,16 @@ function fireMemorizeHook(event, payload) {
 export const MemorizePlugin = async () => ({
   'tool.execute.after': async (input, output) => {
     const rawTool = (input && (input.tool || input.toolName)) || (output && output.tool) || '';
+    dbg({
+      hook: 'tool.execute.after',
+      rawTool,
+      mapped: TOOL_NAME_MAP[rawTool] || rawTool,
+      cwd: process.cwd(),
+      inputKeys: Object.keys(input || {}),
+      outputKeys: Object.keys(output || {}),
+      input,
+      output,
+    });
     fireMemorizeHook('PostToolUse', {
       tool_name: TOOL_NAME_MAP[rawTool] || rawTool,
       tool_input: (input && (input.args || input.input)) || {},
