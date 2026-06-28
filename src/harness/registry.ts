@@ -29,8 +29,18 @@ export interface HarnessDescriptor {
    *  detection signal. NOT always `.${id}`: opencode uses `.config/opencode`,
    *  not `.opencode`. */
   configDirRel: string;
-  /** Lifecycle hook events memorize registers at install time. */
+  /** Lifecycle hook events memorize registers at install time, in this
+   *  harness's NATIVE event names (Claude/Codex use the canonical names;
+   *  Gemini uses `AfterTool`/`PreCompress`/…). */
   hookEvents: readonly string[];
+  /**
+   * Maps a harness's NATIVE hook event name → the canonical runtime handler
+   * key (SessionStart / PostToolUse / PostCompact / SessionEnd). Lets one set
+   * of handlers serve harnesses that name the same lifecycle moment
+   * differently — e.g. Gemini `AfterTool` → `PostToolUse`. Omitted ⇒ identity
+   * (Claude/Codex already use the canonical names).
+   */
+  eventHandlerMap?: Readonly<Record<string, string>>;
   /** Events a prior install may have registered that the current contract
    *  no longer wants — stripped on re-install. */
   legacyHookEvents: readonly string[];
