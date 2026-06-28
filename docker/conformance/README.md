@@ -49,12 +49,22 @@ Drop a `harnesses/<id>.sh` descriptor defining:
 `run.sh` is generic; it sources the descriptor and runs the tiers. The harness
 must already exist in `src/harness/registry.ts`.
 
-## Status / caveats
+## Tiers (when each runs)
 
-- **opencode** descriptor is the first. Tier A is solid. Tier A' (`opencode
-  serve` model-free boot) and Tier B field-reads (opencode's plugin payload
-  shape, tool names) are **best-effort and need a first real run to tune** — the
-  capture plugin's tool-name map / payload reads are documented as live-pending
-  in `install-service.ts`.
-- Authored where Docker was unavailable; scripts are shell-syntax-checked
-  (`bash -n`) but the image build/run should be validated in CI on first use.
+- Tier A, A', **A''** run on every PR touching harness code (model-free,
+  deterministic). A'' feeds the MAPPED tool payloads the plugin emits
+  (`Write`/`Edit`/`shell`) to the real `memorize hook` and asserts capture.
+- Tier B (live, model) runs on **schedule + manual dispatch only** — cost/flake
+  control. Auto-enables when the `ANTHROPIC_API_KEY` repo secret exists.
+
+## Status — opencode (validated against opencode 1.17.11 in CI)
+
+- Tiers A / A' / A'' / B all green (PASS=9). The live run confirmed opencode's
+  real tool names + payload shape: `write`→`Write`, `edit`→`Edit` (both
+  captured), `read` correctly ignored. opencode's `tool.execute.after` payload
+  is `{ tool, sessionID, callID, args:{ filePath, content|oldString/newString }}`.
+- Residual: opencode's `bash` tool name is assumed (not exercised live yet); the
+  synthetic tier covers the memorize side for `shell`. The compaction
+  (`experimental.session.compacting`) path is not yet exercised end-to-end.
+- Tier B currently uses Anthropic haiku; override with `OPENCODE_MODEL` + the
+  matching provider key.
