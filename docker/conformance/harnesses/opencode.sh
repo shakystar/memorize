@@ -76,12 +76,19 @@ live_capture_check() {
   # A non-interactive `opencode run` needs a model; write it into the config
   # memorize already created (the provider key is read from env by opencode).
   node -e 'const fs=require("fs");const f=process.argv[1];const c=JSON.parse(fs.readFileSync(f,"utf8"));c.model=process.argv[2];fs.writeFileSync(f,JSON.stringify(c,null,2));' "$CFG" "$model" 2>/dev/null || true
+  # Turn on plugin diagnostics so we can see opencode's real tool.execute.after
+  # payload + spawn outcome (pins the field/tool-name mapping).
+  export MEMORIZE_OPENCODE_DEBUG=1
+  rm -f "$HOME/memorize-opencode-debug.log"
   if ! ( cd /work/sample && opencode run "create a file hello.txt containing the word hi" ) >/work/run.log 2>&1; then
     ko "opencode run failed (model=$model; provider key set? see below)"
     tail -n 4 /work/run.log | sed 's/^/      /'
     return
   fi
   sleep 3
+  echo "  --- plugin debug log (opencode payload shape) ---"
+  head -c 2500 "$HOME/memorize-opencode-debug.log" 2>/dev/null | sed 's/^/    /' || echo "    (no debug log — plugin tool.execute.after never fired)"
+  echo "  --- end debug log ---"
   local pending
   pending="$(memorize doctor --json 2>/dev/null | node -e '
     let s = "";
