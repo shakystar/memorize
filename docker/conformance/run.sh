@@ -44,7 +44,10 @@ assert_artifacts
 echo "== [$HARNESS] tier A': plugin load (best-effort) =="
 if declare -F plugin_load_check >/dev/null; then plugin_load_check; else skip "no plugin_load_check"; fi
 
-echo "== [$HARNESS] tier B: live capture (gated) =="
+echo "== [$HARNESS] tier A'': synthetic capture (deterministic, model-free) =="
+if declare -F synthetic_capture_check >/dev/null; then synthetic_capture_check; else skip "no synthetic_capture_check"; fi
+
+echo "== [$HARNESS] tier B: live capture (gated, model) =="
 if declare -F live_capture_check >/dev/null; then live_capture_check; else skip "no live_capture_check"; fi
 
 echo "== [$HARNESS] summary: PASS=$PASS FAIL=$FAIL =="
