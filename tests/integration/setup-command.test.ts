@@ -67,14 +67,21 @@ describe('memorize setup', () => {
     expect(result.stdout).not.toContain('memorize install claude');
   });
 
-  it('instructs for claude (per-project) without writing any codex file', async () => {
+  it('plants the global init-memorize skill for claude, writing no codex file', async () => {
     await mkdir(join(fakeHome, '.claude'), { recursive: true });
 
     const result = runSetup();
     expect(result.status).toBe(0);
 
+    // Global-only: never writes a codex hooks file, never binds a project.
     expect(await pathExists(join(fakeHome, '.codex', 'hooks.json'))).toBe(false);
-    expect(result.stdout).toContain('memorize install claude');
+    // Plants the global trigger so any project can be onboarded with `init`.
+    expect(
+      await pathExists(
+        join(fakeHome, '.claude', 'skills', 'init-memorize', 'SKILL.md'),
+      ),
+    ).toBe(true);
+    expect(result.stdout).toContain('init-memorize');
   });
 
   it('prints guidance when no agent is detected', async () => {
@@ -85,7 +92,7 @@ describe('memorize setup', () => {
     expect(result.stdout).toContain('No supported AI agent detected');
   });
 
-  it('wires codex AND instructs for claude when both are present', async () => {
+  it('wires codex globally AND plants the init-memorize skill when both are present', async () => {
     await mkdir(join(fakeHome, '.codex'), { recursive: true });
     await mkdir(join(fakeHome, '.claude'), { recursive: true });
 
@@ -97,7 +104,13 @@ describe('memorize setup', () => {
     ) as { hooks: Record<string, unknown> };
     expect(hooks.hooks.SessionStart).toBeTruthy();
 
+    expect(
+      await pathExists(
+        join(fakeHome, '.claude', 'skills', 'init-memorize', 'SKILL.md'),
+      ),
+    ).toBe(true);
+
     expect(result.stdout).toContain('Codex');
-    expect(result.stdout).toContain('memorize install claude');
+    expect(result.stdout).toContain('init-memorize');
   });
 });

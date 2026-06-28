@@ -4,6 +4,11 @@ import { fileURLToPath } from 'node:url';
 
 import type { AdapterAgent } from '../adapters/index.js';
 import {
+  type HarnessId,
+  getHarness,
+  runtimeHookEvents,
+} from '../harness/registry.js';
+import {
   detectInjectionMarkers,
   MAX_HOOK_CONTENT_LENGTH,
   truncateContent,
@@ -609,7 +614,14 @@ const handlePostToolUse: HookHandler = async (ctx) => {
   return EMPTY_HOOK_RESULT;
 };
 
-const claudeHookHandlers: Record<string, HookHandler> = {
+// One handler per lifecycle event, shared across harnesses (the handlers are
+// harness-agnostic). Which events a given harness actually dispatches is
+// decided by `runtimeHookEvents(id)` from the registry — e.g. codex has no
+// SessionEnd, so a SessionEnd fired under codex resolves to the empty result.
+// Codex PostToolUse fires for Bash-like tools only today (known upstream
+// issue); partial capture beats none. Stop is a kept no-op so pre-β installs
+// that still register it don't error.
+const sharedHookHandlers: Record<string, HookHandler> = {
   SessionStart: handleSessionStart,
   PostToolUse: handlePostToolUse,
   PostCompact: handlePostCompact,
@@ -617,66 +629,57 @@ const claudeHookHandlers: Record<string, HookHandler> = {
   Stop: handleStop,
 };
 
-const codexHookHandlers: Record<string, HookHandler> = {
-  SessionStart: handleSessionStart,
-  // Codex PostToolUse fires for Bash-like tools only (known issue — see
-  // direction doc §10-D), so codex capture coverage is the Bash branch of
-  // the decision-signal filter. Better partial than absent.
-  PostToolUse: handlePostToolUse,
-  // Codex has no SessionEnd hook, so PostCompact + the next SessionStart's
-  // consolidation catch-up are its only CLS boundaries.
-  PostCompact: handlePostCompact,
-  // Codex has no SessionEnd hook (verified against
-  // developers.openai.com/codex/hooks 2026-05). Codex sessions get
-  // cleaned up entirely via reapStaleSessions — either on the next
-  // codex SessionStart in the same cwd or via `memorize session reap`.
-  Stop: handleStop,
-};
-
-export async function runClaudeHook(params: {
-  eventName: string;
-  cwd: string;
-  stdinPayload?: string;
-}): Promise<string> {
+/**
+ * Run a fired lifecycle hook for any registered harness. Replaces the old
+ * per-harness `runClaudeHook`/`runCodexHook` (kept as thin wrappers): binding
+ * policy (auto-create vs bail-if-unbound) and the handled-event set are read
+ * from the harness descriptor, so adding a harness needs no new runner.
+ */
+export async function runHook(
+  harnessId: HarnessId,
+  params: { eventName: string; cwd: string; stdinPayload?: string },
+): Promise<string> {
   // Recursion guard (#44): the boundary consolidator can spawn the host CLI
   // (claude -p / codex exec) as its extractor, and that child session fires
-  // these very hooks. The extractor sets MEMORIZE_SUPPRESS_HOOKS in the
-  // child env so its own invocation is never captured/consolidated
+  // these very hooks. The extractor sets MEMORIZE_SUPPRESS_HOOKS in the child
+  // env so its own invocation is never captured/consolidated
   // (consolidate → claude -p → SessionStart hook → consolidate → ...).
   if (process.env[SUPPRESS_HOOKS_ENV_VAR]) return EMPTY_HOOK_RESULT;
 
-  const projectId = await ensureBoundProjectId(params.cwd);
-  const handler = claudeHookHandlers[params.eventName];
+  // Binding policy per descriptor: claude auto-creates a binding; codex hooks
+  // are global (fire in every cwd) so they bail fast when cwd is unbound,
+  // never auto-creating state. Bind BEFORE the handled-event gate to preserve
+  // the historical auto-bind side effect on claude.
+  const descriptor = getHarness(harnessId);
+  const projectId = descriptor.autoBindProject
+    ? await ensureBoundProjectId(params.cwd)
+    : await getBoundProjectId(params.cwd);
+  if (!projectId) return EMPTY_HOOK_RESULT;
+
+  const handler = runtimeHookEvents(harnessId).includes(params.eventName)
+    ? sharedHookHandlers[params.eventName]
+    : undefined;
   if (!handler) return EMPTY_HOOK_RESULT;
   return handler({
     projectId,
-    agent: 'claude',
+    agent: harnessId,
     cwd: params.cwd,
     rawPayload: params.stdinPayload,
   });
 }
 
-export async function runCodexHook(params: {
+export function runClaudeHook(params: {
   eventName: string;
   cwd: string;
   stdinPayload?: string;
 }): Promise<string> {
-  // Recursion guard (#44) — see runClaudeHook.
-  if (process.env[SUPPRESS_HOOKS_ENV_VAR]) return EMPTY_HOOK_RESULT;
+  return runHook('claude', params);
+}
 
-  // Codex hooks live globally in ~/.codex/hooks.json so every codex
-  // session fires them. Bail fast when cwd is not bound to memorize.
-  // Unlike runClaudeHook we use getBoundProjectId — never auto-create
-  // state from a codex hook.
-  const projectId = await getBoundProjectId(params.cwd);
-  if (!projectId) return EMPTY_HOOK_RESULT;
-
-  const handler = codexHookHandlers[params.eventName];
-  if (!handler) return EMPTY_HOOK_RESULT;
-  return handler({
-    projectId,
-    agent: 'codex',
-    cwd: params.cwd,
-    rawPayload: params.stdinPayload,
-  });
+export function runCodexHook(params: {
+  eventName: string;
+  cwd: string;
+  stdinPayload?: string;
+}): Promise<string> {
+  return runHook('codex', params);
 }

@@ -5,6 +5,7 @@ import { fileURLToPath } from 'node:url';
 
 import which from 'which';
 
+import { getHarness } from '../harness/registry.js';
 import { isEnoent, writeJson } from '../storage/fs-utils.js';
 import { POST_TOOL_USE_MATCHER } from './capture-service.js';
 
@@ -105,21 +106,11 @@ export function isMemorizeHookCommandForAgent(
   return re.test(command);
 }
 
-// Hook events the β contract registers for Claude. Stop is intentionally
-// absent — see hook-service.ts for the rationale (Stop fires per-turn,
-// not per-session, and lifecycle moved to SessionEnd + reapStaleSessions).
-// PreCompact is gone too (#85): its checkpoint-capture role was replaced
-// wholesale by the PostCompact consolidation boundary, the handler had
-// been a no-op for a while, and real stores show ZERO checkpoint events —
-// registering it only spawned a useless subprocess on every compaction.
-// PostToolUse (CLS capture) carries a tool matcher so the hook subprocess
-// only spawns for tools the decision-signal filter could ever admit.
-export const CLAUDE_HOOK_EVENTS = [
-  'SessionStart',
-  'PostCompact',
-  'SessionEnd',
-  'PostToolUse',
-] as const;
+// Hook event sets are owned by the harness registry (the single source of
+// truth) — see src/harness/registry.ts for the per-event rationale. Re-exported
+// here because repair-service (doctor) reads CLAUDE_HOOK_EVENTS to verify the
+// SAME set install registers, so the two can never drift.
+export const CLAUDE_HOOK_EVENTS = getHarness('claude').hookEvents;
 
 // Per-event matcher for Claude hook registration. PostToolUse fires for
 // every tool; matching here (instead of in the handler) saves a subprocess
@@ -130,12 +121,9 @@ const CLAUDE_HOOK_MATCHERS: Partial<Record<string, string>> = {
   PostToolUse: POST_TOOL_USE_MATCHER,
 };
 
-// Memorize hook events that previous installs may have registered but
-// the current β contract no longer wants. We strip these from the
-// merged settings on re-install. Keep narrow — only memorize-owned
-// entries; user-added entries for other tools under the same event
-// keys must be untouched.
-const CLAUDE_LEGACY_MEMORIZE_HOOK_EVENTS = ['Stop', 'PreCompact'] as const;
+// Legacy events a prior install may have registered that the current contract
+// strips on re-install (registry-owned; preserves other tools' entries).
+const CLAUDE_LEGACY_MEMORIZE_HOOK_EVENTS = getHarness('claude').legacyHookEvents;
 
 // Claude Code expects each hook event to hold an array of matcher
 // groups, where every group itself carries a `hooks` array of
@@ -379,6 +367,74 @@ async function removeUsingMemorizeSkill(cwd: string): Promise<void> {
   await fs.rm(skillDir, { recursive: true, force: true });
 }
 
+// --- init-memorize Agent Skill (global) --------------------------------------
+
+const INIT_MEMORIZE_SKILL = `---
+name: init-memorize
+description: Use when the user wants to set up / onboard / install memorize in a project for the first time ("set up memorize here", "add memorize to this repo", "onboard memorize"). For a one-shot project onboarding. NOT for recalling memory or checking health — that is the using-memorize skill.
+---
+
+# Setting up memorize in a project
+
+## Overview
+memorize gives every agent session a shared, persistent project brain. Onboarding a project is a single idempotent command — do NOT hand-run the old four-step flow (\`project init\` + \`project setup\` + \`install claude\` + \`install codex\`).
+
+## When to use
+The user asks to set up, onboard, or install memorize in THIS project for the first time.
+
+## When NOT to use
+- Recalling decisions / progress, or checking capture health → that is the \`using-memorize\` skill.
+- The project is already set up (\`.claude/settings.local.json\` already has memorize hooks) → re-running \`init\` is safe but usually unnecessary; run \`memorize doctor\` instead.
+
+## Steps
+1. **Ensure \`memorize\` is on PATH.** Node project: \`npm install -D @shakystar/memorize\`. Otherwise: \`npm install -g @shakystar/memorize\`. (See AI_SETUP.md step 1 for monorepo / global-dir edge cases.)
+2. **Run the one-shot onboarding** from the project root:
+   \`npx @shakystar/memorize init\`
+   Binds the directory to a memorize project (creating one if needed), imports existing AGENTS.md/CLAUDE.md/GEMINI.md/.cursorrules, detects installed agent CLIs, and wires each present agent. Safe to re-run. Add \`--nested\` to create a SEPARATE project inside an already-bound directory.
+   If the output prints an **ACTION REQUIRED** notice for Codex, relay it verbatim — codex silently ignores externally-written hooks until the user approves them once interactively.
+3. **Verify:** \`npx @shakystar/memorize doctor --json\` — expect \`"status": "ok"\`. If \`warn\`/\`error\`, apply each issue's \`fix\` field and re-run.
+4. **Tell the user** memorize is set up and context now persists across sessions automatically. Do NOT tell them to create a task (an empty task list is normal).
+
+## Common mistake
+Running \`project init\` then \`project setup\` then \`install claude\`/\`install codex\` separately. \`memorize init\` does all of it in one idempotent step; the split commands are low-level escape hatches.
+`;
+
+/**
+ * Global Claude skills dir (~/.claude/skills). Unlike using-memorize (planted
+ * per-project by installClaudeIntegration), the init-memorize trigger must
+ * exist BEFORE any project is set up, so it lives user-global.
+ */
+function globalClaudeSkillsDir(): string {
+  return path.join(os.homedir(), '.claude', 'skills');
+}
+
+/**
+ * Plant the init-memorize skill at ~/.claude/skills/init-memorize/SKILL.md so
+ * any project gains a natural-language "set up memorize here" → `memorize init`
+ * trigger. Idempotent — overwrites on every call to keep content current.
+ * Called by `memorize setup` (the once-per-machine global onboarding) when
+ * Claude Code is detected.
+ */
+export async function installInitMemorizeSkill(): Promise<string> {
+  const skillDir = path.join(globalClaudeSkillsDir(), 'init-memorize');
+  await fs.mkdir(skillDir, { recursive: true });
+  const skillPath = path.join(skillDir, 'SKILL.md');
+  await fs.writeFile(skillPath, INIT_MEMORIZE_SKILL, 'utf8');
+  return skillPath;
+}
+
+/**
+ * Remove the global init-memorize skill dir (only that dir). Never throws when
+ * absent. Exported for an explicit teardown path; not wired into per-project
+ * `uninstall claude` (that would surprisingly affect every project).
+ */
+export async function removeInitMemorizeSkill(): Promise<void> {
+  await fs.rm(path.join(globalClaudeSkillsDir(), 'init-memorize'), {
+    recursive: true,
+    force: true,
+  });
+}
+
 // --- #68 ground-rule block ----------------------------------------------------
 
 const GROUND_RULE_START_MARKER = '<!-- memorize:ground-rule v=1 start -->';
@@ -473,19 +529,9 @@ const CODEX_END_MARKER = '<!-- memorize:bootstrap v=1 end -->';
 const LEGACY_CODEX_START_MARKER = '<!-- Memorize:START -->';
 const LEGACY_CODEX_END_MARKER = '<!-- Memorize:END -->';
 
-// Codex hook events the β contract registers. Codex has no SessionEnd /
-// Shutdown / Exit hook (verified against developers.openai.com/codex/hooks
-// 2026-05), so codex session lifecycle is owned by reapStaleSessions, and
-// the CLS consolidation boundary is PostCompact + the next SessionStart's
-// catch-up. PostToolUse is registered even though codex currently fires it
-// for Bash-like tools only — partial capture beats none, and coverage
-// widens automatically if the upstream issue is fixed.
-const CODEX_HOOK_EVENTS = ['SessionStart', 'PostToolUse', 'PostCompact'] as const;
-
-// Codex Stop fires per-turn just like Claude's, so the rc.X
-// auto-handoff path was wrong here too. Strip the legacy registration
-// on re-install.
-const CODEX_LEGACY_MEMORIZE_HOOK_EVENTS = ['Stop'] as const;
+// Codex hook event sets (registry-owned; see registry.ts for rationale).
+const CODEX_HOOK_EVENTS = getHarness('codex').hookEvents;
+const CODEX_LEGACY_MEMORIZE_HOOK_EVENTS = getHarness('codex').legacyHookEvents;
 
 function codexHooksPath(): string {
   return path.join(os.homedir(), '.codex', 'hooks.json');

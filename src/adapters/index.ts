@@ -1,3 +1,4 @@
+import type { HarnessId } from '../harness/registry.js';
 import {
   renderClaudeLiveUpdate,
   renderClaudeStartupContext,
@@ -8,7 +9,8 @@ import {
 } from './codex/renderer.js';
 import type { AdapterRuntime } from './types.js';
 
-export type AdapterAgent = 'claude' | 'codex';
+/** @deprecated alias of {@link HarnessId} — kept for existing call sites. */
+export type AdapterAgent = HarnessId;
 
 export const adapterRegistry: Record<AdapterAgent, AdapterRuntime> = {
   claude: {

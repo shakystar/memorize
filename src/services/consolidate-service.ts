@@ -14,6 +14,7 @@ import {
   createConsolidatedMemory,
 } from '../domain/entities.js';
 import type { DomainEventPayload } from '../domain/events.js';
+import type { HarnessId } from '../harness/registry.js';
 import { getDb } from '../storage/db.js';
 import {
   type AppendEventInput,
@@ -290,7 +291,15 @@ export class LlmConsolidator implements Consolidator {
 
 // --- host-CLI extractor (claude -p / codex exec) — #44 ------------------------
 
-export type HostCliCommand = 'claude' | 'codex';
+/**
+ * The host CLIs memorize can drive headlessly to run LLM extraction. This is a
+ * DELIBERATE SUBSET of {@link HarnessId}, not an alias: a harness counts here
+ * only if it has a one-shot, pipe-a-prompt-on-stdin mode (claude `-p`,
+ * codex `exec -`). Harnesses without that (e.g. opencode, IDE harnesses) are
+ * valid {@link HarnessId}s but cannot be extractors, so adding them to the
+ * registry must NOT force an entry in CLI_EXTRACTOR_ARGS.
+ */
+export type HostCliCommand = Extract<HarnessId, 'claude' | 'codex'>;
 
 /**
  * Env var set on the spawned host CLI so the memorize hooks ITS session

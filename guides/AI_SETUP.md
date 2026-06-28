@@ -70,50 +70,40 @@ no task lists, no summaries.**
    via `npx @shakystar/memorize` (which works after either install
    mode).
 
-2. **Adopt the project**:
+2. **Onboard the project (one command)**:
 
    ```sh
-   npx @shakystar/memorize project setup
+   npx @shakystar/memorize init
    ```
 
-   This binds the current directory to a memorize project (creating one
-   if needed) and imports any existing `AGENTS.md`, `CLAUDE.md`,
-   `GEMINI.md`, `.cursorrules`, and files under `.cursor/rules/` as
-   rules. Safe to re-run.
+   This is the whole setup in one idempotent step. It:
+   - binds the current directory to a memorize project (creating one if
+     needed, auto-adopting/relocating an existing one);
+   - imports any existing `AGENTS.md`, `CLAUDE.md`, `GEMINI.md`,
+     `.cursorrules`, and files under `.cursor/rules/` as rules;
+   - detects which agent CLIs are installed and wires each present one —
+     Claude Code hooks into `.claude/settings.local.json` (per-project),
+     Codex hooks into `~/.codex/hooks.json` (global; memorize entries are
+     prepended so they run before any other layer, and the hook is a
+     no-op in directories not bound to a memorize project).
 
-   (Do not use `memorize project init` for adoption: it creates a
-   fresh project without importing rules and refuses to run on an
-   already-bound directory.)
+   Safe to re-run. To create a SEPARATE project inside an already-bound
+   directory (a monorepo subpackage), add `--nested`.
 
-3. **Install your agent integration**. Pick the one that matches you:
+   - **If `init` wires Codex, tell the user to approve the hooks once.**
+     Codex silently skips externally-written hooks (no error, no log)
+     until the user approves them in an interactive codex session — the
+     command prints an `ACTION REQUIRED` notice when this applies. Relay
+     it: "start `codex` interactively once and accept the hook approval
+     prompt; until then memorize records nothing from codex sessions."
+     `memorize doctor` warns when registered hooks have apparently never
+     fired. (Upstream fix tracked in openai/codex#21615.)
 
-   ```sh
-   npx @shakystar/memorize install claude    # if you are Claude Code
-   npx @shakystar/memorize install codex     # if you are Codex
-   ```
+   The lower-level commands (`project setup`, `project init`,
+   `install claude`, `install codex`, `setup`) still exist as escape
+   hatches, but `init` covers the common case — prefer it.
 
-   Both commands are safe to re-run and preserve unrelated content in
-   the target files.
-
-   - `install claude` writes hook entries to `.claude/settings.local.json`
-     (per-project).
-   - `install codex` writes hook entries to `~/.codex/hooks.json`
-     (global; codex stores hooks per-user, not per-project). Memorize
-     entries are prepended so they run before any other registered
-     hooks; this is how memorize guarantees it is the source of truth
-     even when other orchestration layers (OMX, etc.) are installed.
-     The codex hook is a no-op in directories that are not bound to a
-     memorize project.
-   - **Codex only: tell the user to approve the hooks once.** Codex
-     silently skips externally-written hooks (no error, no log) until
-     the user approves them in an interactive codex session. After
-     `install codex`, instruct the user: "start `codex` interactively
-     once and accept the hook approval prompt; until then memorize
-     records nothing from codex sessions." `memorize doctor` warns
-     when registered hooks have apparently never fired. (Upstream
-     fix tracked in openai/codex#21615.)
-
-4. **Verify**:
+3. **Verify**:
 
    ```sh
    npx @shakystar/memorize doctor --json
@@ -123,7 +113,7 @@ no task lists, no summaries.**
    or `error`, apply the `fix` field of each issue in order and re-run
    until status is `ok`.
 
-5. **Enable consolidation & semantic search** (optional but recommended).
+4. **Enable consolidation & semantic search** (optional but recommended).
    Out of the box, memory consolidation auto-detects your agent CLI
    (`claude`, then `codex`) on PATH and extracts through its existing
    login. If no CLI is detected (and whenever `MEMORIZE_LLM_BACKEND=off`),
@@ -185,7 +175,7 @@ no task lists, no summaries.**
    search (env)" for the full variable list (timeouts, contradiction
    detection, the `MEMORIZE_LLM_ENDPOINT` HTTP backend, etc.).
 
-6. **Offer to absorb pre-existing context** (mid-project adoption, #69).
+5. **Offer to absorb pre-existing context** (mid-project adoption, #69).
    If this project lived under you (or another agent) before memorize
    (your harness memory has project notes, or the user keeps decision
    docs), offer:
@@ -211,7 +201,7 @@ no task lists, no summaries.**
    4. Report the result counts (`imported` / `skippedDuplicates`) to
       the user. Re-running is safe; duplicates are skipped.
 
-7. **Tell the user** briefly:
+6. **Tell the user** briefly:
 
    > Memorize is set up. Your project context will now persist across
    > sessions automatically. Just work as usual, and each new session
@@ -263,6 +253,7 @@ bundled inside the npm tarball, so it is available offline.
 ## Command index (1-line summaries)
 
 ```
+init                 one-shot: bind cwd + import + detect & wire agent(s)
 setup                detect installed agents + wire global integration
 project setup        bind cwd + import AGENTS/CLAUDE/.cursorrules
 project show         print bound project JSON
