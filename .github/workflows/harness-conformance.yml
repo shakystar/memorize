@@ -1,0 +1,32 @@
+name: harness-conformance
+
+# Verifies memorize's integration against the REAL agent-harness CLIs in a
+# container. Scheduled so an upstream harness change (config schema/paths,
+# plugin API) surfaces as a red check instead of silent drift. Tier A/A' only
+# (model-free); live capture (tier B) is run manually with a provider secret.
+
+on:
+  workflow_dispatch:
+    inputs:
+      harness:
+        description: harness id (must exist in src/harness/registry.ts)
+        required: true
+        default: opencode
+  schedule:
+    # Weekly, Monday 06:00 UTC — catch upstream harness releases.
+    - cron: '0 6 * * 1'
+
+jobs:
+  conformance:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # Add harness ids here as descriptors land in docker/conformance/harnesses/.
+        harness: ${{ github.event_name == 'workflow_dispatch' && fromJSON(format('["{0}"]', github.event.inputs.harness)) || fromJSON('["opencode"]') }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build conformance image
+        run: docker build -f docker/conformance/Dockerfile -t memorize-conformance .
+      - name: Run tier A + A' (model-free)
+        run: docker run --rm memorize-conformance ${{ matrix.harness }}

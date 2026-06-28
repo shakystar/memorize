@@ -1,0 +1,10 @@
+# Keep the Docker build context small and host-agnostic. Host node_modules are
+# the wrong platform/arch for the linux image and would shadow a clean install.
+node_modules
+**/node_modules
+dist
+.git
+.claude
+*.log
+coverage
+.bench

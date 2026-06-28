@@ -850,24 +850,42 @@ function opencodePluginPath(): string {
   return path.join(opencodeConfigDir(), 'plugins', 'memorize.ts');
 }
 
+/**
+ * The spawn command the opencode plugin uses to reach THIS memorize install.
+ * Mirrors buildHookCommand's form choice so the plugin invokes the same binary
+ * the install resolved — node-abs when memorize is installed (crucial: avoids
+ * fetching the *published* npm package, which lacks unreleased harness support,
+ * and is what the conformance container relies on), else npx.
+ */
+function opencodeSpawnSpec(): { cmd: string; argsPrefix: string[] } {
+  return detectHookCommandForm() === 'bare'
+    ? { cmd: 'node', argsPrefix: [resolveCliPath()] }
+    : { cmd: 'npx', argsPrefix: ['-y', '@shakystar/memorize'] };
+}
+
 // Planted verbatim at install. opencode runs on Bun, which supports
 // node:child_process, so the spawn path avoids depending on Bun-shell stdin
 // specifics. LIVE-VERIFICATION NOTE: opencode's plugin payload field names and
 // built-in tool names are not fully pinned in the docs — the field reads and
 // the tool-name map below are best-effort and must be confirmed against a live
-// opencode session (tracked as the opencode dogfood item). Capture failing
+// opencode session (the conformance harness / dogfood item). Capture failing
 // must never break the opencode session, hence the broad try/catch + detached
 // fire-and-forget.
-const OPENCODE_PLUGIN = `// memorize opencode plugin — planted by \`memorize install opencode\`.
+function renderOpencodePlugin(spec: { cmd: string; argsPrefix: string[] }): string {
+  return `// memorize opencode plugin — planted by \`memorize install opencode\`.
 // Do not edit by hand; re-running install overwrites it.
 import { spawn } from 'node:child_process';
+
+// Baked at install time so the plugin reaches the same memorize the install used.
+const SPAWN_CMD = ${JSON.stringify(spec.cmd)};
+const SPAWN_ARGS_PREFIX = ${JSON.stringify(spec.argsPrefix)};
 
 // opencode tool names -> the names memorize's capture filter recognizes.
 const TOOL_NAME_MAP = { write: 'Write', edit: 'Edit', patch: 'Edit', bash: 'shell' };
 
 function fireMemorizeHook(event, payload) {
   try {
-    const child = spawn('npx', ['-y', '@shakystar/memorize', 'hook', 'opencode', event], {
+    const child = spawn(SPAWN_CMD, [...SPAWN_ARGS_PREFIX, 'hook', 'opencode', event], {
       stdio: ['pipe', 'ignore', 'ignore'],
       detached: true,
     });
@@ -901,6 +919,7 @@ export const MemorizePlugin = async () => ({
   },
 });
 `;
+}
 
 interface OpencodeConfig {
   $schema?: string;
@@ -949,7 +968,7 @@ async function mergeOpencodeConfig(): Promise<string> {
 async function writeOpencodePlugin(): Promise<void> {
   const pluginPath = opencodePluginPath();
   await fs.mkdir(path.dirname(pluginPath), { recursive: true });
-  await fs.writeFile(pluginPath, OPENCODE_PLUGIN, 'utf8');
+  await fs.writeFile(pluginPath, renderOpencodePlugin(opencodeSpawnSpec()), 'utf8');
 }
 
 /**
