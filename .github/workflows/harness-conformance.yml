@@ -45,10 +45,13 @@ jobs:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
         run: |
           ARGS=(--rm)
-          if [ -n "$ANTHROPIC_API_KEY" ]; then
-            echo "tier B: live capture ENABLED (provider secret present)"
+          EVENT='${{ github.event_name }}'
+          # Cost/flake control: the model-driven tier B runs on schedule/manual
+          # only. PRs get the deterministic, model-free tiers (A/A'/A'').
+          if [ -n "$ANTHROPIC_API_KEY" ] && { [ "$EVENT" = schedule ] || [ "$EVENT" = workflow_dispatch ]; }; then
+            echo "tier B: live capture ENABLED ($EVENT, provider secret present)"
             ARGS+=(-e OPENCODE_CONFORMANCE_LIVE=1 -e 'OPENCODE_MODEL=anthropic/claude-haiku-4-5' -e ANTHROPIC_API_KEY)
           else
-            echo "tier B: SKIPPED (no ANTHROPIC_API_KEY secret)"
+            echo "tier B: live capture SKIPPED (deterministic tiers only on $EVENT; model runs on schedule/dispatch)"
           fi
           docker run "${ARGS[@]}" memorize-conformance ${{ matrix.harness }}
