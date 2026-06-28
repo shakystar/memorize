@@ -89,8 +89,10 @@ live_capture_check() {
   echo "  --- plugin debug log (opencode payload shape) ---"
   head -c 2500 "$HOME/memorize-opencode-debug.log" 2>/dev/null | sed 's/^/    /' || echo "    (no debug log — plugin tool.execute.after never fired)"
   echo "  --- end debug log ---"
+  # doctor must run FROM the bound project dir — memorize resolves the project
+  # by walking UP from cwd, so querying /work (the parent) would find nothing.
   local pending
-  pending="$(memorize doctor --json 2>/dev/null | node -e '
+  pending="$( cd /work/sample && memorize doctor --json 2>/dev/null | node -e '
     let s = "";
     process.stdin.on("data", (d) => (s += d)).on("end", () => {
       try {
