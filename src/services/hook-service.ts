@@ -656,9 +656,14 @@ export async function runHook(
     : await getBoundProjectId(params.cwd);
   if (!projectId) return EMPTY_HOOK_RESULT;
 
-  const handler = runtimeHookEvents(harnessId).includes(params.eventName)
-    ? sharedHookHandlers[params.eventName]
-    : undefined;
+  // Gate on the NATIVE fired event, then translate to the canonical handler
+  // (identity for Claude/Codex; e.g. Gemini `AfterTool` → `PostToolUse`).
+  if (!runtimeHookEvents(harnessId).includes(params.eventName)) {
+    return EMPTY_HOOK_RESULT;
+  }
+  const handlerKey =
+    descriptor.eventHandlerMap?.[params.eventName] ?? params.eventName;
+  const handler = sharedHookHandlers[handlerKey];
   if (!handler) return EMPTY_HOOK_RESULT;
   return handler({
     projectId,
