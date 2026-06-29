@@ -17,7 +17,7 @@
  * in their own modules and are wired to descriptors by id.
  */
 
-export type HarnessId = 'claude' | 'codex' | 'opencode';
+export type HarnessId = 'claude' | 'codex' | 'opencode' | 'gemini';
 
 export interface HarnessDescriptor {
   /** Stable id; also the `memorize hook <id> <event>` token and (for
@@ -150,17 +150,46 @@ const OPENCODE: HarnessDescriptor = {
   autoBindProject: false,
 };
 
+// --- Gemini CLI --------------------------------------------------------------
+
+// Gemini CLI's hooks live in settings.json with a schema IDENTICAL to Claude's
+// (matcher groups + {type,command}), and SessionStart injects context via the
+// SAME `hookSpecificOutput.additionalContext` field — so the shared handlers
+// work as-is and gemini gets full session-start injection. It only DIFFERS in
+// event NAMES: `AfterTool` (not PostToolUse), `PreCompress` (not PostCompact) —
+// translated by eventHandlerMap. Tool names also differ (write_file/replace/
+// run_shell_command); the capture filter learns those via conformance dogfood.
+const GEMINI: HarnessDescriptor = {
+  id: 'gemini',
+  label: 'Gemini CLI',
+  configDirRel: '.gemini',
+  // NATIVE gemini event names; eventHandlerMap routes them to canonical handlers.
+  hookEvents: ['SessionStart', 'AfterTool'],
+  legacyHookEvents: [],
+  legacyHandledEvents: [],
+  eventHandlerMap: { AfterTool: 'PostToolUse' },
+  mechanism: 'json-hooks-map',
+  registersMcp: false,
+  hookScope: 'global',
+  hookPlacement: 'append',
+  groundRuleFile: 'GEMINI.md',
+  plantsSkill: false,
+  autoBindProject: false,
+};
+
 /** All supported harnesses, in display order. */
 export const harnessRegistry: readonly HarnessDescriptor[] = [
   CLAUDE,
   CODEX,
   OPENCODE,
+  GEMINI,
 ];
 
 const byId: Record<HarnessId, HarnessDescriptor> = {
   claude: CLAUDE,
   codex: CODEX,
   opencode: OPENCODE,
+  gemini: GEMINI,
 };
 
 /** All harness ids, in registry order. */
