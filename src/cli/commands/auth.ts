@@ -1,3 +1,4 @@
+import { probeHubAuth } from '../../adapters/sync-transport-http.js';
 import {
   deleteToken,
   listHosts,
@@ -10,7 +11,7 @@ import type { CliContext } from '../context.js';
 import { parseFlags } from '../parse-flags.js';
 
 const LOGIN_USAGE =
-  'Usage: memorize auth login --remote-url <url> [--token <t>] ' +
+  'Usage: memorize auth login --remote-url <url> [--token <t>] [--no-validate] ' +
   '(or pipe the token on stdin)';
 const STATUS_USAGE = 'Usage: memorize auth status [--remote-url <url>]';
 const LOGOUT_USAGE = 'Usage: memorize auth logout --remote-url <url>';
@@ -40,6 +41,7 @@ export async function runAuthCommand(
   if (subcommand === 'login') {
     const flags = parseFlags(args.slice(1), {
       single: ['remote-url', 'token'],
+      boolean: ['no-validate'],
     });
     const remoteUrl = flags.single['remote-url'];
     if (!remoteUrl) throw new Error(LOGIN_USAGE);
@@ -51,9 +53,33 @@ export async function runAuthCommand(
         `No token provided. Pass --token <t> or pipe it on stdin. ${LOGIN_USAGE}`,
       );
     }
+    const host = normalizeHost(remoteUrl);
+    // Fail-fast validation (#192): probe the Hub before persisting so a typo'd or
+    // expired key is rejected here rather than as a deferred auto-sync failure
+    // later. Only a definitive 401/403 aborts; an unreachable/non-conformant Hub
+    // degrades to "store anyway" so offline/CI provisioning still works.
+    // `--no-validate` skips the network entirely.
+    if (!flags.boolean['no-validate']) {
+      const probe = await probeHubAuth(remoteUrl, token);
+      if (probe === 'unauthorized') {
+        throw new Error(
+          `Token rejected by ${host} (401/403). Nothing was stored. ` +
+            `Check the key, or pass --no-validate to store it without checking.`,
+        );
+      }
+      await setToken(remoteUrl, token);
+      console.log(
+        probe === 'ok'
+          ? `Logged in to ${host} (token validated). ` +
+              `Token stored (0600) at ${getCredentialsFile()}.`
+          : `Logged in to ${host}. ⚠ Could not reach the Hub to validate the ` +
+              `token; stored it anyway (0600) at ${getCredentialsFile()}.`,
+      );
+      return;
+    }
     await setToken(remoteUrl, token);
     console.log(
-      `Logged in to ${normalizeHost(remoteUrl)}. ` +
+      `Logged in to ${host}. ` +
         `Token stored (0600) at ${getCredentialsFile()}.`,
     );
     return;
