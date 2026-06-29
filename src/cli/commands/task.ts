@@ -134,6 +134,18 @@ async function runResumeTask(
     ...(taskId ? { taskId } : {}),
     ...(sessionCtx.sessionId ? { selfSessionId: sessionCtx.sessionId } : {}),
   });
+  // Fail loud on an unresolved explicit target. loadStartContext silently
+  // falls back to the auto-picker when readTask(taskId) misses, so a
+  // mistyped `resume --task <typo>` would otherwise return a *different*
+  // task's payload — reintroducing the "plausible payload for the wrong
+  // task" no-op this command exists to kill. The auto-picker fallback is
+  // intended only for the no-explicit-target case.
+  if (explicitTaskId && payload.task?.id !== explicitTaskId) {
+    throw new Error(
+      `No task ${explicitTaskId} in this project. ` +
+        'Run `memorize task list` to see valid task ids.',
+    );
+  }
   console.log(JSON.stringify(payload, null, 2));
 }
 

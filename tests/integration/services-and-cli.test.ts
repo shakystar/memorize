@@ -132,6 +132,12 @@ describe('phase 2 services and cli', () => {
     // Fail loud: a typo'd flag no longer no-ops into a plausible payload.
     const bogus = runCli(['task', 'resume', '--bogus']);
     expect(bogus.status).not.toBe(0);
+
+    // Fail loud: an explicit but unresolved task id must not silently
+    // fall back to the auto-picker and return a different task.
+    const missing = runCli(['task', 'resume', '--task', 'task_does_not_exist']);
+    expect(missing.status).not.toBe(0);
+    expect(String(missing.stderr)).toContain('task_does_not_exist');
   });
 
   it('records task checkpoint and handoff via cli', { timeout: 30_000 }, () => {
