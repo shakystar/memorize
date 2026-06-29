@@ -22,6 +22,10 @@ import {
 } from '../storage/event-store.js';
 import { readJson, writeJson } from '../storage/fs-utils.js';
 import { getSyncFile } from '../storage/path-resolver.js';
+import {
+  decryptEventPayload,
+  encryptEventPayload,
+} from './encryption-service.js';
 import { rebuildProjectProjection } from './projection-store.js';
 
 async function readStateOrThrow(projectId: string): Promise<ProjectSyncState> {
@@ -138,7 +142,20 @@ export async function pushProject(
     await updateSyncState(projectId, { syncStatus: 'syncing' });
   }
 
-  const response = await transport.push(payload);
+  // E2E encryption (#182): when a project key is set, encrypt each event's
+  // payload just before it leaves the machine. buildPushPayload stays plaintext
+  // (it also feeds getQueueSnapshot's counting), so this is the single push-side
+  // encryption point. Event ids are unchanged, so the watermark below still works.
+  const wirePayload = state.encryptionKey
+    ? {
+        ...payload,
+        events: payload.events.map((event) =>
+          encryptEventPayload(event, state.encryptionKey as string),
+        ),
+      }
+    : payload;
+
+  const response = await transport.push(wirePayload);
   if (response.lastAcceptedEventId) {
     await markPushed(projectId, response.lastAcceptedEventId);
   }
@@ -168,7 +185,18 @@ export async function pullProject(
 
   let inserted = 0;
   if (response.events.length > 0) {
-    inserted = await applyPullResponse(projectId, response);
+    // Decrypt payloads back to plaintext before they hit the local store, so the
+    // SQLite log and projection only ever see cleartext (#182). Plaintext
+    // payloads (un-keyed peers, legacy events) pass through untouched.
+    const decrypted = state.encryptionKey
+      ? {
+          ...response,
+          events: response.events.map((event) =>
+            decryptEventPayload(event, state.encryptionKey as string),
+          ),
+        }
+      : response;
+    inserted = await applyPullResponse(projectId, decrypted);
   }
   await updateSyncState(projectId, { syncStatus: 'idle' });
 
@@ -205,6 +233,11 @@ export async function cloneProject(
   remoteProjectId: string,
   transport: SyncTransport,
   transportConfig?: SyncTransportConfig,
+  // E2E key (#182), provisioned out-of-band at clone time. Must be seeded into
+  // the sync state BEFORE the clone-time pull below, or that pull cannot decrypt
+  // the remote's encrypted payloads. CLI plumbing (`--encryption-key`) is a
+  // follow-up; this seam lets the function clone an encrypted project today.
+  encryptionKey?: string,
 ): Promise<CloneResult> {
   assertValidId(remoteProjectId, 'remoteProjectId');
 
@@ -239,6 +272,8 @@ export async function cloneProject(
       syncEnabled: true,
       // Persist WHERE to sync so later boundaries auto-push/pull with no flag.
       ...(transportConfig ? { syncTransport: transportConfig } : {}),
+      // Seed the E2E key so the clone-time pull (below) can decrypt payloads.
+      ...(encryptionKey ? { encryptionKey } : {}),
       syncStatus: 'idle',
     };
     await writeJson(getSyncFile(remoteProjectId), initial);

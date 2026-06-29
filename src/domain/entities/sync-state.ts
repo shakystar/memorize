@@ -23,4 +23,13 @@ export interface ProjectSyncState extends BaseEntity {
   lastPulledEventId?: string;
   lastSyncAt?: ISODateString;
   syncStatus: SyncStatus;
+  /**
+   * base64 AES-256 key for client-side E2E encryption of synced event payloads
+   * (#182). When present, the sync push/pull boundary encrypts each event's
+   * `payload` before it leaves the machine and decrypts it on arrival; absent =
+   * plaintext sync (unchanged). Local-only and NEVER synced: it lives in this
+   * sync state, and `buildPushPayload` already excludes `sync.state.updated`
+   * events from the wire, so the relay never receives it.
+   */
+  encryptionKey?: string;
 }
