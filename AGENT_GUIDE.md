@@ -460,7 +460,7 @@ no flags (P3-b).
 | `<remoteProjectId>` | positional, required | The remote project id to replicate |
 | `--remote-path <path>` | single | Filesystem transport location of the source |
 | `--remote-url <url>` | single | HTTP relay URL of the source (alternative to `--remote-path`) |
-| `--token <t>` | single | Bearer token for `--remote-url` |
+| `--token <t>` | single | Bearer token for `--remote-url`. Optional once `memorize auth login` has stored one for the host (#192) |
 | `--encryption-key <b64>` | single | E2E key (#182) for an encrypted source; must match the origin's key (verify by `kid`). Seeded before the clone-time pull so it can decrypt |
 
 Pulls existing events on clone; if the source has not pushed yet it binds
@@ -493,6 +493,30 @@ returning garbage. Key distribution UX (a host-level key store mirroring
 #192's credential store, env fallback) is a follow-up; today the key
 lives per project in `sync/remote.json`. Same experimental caveats as
 `project sync`.
+
+### `memorize auth (login | status | logout)` (experimental)
+
+Host-scoped sync **credential store** (#192), the git-credential model:
+authenticate once per Hub host, then `project clone`/`sync` over
+`--remote-url` carry no inline `--token`. The token is **authorization**
+(the Hub sees it), kept deliberately separate from the #182 encryption
+key, which is **confidentiality** (the Hub never sees it) — the two are
+never co-stored.
+
+| Action | Purpose |
+|---|---|
+| `login --remote-url <url> [--token <t>]` | Store a bearer token for the URL's host. Without `--token`, the token is read from stdin (keeps it out of shell history) |
+| `status [--remote-url <url>]` | With a URL, report whether a token is stored for that host; without, list all hosts that have one (never the tokens) |
+| `logout --remote-url <url>` | Remove the stored token for the URL's host |
+
+Resolution order for the bearer token (most→least specific): explicit
+`--token` → per-project persisted token → this host store → the
+`MEMORIZE_SYNC_TOKEN` env escape hatch. A token resolved from the store is
+**not** baked back into per-project sync state, so it is not duplicated
+across projects. Storage: a `0600` JSON file at `MEMORIZE_ROOT/credentials`
+keyed by normalized host — plaintext at rest, honest like git's `store`
+helper (an OS-keychain backend is the hardening path). Same experimental
+caveats as `project sync`.
 
 ### `memorize project decision list [--all] [--json]`
 

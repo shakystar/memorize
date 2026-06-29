@@ -2,6 +2,7 @@ import { createFileSyncTransport } from '../adapters/sync-transport-file.js';
 import { createHttpSyncTransport } from '../adapters/sync-transport-http.js';
 import type { ProjectSyncState } from '../domain/entities.js';
 import type { SyncTransport } from '../domain/sync-transport.js';
+import { resolveSyncToken } from '../storage/credentials-store.js';
 import { readSyncState } from './project-service.js';
 import { pullProject, pushProject } from './sync-service.js';
 
@@ -30,17 +31,18 @@ export interface AutoSyncResult {
  * CLI `--remote-path`/`--remote-url`. Returns undefined when nothing is
  * configured (or for an unrecognized transport type from a newer schema).
  */
-export function resolveTransport(
+export async function resolveTransport(
   state: ProjectSyncState,
-): SyncTransport | undefined {
+): Promise<SyncTransport | undefined> {
   const config = state.syncTransport;
   if (!config) return undefined;
   if (config.type === 'file') return createFileSyncTransport(config.location);
   if (config.type === 'http') {
-    return createHttpSyncTransport(
-      config.url,
-      config.token ? { token: config.token } : {},
-    );
+    // Token ladder (#192): a per-project persisted token wins, else the host
+    // credential store, else env — so a project that authed via `auth login`
+    // (no token baked into its sync state) still resolves one at runtime.
+    const token = await resolveSyncToken(config.url, config.token);
+    return createHttpSyncTransport(config.url, token ? { token } : {});
   }
   return undefined;
 }
@@ -58,7 +60,7 @@ export async function autoPush(projectId: string): Promise<AutoSyncResult> {
     // this — pull is idempotent, and gating risks wedging on a stale 'syncing'
     // left by a crashed push.)
     if (state.syncStatus === 'syncing') return { ran: false, reason: 'reentrant' };
-    const transport = resolveTransport(state);
+    const transport = await resolveTransport(state);
     if (!transport) return { ran: false, reason: 'not-configured' };
     const response = await pushProject(projectId, transport);
     return { ran: true, pushed: response.accepted.length };
@@ -74,7 +76,7 @@ export async function autoPull(projectId: string): Promise<AutoSyncResult> {
   try {
     const state = await readSyncState(projectId);
     if (!isConfigured(state)) return { ran: false, reason: 'not-configured' };
-    const transport = resolveTransport(state);
+    const transport = await resolveTransport(state);
     if (!transport) return { ran: false, reason: 'not-configured' };
     const result = await pullProject(projectId, transport);
     return { ran: true, pulled: result.inserted };

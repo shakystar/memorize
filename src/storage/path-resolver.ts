@@ -40,6 +40,16 @@ export function getProjectBindingsFile(): string {
   return path.join(getMemorizeRoot(), 'profile', 'bindings.json');
 }
 
+/**
+ * Host-scoped sync credential store (#192), the git-credential analog: a single
+ * `0600` JSON file keyed by normalized Hub host so `auth login` is run once per
+ * host and later clone/sync carry no inline `--token`. Top-level (next to
+ * `projects/` and `profile/`), like git's `~/.git-credentials`.
+ */
+export function getCredentialsFile(): string {
+  return path.join(getMemorizeRoot(), 'credentials');
+}
+
 export function getTopicsDir(projectId: string): string {
   const projectRoot = getProjectRoot(projectId);
   return ensureWithinRoot(path.join(projectRoot, 'topics'), projectRoot);

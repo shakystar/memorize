@@ -5,6 +5,7 @@ import { createHttpSyncTransport } from '../../adapters/sync-transport-http.js';
 import type { SyncTransportConfig } from '../../domain/entities.js';
 import type { SyncTransport } from '../../domain/sync-transport.js';
 import { ACTOR_USER } from '../../domain/common.js';
+import { resolveSyncToken } from '../../storage/credentials-store.js';
 import { generateProjectKey, keyId } from '../../services/encryption-service.js';
 import {
   createProject,
@@ -37,25 +38,32 @@ import { renderScaffoldUsage } from '../usage.js';
  * of `--remote-path` (file) or `--remote-url` (http relay, P3-b-2) is required;
  * `--token` is only meaningful with `--remote-url`. The returned config is
  * written to ProjectSyncState so later boundaries auto-sync with no flag.
+ *
+ * For `--remote-url`, the bearer token follows the #192 ladder (explicit
+ * `--token` → host credential store → env). Only an explicit `--token` is
+ * persisted into the per-project config; a token resolved from the host store
+ * stays there (auto-sync re-resolves), avoiding secret sprawl.
  */
-function resolveTransportFlags(flags: {
+async function resolveTransportFlags(flags: {
   'remote-path'?: string;
   'remote-url'?: string;
   token?: string;
-}): { transport: SyncTransport; config: SyncTransportConfig } {
+}): Promise<{ transport: SyncTransport; config: SyncTransportConfig }> {
   const remotePath = flags['remote-path'];
   const remoteUrl = flags['remote-url'];
   if (remotePath && remoteUrl) {
     throw new Error('Pass only one of --remote-path or --remote-url, not both.');
   }
   if (remoteUrl) {
-    const token = flags.token;
+    const explicit = flags.token;
+    const token = await resolveSyncToken(remoteUrl, explicit);
     return {
-      transport: createHttpSyncTransport(
-        remoteUrl,
-        token ? { token } : {},
-      ),
-      config: { type: 'http', url: remoteUrl, ...(token ? { token } : {}) },
+      transport: createHttpSyncTransport(remoteUrl, token ? { token } : {}),
+      config: {
+        type: 'http',
+        url: remoteUrl,
+        ...(explicit ? { token: explicit } : {}),
+      },
     };
   }
   if (remotePath) {
@@ -136,7 +144,7 @@ export async function runProjectCommand(
       single: ['remote-path', 'remote-url', 'token', 'encryption-key'],
     });
     // Persist the location so later boundaries auto-sync with no flag (P3-b).
-    const { transport, config } = resolveTransportFlags(flags.single);
+    const { transport, config } = await resolveTransportFlags(flags.single);
     // #182 — out-of-band E2E key for an encrypted replica. Validate it up front
     // (keyId throws a clear length error) so a typo fails here rather than as an
     // opaque GCM/kid error on the clone-time pull. Seeded into the sync state
@@ -394,7 +402,7 @@ export async function runProjectCommand(
     }
 
     if (flags.boolean.push || flags.boolean.pull) {
-      const { transport, config } = resolveTransportFlags(flags.single);
+      const { transport, config } = await resolveTransportFlags(flags.single);
       // Persist the transport location so background auto-sync (P3-b) can run
       // at boundaries without a flag — this manual push/pull is how the origin
       // machine opts in.
