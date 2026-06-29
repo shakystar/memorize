@@ -26,6 +26,23 @@ ok()   { echo "  PASS: $1"; PASS=$((PASS + 1)); }
 ko()   { echo "  FAIL: $1"; FAIL=$((FAIL + 1)); }
 skip() { echo "  SKIP: $1"; }
 
+# Shared helper: pending-observation count for the memorize project bound at $1.
+# doctor walks UP from cwd, so it MUST run FROM the bound dir. Used by harness
+# descriptors' synthetic/live capture checks.
+_pending_count() {
+  ( cd "$1" && memorize doctor --json 2>/dev/null ) | node -e '
+    let s = "";
+    process.stdin.on("data", (d) => (s += d)).on("end", () => {
+      try {
+        const r = JSON.parse(s);
+        const c = (r.checks || []).find((x) => /consolidat/.test(x.id));
+        const m = ((c && c.message) || "").match(/(\d+) observation/);
+        process.stdout.write(m ? m[1] : "0");
+      } catch { process.stdout.write("0"); }
+    });
+  '
+}
+
 echo "== [$HARNESS] install harness CLI =="
 if ! install_harness; then
   echo "harness CLI install failed — cannot run conformance"
