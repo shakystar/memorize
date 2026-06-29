@@ -88,6 +88,54 @@ describe('E2E payload encryption over sync (#182)', () => {
     expect((localTask?.payload as { title: string }).title).toBe(SECRET_TITLE);
   });
 
+  it('fails closed cloning an encrypted remote without a key, then recovers with it (#195/#198)', async () => {
+    const remotePath = join(sandbox, 'remote');
+    const homeA = join(sandbox, 'home-a');
+    const homeB = join(sandbox, 'home-b');
+    const key = generateProjectKey();
+
+    // A: encrypted project pushed to the relay.
+    useMachine(homeA);
+    const projectA = await createProject({
+      title: 'Project A',
+      rootPath: join(sandbox, 'a'),
+    });
+    await updateSyncState(projectA.id, { encryptionKey: key });
+    await createTask({ projectId: projectA.id, title: SECRET_TITLE, actor: 'user' });
+    const transport = createFileSyncTransport(remotePath);
+    await pushProject(projectA.id, transport);
+
+    // B: clone WITHOUT the key must throw before inserting any ciphertext.
+    useMachine(homeB);
+    await expect(
+      cloneProject(join(sandbox, 'b'), projectA.id, transport),
+    ).rejects.toThrow(/encrypted payloads but no encryption key/i);
+
+    // No ciphertext and no remote events leaked into the local log — their ids
+    // are NOT burned, so the keyed retry below is not dropped as a duplicate.
+    // (A local sync.state.updated from the pull's "syncing" flip may exist; what
+    // must NOT exist is any encrypted payload or pulled remote event.)
+    const afterFail = await readEvents(projectA.id);
+    expect(afterFail.some((e) => isEncryptedEnvelope(e.payload))).toBe(false);
+    expect(afterFail.some((e) => e.type === 'task.created')).toBe(false);
+    expect(afterFail.some((e) => e.type === 'project.created')).toBe(false);
+
+    // Retry WITH the key on the same (already-bound) directory recovers.
+    const clone = await cloneProject(
+      join(sandbox, 'b'),
+      projectA.id,
+      transport,
+      undefined,
+      key,
+    );
+    expect(clone.pulled).toBeGreaterThan(0);
+    const localTask = (await readEvents(projectA.id)).find(
+      (e) => e.type === 'task.created',
+    );
+    expect(isEncryptedEnvelope(localTask?.payload)).toBe(false);
+    expect((localTask?.payload as { title: string }).title).toBe(SECRET_TITLE);
+  });
+
   it('un-keyed project still round-trips plaintext (compat)', async () => {
     const remotePath = join(sandbox, 'remote');
     const homeA = join(sandbox, 'home-a');
