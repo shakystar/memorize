@@ -26,8 +26,19 @@ interface PsRow {
 }
 
 async function loadProcessMap(): Promise<Map<number, PsRow>> {
-  const rows = await psList();
   const map = new Map<number, PsRow>();
+  let rows: Awaited<ReturnType<typeof psList>>;
+  try {
+    // ps-list shells out to `ps` on POSIX / wmic on Windows. On minimal hosts
+    // where that binary is absent (slim containers without procps), the spawn
+    // rejects with ENOENT. Process-tree attribution is PURE best-effort metadata
+    // (the picker falls back to heartbeat liveness), so a missing `ps` must
+    // degrade to "no ancestors known" — NEVER throw, or it would take down the
+    // whole SessionStart hook that calls us.
+    rows = await psList();
+  } catch {
+    return map;
+  }
   for (const r of rows) {
     map.set(r.pid, { pid: r.pid, ppid: r.ppid, comm: r.name });
   }
