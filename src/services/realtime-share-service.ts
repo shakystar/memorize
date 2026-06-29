@@ -67,6 +67,11 @@ export const MAX_LIVE_GIT_WARNINGS = 3;
  *  active concurrency hazard and is not warned about. */
 export const GIT_OP_COLLISION_WINDOW_MINUTES = 10;
 
+/** Row cap when scanning the observations projection for sibling git ops in the
+ *  hazard window. The window is short (minutes), so this only bounds a pathologically
+ *  busy project; per-session dedup means a handful of distinct siblings is the norm. */
+export const GIT_OP_SCAN_LIMIT = 200;
+
 /** Opt-in: promote detected live file collisions to `conflict.detected`
  *  events (persisted, surfaced at every startup). Off by default so dogfood
  *  is not flooded with conflict events — the additionalContext warning alone
@@ -214,6 +219,43 @@ function hasRecentSelfGitOp(
   );
 }
 
+/**
+ * Sibling destructive-git ops inside the hazard window, read from the
+ * observations projection by TIME — NOT from the post-watermark delta (#168).
+ * The sibling's op may already have been delivered to this session on an
+ * earlier, non-git live update, which advanced the share watermark past that
+ * event; gating the git-collision scan on the watermark then misses it even
+ * though both sessions are still inside the window. The shared `.git` is one
+ * resource, so presence-in-window is the correct gate. One warning per sibling
+ * session (newest command first, since the query is created_at DESC).
+ */
+function recentSiblingGitOpWarnings(
+  projectId: string,
+  selfSessionId: string,
+  windowStartIso: string,
+): SiblingGitOpWarning[] {
+  const observations = listRecentObservations(projectId, {
+    limit: GIT_OP_SCAN_LIMIT,
+    sinceIso: windowStartIso,
+  });
+  const warnings: SiblingGitOpWarning[] = [];
+  const seenGitSessions = new Set<string>();
+  for (const obs of observations) {
+    if (obs.sessionId === selfSessionId) continue;
+    if (obs.signal !== 'mutating-bash') continue;
+    if (!obs.summary || !DESTRUCTIVE_GIT_PATTERN.test(obs.summary)) continue;
+    const sid = obs.sessionId ?? '(unknown)';
+    if (seenGitSessions.has(sid)) continue;
+    seenGitSessions.add(sid);
+    warnings.push({
+      command: obs.summary,
+      siblingSessionId: sid,
+      siblingActor: siblingActor(projectId, obs.sessionId, '(unknown)'),
+    });
+  }
+  return warnings;
+}
+
 /** Normalized recent file paths this session touched (collision input). */
 function recentSelfFilePaths(
   projectId: string,
@@ -268,6 +310,7 @@ export async function buildLiveUpdate(params: {
   // Without a self session id we cannot self-filter, so we never inject (would
   // risk echoing the session's own events back to it). Common on codex.
   if (!params.selfSessionId) return empty;
+  const selfSessionId = params.selfSessionId;
 
   const all = await readEventsSince(params.projectId, params.sinceEventId);
   if (all.length === 0) return empty;
@@ -341,27 +384,16 @@ export async function buildLiveUpdate(params: {
   // also doing destructive-git work — the shared-.git race. Gated on
   // selfRecentGitOp so sessions not touching git get zero noise; the shared
   // `.git`/`.worktrees` is one resource, so this is presence-in-window, not
-  // path equality. One warning per sibling session.
-  const gitOpWarnings: SiblingGitOpWarning[] = [];
-  if (params.selfRecentGitOp) {
-    const seenGitSessions = new Set<string>();
-    for (const event of scanned) {
-      if (event.type !== 'observation.captured') continue;
-      const obs = event.payload as Observation;
-      if (obs.sessionId === params.selfSessionId) continue;
-      if (obs.signal !== 'mutating-bash') continue;
-      if (!obs.summary || !DESTRUCTIVE_GIT_PATTERN.test(obs.summary)) continue;
-      if (obs.createdAt < params.gitOpWindowStartIso) continue;
-      const sid = obs.sessionId ?? '(unknown)';
-      if (seenGitSessions.has(sid)) continue;
-      seenGitSessions.add(sid);
-      gitOpWarnings.push({
-        command: obs.summary,
-        siblingSessionId: sid,
-        siblingActor: siblingActor(params.projectId, obs.sessionId, event.actor),
-      });
-    }
-  }
+  // path equality. Scans the hazard WINDOW directly (not the post-watermark
+  // delta) so a sibling op already delivered on an earlier non-git update is
+  // still seen (#168). One warning per sibling session.
+  const gitOpWarnings = params.selfRecentGitOp
+    ? recentSiblingGitOpWarnings(
+        params.projectId,
+        selfSessionId,
+        params.gitOpWindowStartIso,
+      )
+    : [];
   const cappedGitOpWarnings = gitOpWarnings.slice(0, MAX_LIVE_GIT_WARNINGS);
 
   // Rank + cap. Conflicts are highest signal; memories by salience; raw
