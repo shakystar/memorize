@@ -370,6 +370,28 @@ describe('realtime-share — buildLiveUpdate', () => {
     expect(loud.hasContent).toBe(true);
   });
 
+  it('#168 — warns even when the sibling git op was already delivered (watermark moved past it)', async () => {
+    await seedProject();
+    // B's destructive git op is DELIVERED to A on an earlier update, so A's share
+    // watermark advances to it. Later A runs its OWN git op (the event after the
+    // watermark that makes selfRecentGitOp true). B's op is now behind the
+    // watermark — invisible to the post-watermark delta, but still in-window.
+    const bGitOp = await appendGitOp('B', 'git worktree remove .worktrees/x');
+    await appendGitOp('A', 'git worktree remove .worktrees/a');
+
+    const update = await buildLiveUpdate({
+      projectId, selfSessionId: 'A', sinceEventId: bGitOp,
+      selfRecentFilePaths: new Set(), cwd: sandbox,
+      selfRecentGitOp: true, gitOpWindowStartIso: OLD_WINDOW,
+    });
+
+    // Window-based scan still finds B's op — the old watermark-bound scan, which
+    // only saw events after bGitOp (just A's own, self-filtered), would not.
+    expect(update.gitOpWarnings).toHaveLength(1);
+    expect(update.gitOpWarnings[0]!.siblingSessionId).toBe('B');
+    expect(update.gitOpWarnings[0]!.command).toContain('git worktree remove');
+  });
+
   it('drops sibling git ops older than the freshness window, and dedups per session', async () => {
     await seedProject();
     const since = await appendObservation('A', '/repo/seed.ts');
