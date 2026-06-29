@@ -17,7 +17,7 @@
  * in their own modules and are wired to descriptors by id.
  */
 
-export type HarnessId = 'claude' | 'codex' | 'opencode' | 'gemini';
+export type HarnessId = 'claude' | 'codex' | 'opencode' | 'gemini' | 'pi';
 
 export interface HarnessDescriptor {
   /** Stable id; also the `memorize hook <id> <event>` token and (for
@@ -177,12 +177,50 @@ const GEMINI: HarnessDescriptor = {
   autoBindProject: false,
 };
 
+// --- pi ----------------------------------------------------------------------
+
+// pi (earendil-works/pi) integrates via a TypeScript EXTENSION
+// (`~/.pi/agent/extensions/*.ts`), the same ts-plugin family as opencode — but
+// pi's hook surface is the FULLEST of any harness so far. Its `before_agent_start`
+// event can inject a message into the model (`return { message: {...} }`), so
+// UNLIKE opencode, pi gets real session-start memory injection THROUGH the hook
+// (the extension gates it to fire once per session). `tool_result` → PostToolUse
+// capture; `session_compact` → PostCompact boundary. hookEvents are the CANONICAL
+// names (the extension maps pi's native event names internally before shelling
+// to `memorize hook pi <event>`), so no eventHandlerMap is needed.
+//
+// pi has NO first-party MCP; a community extension reads ~/.pi/agent/mcp.json
+// (Claude-format). registersMcp merges memorize's block there so an MCP-capable
+// pi setup picks it up — but session-start memory does NOT depend on it (the
+// before_agent_start hook delivers that), so MCP here is additive, not load-bearing.
+//
+// pi reads AGENTS.md/CLAUDE.md natively (global + walking up from cwd), so the
+// ground-rule lands in AGENTS.md with no extra config wiring (unlike opencode's
+// `instructions` array). The extension is planted globally (~/.pi/agent/extensions/),
+// so like codex/opencode it bails when the cwd is unbound.
+const PI: HarnessDescriptor = {
+  id: 'pi',
+  label: 'pi',
+  configDirRel: '.pi',
+  hookEvents: ['SessionStart', 'PostToolUse', 'PostCompact'],
+  legacyHookEvents: [],
+  legacyHandledEvents: ['Stop'],
+  mechanism: 'ts-plugin',
+  registersMcp: true,
+  hookScope: 'global',
+  hookPlacement: 'append',
+  groundRuleFile: 'AGENTS.md',
+  plantsSkill: false,
+  autoBindProject: false,
+};
+
 /** All supported harnesses, in display order. */
 export const harnessRegistry: readonly HarnessDescriptor[] = [
   CLAUDE,
   CODEX,
   OPENCODE,
   GEMINI,
+  PI,
 ];
 
 const byId: Record<HarnessId, HarnessDescriptor> = {
@@ -190,6 +228,7 @@ const byId: Record<HarnessId, HarnessDescriptor> = {
   codex: CODEX,
   opencode: OPENCODE,
   gemini: GEMINI,
+  pi: PI,
 };
 
 /** All harness ids, in registry order. */

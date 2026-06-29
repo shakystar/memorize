@@ -891,13 +891,14 @@ function opencodePluginPath(): string {
 }
 
 /**
- * The spawn command the opencode plugin uses to reach THIS memorize install.
- * Mirrors buildHookCommand's form choice so the plugin invokes the same binary
- * the install resolved — node-abs when memorize is installed (crucial: avoids
- * fetching the *published* npm package, which lacks unreleased harness support,
- * and is what the conformance container relies on), else npx.
+ * The spawn command a planted TS plugin/extension uses to reach THIS memorize
+ * install (shared by opencode and pi). Mirrors buildHookCommand's form choice so
+ * the plugin invokes the same binary the install resolved — node-abs when
+ * memorize is installed (crucial: avoids fetching the *published* npm package,
+ * which lacks unreleased harness support, and is what the conformance container
+ * relies on), else npx.
  */
-function opencodeSpawnSpec(): { cmd: string; argsPrefix: string[] } {
+function tsPluginSpawnSpec(): { cmd: string; argsPrefix: string[] } {
   return detectHookCommandForm() === 'bare'
     ? { cmd: 'node', argsPrefix: [resolveCliPath()] }
     : { cmd: 'npx', argsPrefix: ['-y', '@shakystar/memorize'] };
@@ -1034,7 +1035,7 @@ async function mergeOpencodeConfig(): Promise<string> {
 async function writeOpencodePlugin(): Promise<void> {
   const pluginPath = opencodePluginPath();
   await fs.mkdir(path.dirname(pluginPath), { recursive: true });
-  await fs.writeFile(pluginPath, renderOpencodePlugin(opencodeSpawnSpec()), 'utf8');
+  await fs.writeFile(pluginPath, renderOpencodePlugin(tsPluginSpawnSpec()), 'utf8');
 }
 
 /**
@@ -1067,4 +1068,208 @@ export async function uninstallOpencodeIntegration(cwd: string): Promise<string>
   await fs.rm(opencodePluginPath(), { force: true });
   await stripGroundRuleBlock(path.join(cwd, 'AGENTS.md'));
   return configPath;
+}
+
+// --- pi (TS-extension mechanism) ---------------------------------------------
+
+// pi (earendil-works/pi) is the same ts-plugin family as opencode but with a
+// richer hook surface, so it integrates via three surfaces:
+//   1. A TS extension (~/.pi/agent/extensions/memorize.ts) that subscribes to
+//      pi lifecycle events: `before_agent_start` (→ inject session-start memory
+//      ONCE per session — pi's hook CAN inject a model message, unlike
+//      opencode's), `tool_result` (→ PostToolUse capture), `session_compact`
+//      (→ PostCompact boundary). Planted as a template string (NOT part of
+//      memorize's own build, so neither typechecked nor linted here).
+//   2. An MCP block merged into ~/.pi/agent/mcp.json (Claude-format) so an
+//      MCP-capable pi setup (community extension / my-pi) also exposes memorize
+//      tools. Additive: session-start memory does NOT depend on it (the
+//      before_agent_start hook delivers that).
+//   3. The AGENTS.md ground-rule block — pi reads AGENTS.md natively.
+
+function piAgentDir(): string {
+  return path.join(os.homedir(), '.pi', 'agent');
+}
+
+function piExtensionPath(): string {
+  return path.join(piAgentDir(), 'extensions', 'memorize.ts');
+}
+
+function piMcpConfigPath(): string {
+  return path.join(piAgentDir(), 'mcp.json');
+}
+
+// Planted verbatim at install. pi loads extensions as ES modules (Node/Bun
+// compatible), so the spawn path uses node:child_process. Capture/injection
+// failing must NEVER break the pi session, hence broad try/catch and a bounded
+// wait on the session-start fetch. LIVE-VERIFICATION NOTE: pi's event payload
+// field names and built-in tool names are grounded from the docs (toolName is
+// lowercase write/edit/bash); the conformance harness pins them against the
+// real CLI.
+function renderPiExtension(spec: { cmd: string; argsPrefix: string[] }): string {
+  return `// memorize pi extension — planted by \`memorize init\` (pi detected).
+// Do not edit by hand; re-running install overwrites it.
+import { spawn } from 'node:child_process';
+import { appendFileSync } from 'node:fs';
+import { homedir } from 'node:os';
+import { join } from 'node:path';
+
+// Baked at install time so the extension reaches the same memorize the install used.
+const SPAWN_CMD = ${JSON.stringify(spec.cmd)};
+const SPAWN_ARGS_PREFIX = ${JSON.stringify(spec.argsPrefix)};
+
+// Diagnostics: MEMORIZE_PI_DEBUG=1 dumps payloads + spawn outcomes to
+// ~/memorize-pi-debug.log. Off by default; used by the conformance harness.
+const DEBUG = !!process.env.MEMORIZE_PI_DEBUG;
+function dbg(obj) {
+  if (!DEBUG) return;
+  try {
+    appendFileSync(join(homedir(), 'memorize-pi-debug.log'), JSON.stringify(obj) + '\\n');
+  } catch {}
+}
+
+// pi built-in tool names (lowercase) -> the names memorize's capture filter knows.
+const TOOL_NAME_MAP = { write: 'Write', edit: 'Edit', patch: 'Edit', bash: 'shell' };
+
+// Fire-and-forget hook (capture / compaction): never blocks the pi turn.
+function fireMemorizeHook(event, payload) {
+  try {
+    const child = spawn(SPAWN_CMD, [...SPAWN_ARGS_PREFIX, 'hook', 'pi', event], {
+      stdio: ['pipe', 'ignore', 'ignore'],
+      detached: true,
+    });
+    child.on('error', (e) => dbg({ spawnError: String(e), event }));
+    if (child.stdin) child.stdin.end(JSON.stringify(payload || {}));
+    child.unref();
+    dbg({ fired: event, payload });
+  } catch (e) {
+    dbg({ fireError: String(e) });
+  }
+}
+
+// Session-start memory: run \`memorize hook pi SessionStart\`, CAPTURE its stdout
+// JSON, and return the injected context. Bounded so a slow/hung memorize never
+// stalls the pi session; resolves '' on any failure (best-effort).
+function memorizeSessionContext() {
+  return new Promise((resolve) => {
+    let out = '';
+    let done = false;
+    const finish = (v) => { if (!done) { done = true; resolve(v); } };
+    try {
+      const child = spawn(SPAWN_CMD, [...SPAWN_ARGS_PREFIX, 'hook', 'pi', 'SessionStart'], {
+        stdio: ['pipe', 'pipe', 'ignore'],
+      });
+      const timer = setTimeout(() => { try { child.kill(); } catch {} finish(''); }, 8000);
+      child.on('error', (e) => { clearTimeout(timer); dbg({ ctxSpawnError: String(e) }); finish(''); });
+      if (child.stdout) child.stdout.on('data', (d) => { out += d; });
+      child.on('close', () => {
+        clearTimeout(timer);
+        try {
+          const parsed = JSON.parse(out);
+          const ctx = parsed && parsed.hookSpecificOutput && parsed.hookSpecificOutput.additionalContext;
+          finish(typeof ctx === 'string' ? ctx : '');
+        } catch (e) { dbg({ ctxParseError: String(e), out }); finish(''); }
+      });
+      if (child.stdin) child.stdin.end('{}');
+    } catch (e) { dbg({ ctxError: String(e) }); finish(''); }
+  });
+}
+
+// before_agent_start fires every user turn; gate injection to ONCE per session.
+let memorizeInjected = false;
+
+export default function (pi) {
+  pi.on('before_agent_start', async (event) => {
+    if (memorizeInjected) return;
+    memorizeInjected = true; // set first: never re-spawn within a session
+    const ctx = await memorizeSessionContext();
+    dbg({ hook: 'before_agent_start', injectedChars: (ctx || '').length });
+    if (!ctx) return;
+    return { message: { customType: 'memorize', content: ctx, display: false } };
+  });
+
+  pi.on('tool_result', async (event) => {
+    const rawTool = (event && (event.toolName || event.tool)) || '';
+    dbg({ hook: 'tool_result', rawTool, mapped: TOOL_NAME_MAP[rawTool] || rawTool, cwd: process.cwd() });
+    fireMemorizeHook('PostToolUse', {
+      tool_name: TOOL_NAME_MAP[rawTool] || rawTool,
+      tool_input: (event && event.input) || {},
+    });
+  });
+
+  pi.on('session_compact', async (event) => {
+    fireMemorizeHook('PostCompact', { compact_summary: (event && event.summary) || '' });
+  });
+}
+`;
+}
+
+interface PiMcpConfig {
+  mcpServers?: Record<string, unknown>;
+  [key: string]: unknown;
+}
+
+async function readPiMcpConfig(): Promise<PiMcpConfig> {
+  try {
+    const raw = await fs.readFile(piMcpConfigPath(), 'utf8');
+    const parsed = JSON.parse(raw) as PiMcpConfig;
+    return parsed && typeof parsed === 'object' ? parsed : {};
+  } catch (error) {
+    if (isEnoent(error)) return {};
+    throw error;
+  }
+}
+
+/**
+ * Merge the memorize MCP server into ~/.pi/agent/mcp.json (Claude-format,
+ * idempotent). pi has no first-party MCP — a community extension reads this
+ * file — so this is additive: it lights up memorize's tools where such an
+ * extension is present, and is harmless otherwise. Preserves other servers.
+ */
+async function mergePiMcpConfig(): Promise<string> {
+  const config = await readPiMcpConfig();
+  config.mcpServers = { ...(config.mcpServers ?? {}) };
+  config.mcpServers[MEMORIZE_MCP_KEY] = {
+    command: 'npx',
+    args: ['-y', '@shakystar/memorize', 'mcp'],
+  };
+  const configPath = piMcpConfigPath();
+  await writeJson(configPath, config);
+  return configPath;
+}
+
+async function writePiExtension(): Promise<void> {
+  const extPath = piExtensionPath();
+  await fs.mkdir(path.dirname(extPath), { recursive: true });
+  await fs.writeFile(extPath, renderPiExtension(tsPluginSpawnSpec()), 'utf8');
+}
+
+/**
+ * Wire memorize into pi: plant the capture+inject extension (global), merge the
+ * MCP block (global mcp.json), and plant the project's AGENTS.md ground-rule
+ * block. Idempotent. Returns the extension path (pi's primary integration
+ * surface) for the install summary.
+ */
+export async function installPiIntegration(cwd: string): Promise<string> {
+  await writePiExtension();
+  await mergePiMcpConfig();
+  await upsertGroundRuleBlock(path.join(cwd, 'AGENTS.md'));
+  return piExtensionPath();
+}
+
+/**
+ * Reverse installPiIntegration: remove the extension file, drop the memorize
+ * MCP entry, and strip the AGENTS.md ground-rule. Preserves other pi config and
+ * never deletes user-owned AGENTS.md. Idempotent.
+ */
+export async function uninstallPiIntegration(cwd: string): Promise<string> {
+  await fs.rm(piExtensionPath(), { force: true });
+  const config = await readPiMcpConfig();
+  if (config.mcpServers && MEMORIZE_MCP_KEY in config.mcpServers) {
+    const servers = { ...config.mcpServers };
+    delete servers[MEMORIZE_MCP_KEY];
+    config.mcpServers = servers;
+    await writeJson(piMcpConfigPath(), config);
+  }
+  await stripGroundRuleBlock(path.join(cwd, 'AGENTS.md'));
+  return piExtensionPath();
 }
