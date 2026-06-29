@@ -447,7 +447,7 @@ Event sync with a remote path.
 Running with no flags prints the current sync state and queue
 snapshot as JSON.
 
-### `memorize project clone <remoteProjectId> (--remote-path <path> | --remote-url <url> [--token <t>])` (experimental)
+### `memorize project clone <remoteProjectId> (--remote-path <path> | --remote-url <url> [--token <t>]) [--encryption-key <b64>]` (experimental)
 
 True-replica join (#30, #38): adopts an existing **remote** project's id
 in a FRESH directory so the same project keeps one identity on every
@@ -461,10 +461,38 @@ no flags (P3-b).
 | `--remote-path <path>` | single | Filesystem transport location of the source |
 | `--remote-url <url>` | single | HTTP relay URL of the source (alternative to `--remote-path`) |
 | `--token <t>` | single | Bearer token for `--remote-url` |
+| `--encryption-key <b64>` | single | E2E key (#182) for an encrypted source; must match the origin's key (verify by `kid`). Seeded before the clone-time pull so it can decrypt |
 
 Pulls existing events on clone; if the source has not pushed yet it binds
 and tells you to run `project sync --pull` once it has. Same experimental
 caveats as `project sync`.
+
+### `memorize project encryption (enable [--key <b64>] [--force] | show | disable)` (experimental)
+
+Provisions the per-project **E2E payload key** (#182) on the origin
+machine. With a key set, each event's `payload` is encrypted with
+AES-256-GCM at the sync boundary, so an untrusted relay (`memorize_hub`)
+stores ciphertext and never sees memory content — only routing metadata
+(event ids, types, scope, actor, sizes, timing) stays visible. The key is
+**local-only**: it is never synced (the push filter drops
+`sync.state.updated`), so distribution to replicas is **out-of-band** —
+`enable`/`show` print the key for exactly that. This is confidentiality
+and is orthogonal to the Hub bearer PAT (authorization).
+
+| Action | Purpose |
+|---|---|
+| `enable [--key <b64>]` | Turn on encryption; generate a fresh AES-256 key, or adopt `--key`. Prints the key (share out-of-band) and its `kid` fingerprint (verify on the replica) |
+| `enable --force` | Replace an existing key. **Warning:** already-synced ciphertext becomes undecryptable (kid mismatch) |
+| `show` | Print the current key + `kid` for out-of-band sharing, or report that encryption is off |
+| `disable` | Remove the key; future pushes send plaintext (already-synced ciphertext is unaffected) |
+
+Provision the key on the origin, then clone a replica with the matching
+`memorize project clone … --encryption-key <b64>`. A wrong key fails
+closed: the clone-time pull throws a clear `kid` mismatch rather than
+returning garbage. Key distribution UX (a host-level key store mirroring
+#192's credential store, env fallback) is a follow-up; today the key
+lives per project in `sync/remote.json`. Same experimental caveats as
+`project sync`.
 
 ### `memorize project decision list [--all] [--json]`
 

@@ -5,6 +5,7 @@ import { createHttpSyncTransport } from '../../adapters/sync-transport-http.js';
 import type { SyncTransportConfig } from '../../domain/entities.js';
 import type { SyncTransport } from '../../domain/sync-transport.js';
 import { ACTOR_USER } from '../../domain/common.js';
+import { generateProjectKey, keyId } from '../../services/encryption-service.js';
 import {
   createProject,
   getBindingForPath,
@@ -127,22 +128,115 @@ export async function runProjectCommand(
     if (!remoteProjectId) {
       throw new Error(
         'Usage: memorize project clone <remoteProjectId> ' +
-          '(--remote-path <path> | --remote-url <url> [--token <t>])',
+          '(--remote-path <path> | --remote-url <url> [--token <t>]) ' +
+          '[--encryption-key <b64>]',
       );
     }
     const flags = parseFlags(args.slice(2), {
-      single: ['remote-path', 'remote-url', 'token'],
+      single: ['remote-path', 'remote-url', 'token', 'encryption-key'],
     });
     // Persist the location so later boundaries auto-sync with no flag (P3-b).
     const { transport, config } = resolveTransportFlags(flags.single);
-    const result = await cloneProject(cwd, remoteProjectId, transport, config);
+    // #182 — out-of-band E2E key for an encrypted replica. Validate it up front
+    // (keyId throws a clear length error) so a typo fails here rather than as an
+    // opaque GCM/kid error on the clone-time pull. Seeded into the sync state
+    // BEFORE that pull so it can decrypt the remote's ciphertext payloads.
+    const encryptionKey = flags.single['encryption-key'];
+    if (encryptionKey) {
+      keyId(encryptionKey);
+    }
+    const result = await cloneProject(
+      cwd,
+      remoteProjectId,
+      transport,
+      config,
+      encryptionKey,
+    );
+    const encNote = encryptionKey
+      ? ` E2E encryption is on (kid ${keyId(encryptionKey)}).`
+      : '';
     console.log(
       result.pulled > 0
-        ? `Cloned project ${result.projectId} (${result.pulled} events pulled).`
+        ? `Cloned project ${result.projectId} (${result.pulled} events pulled).${encNote}`
         : `Bound to remote project ${result.projectId}; no events yet. ` +
-            'Run `memorize project sync --pull --remote-path <path>` after the source pushes.',
+            'Run `memorize project sync --pull --remote-path <path>` after the source pushes.' +
+            encNote,
     );
     return;
+  }
+
+  if (subcommand === 'encryption') {
+    // #182 — provision the per-project E2E key on the ORIGIN machine. The key is
+    // local-only (never synced: `buildPushPayload` drops `sync.state.updated`),
+    // so distribution to replicas is out-of-band — `enable`/`show` print it for
+    // exactly that. Confidentiality only; orthogonal to the Hub bearer PAT.
+    const projectId = await requireBoundProjectId(cwd);
+    const action = args[1];
+    const state = await readSyncState(projectId);
+    if (!state) {
+      throw new Error(`Sync state is missing for project ${projectId}.`);
+    }
+
+    if (action === 'show') {
+      if (!state.encryptionKey) {
+        console.log(`Encryption is not enabled for project ${projectId}.`);
+        return;
+      }
+      console.log(
+        `Encryption is ENABLED for project ${projectId}.\n` +
+          `  key (share out-of-band): ${state.encryptionKey}\n` +
+          `  kid (fingerprint):       ${keyId(state.encryptionKey)}`,
+      );
+      return;
+    }
+
+    if (action === 'enable') {
+      const flags = parseFlags(args.slice(2), {
+        single: ['key'],
+        boolean: ['force'],
+      });
+      // Rotating the key strands already-synced ciphertext (decrypt fails on a
+      // kid mismatch), so refuse to clobber an existing key without --force.
+      if (state.encryptionKey && !flags.boolean.force) {
+        throw new Error(
+          `Encryption is already enabled for project ${projectId}. Changing ` +
+            `the key makes already-synced ciphertext undecryptable (kid ` +
+            `mismatch). Run \`memorize project encryption show\` to view the ` +
+            `current key, or pass --force to replace it.`,
+        );
+      }
+      const key = flags.single.key ?? generateProjectKey();
+      const kid = keyId(key); // validates the key length; clear error on a typo
+      await updateSyncState(projectId, { encryptionKey: key });
+      const remoteId = state.remoteProjectId ?? projectId;
+      console.log(
+        `Encryption enabled for project ${projectId}.\n` +
+          `  key (share out-of-band): ${key}\n` +
+          `  kid (fingerprint):       ${kid}\n\n` +
+          `On another machine, clone the encrypted replica with:\n` +
+          `  memorize project clone ${remoteId} --remote-url <url> ` +
+          `--encryption-key ${key}`,
+      );
+      return;
+    }
+
+    if (action === 'disable') {
+      if (!state.encryptionKey) {
+        console.log(`Encryption is not enabled for project ${projectId}.`);
+        return;
+      }
+      await updateSyncState(projectId, { encryptionKey: undefined });
+      console.log(
+        `Encryption disabled for project ${projectId}. Future pushes send ` +
+          `plaintext payloads (already-synced ciphertext is unaffected).`,
+      );
+      return;
+    }
+
+    throw new Error(
+      'Usage: memorize project encryption ' +
+        '(enable [--key <b64>] [--force] | show | disable)',
+    );
   }
 
   if (subcommand === 'relocate') {
