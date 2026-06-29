@@ -75,6 +75,20 @@ How a release happens:
 Release timing stays a deliberate human act (merging the Release PR);
 only the mechanics are automated.
 
+**CI on the Release PR (optional, `RELEASE_PLEASE_TOKEN`).** A PR opened by
+the built-in `GITHUB_TOKEN` does not trigger other workflows, so the Release
+PR runs no CI by default. `main` is currently unprotected, so this is benign
+— the version/CHANGELOG bump is mechanical and the code it ships already
+passed CI on its feature PR. The day `main` gains **required status checks**,
+provision a token so the Release PR runs `ci.yml` like any other PR:
+
+1. Create a **fine-grained PAT** scoped to this repo with **Contents:
+   read/write** and **Pull requests: read/write** (or use a GitHub App token).
+2. Add it as the repository secret **`RELEASE_PLEASE_TOKEN`**.
+
+`release.yml` already prefers that secret and falls back to `GITHUB_TOKEN`
+when it is absent, so no workflow change is needed when you add it.
+
 ## License and relicensing
 
 Memorize is released under
