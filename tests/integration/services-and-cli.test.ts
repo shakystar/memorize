@@ -117,7 +117,7 @@ describe('phase 2 services and cli', () => {
 
     const created = runCli(['task', 'create', 'Resume', 'target']);
     expect(created.status).toBe(0);
-    const taskId = created.stdout.trim().replace(/^Created task /, '');
+    const taskId = String(created.stdout).trim().replace(/^Created task /, '');
 
     // `--task <id>` (and positional) now load that task's startup
     // context instead of being silently swallowed.
