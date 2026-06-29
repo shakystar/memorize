@@ -7,27 +7,44 @@
 # server into <project>/.cursor/mcp.json, and plants the AGENTS.md ground rule
 # (Cursor reads AGENTS.md/CLAUDE.md natively as rules).
 #
-# DOGFOOD SCOPE (honest — WEAKER than gemini/hermes): Cursor is a GUI IDE (and a
-# closed-source Electron app) with NO headless/CLI agent we can drive in a
-# container. So there is no real binary to install (detection is stubbed by
-# creating ~/.cursor), NO plugin to load-check, and — unlike every other
-# harness — NO live_capture tier is even possible: nothing can perform a tool
-# call without the GUI. We validate the MEMORIZE side end-to-end deterministically:
-# the .cursor/hooks.json + .cursor/mcp.json schema we WRITE, and the hook
-# stdin→stdout wire contract (capture across cursor's tool names + the
-# sessionStart {"additional_context": …} injection envelope). Upstream
-# config-schema drift is tracked manually against cursor.com/docs/hooks.
+# DOGFOOD SCOPE: Cursor ships a headless CLI agent (`cursor-agent`), so — like
+# opencode/gemini/pi — it has a REAL gated live tier, not artifacts-only. The
+# deterministic tiers (every PR) validate the memorize side end-to-end: the
+# .cursor/hooks.json + .cursor/mcp.json schema we WRITE, and the hook
+# stdin→stdout wire contract exercised through the EXACT command memorize
+# installed (capture across cursor's tool names + the sessionStart
+# {"additional_context": …} injection envelope). The gated tiers add real
+# upstream verification: tier B drives `cursor-agent -p` and asserts capture
+# (needs CURSOR_API_KEY); tier C diffs our hardcoded contract against the live
+# docs. ONE open empirical question tier B settles: the docs confirm cursor's
+# CLOUD agents fire postToolUse + preCompact but NOT sessionStart/sessionEnd
+# (VM-lifecycle); whether the LOCAL cursor-agent fires the session-lifecycle
+# hooks is undocumented, so tier B probes it rather than assuming.
 
 HOOKS="/work/sample/.cursor/hooks.json"
 MCP="/work/sample/.cursor/mcp.json"
 GROUND_RULE="/work/sample/AGENTS.md"
 
 install_harness() {
-  # Cursor has no installable headless CLI — stub the detection signal so
-  # `memorize init` wires the integration, exactly as it would on a real
-  # machine where the user has run the Cursor IDE at least once.
-  mkdir -p "$HOME/.cursor"
-  echo "  cursor (detection stub: ~/.cursor; GUI IDE — no headless CLI, live tier N/A)"
+  # The real cursor-agent install needs a CURSOR_API_KEY to do anything live, so
+  # only pull it when a key is present (tier B); otherwise stub the detection
+  # signal (mkdir ~/.cursor) so `memorize init` still wires the integration for
+  # the deterministic tiers — exactly as on a machine where the user has run
+  # Cursor at least once. (curl|bash installer is Linux/macOS — fine in the
+  # Debian conformance image; on the user's Windows box use WSL or the IDE.)
+  if [ -n "${CURSOR_API_KEY:-}" ]; then
+    curl -fsSL https://cursor.com/install | bash >/dev/null 2>&1 \
+      || { echo "  cursor-agent installer failed (network?)"; return 1; }
+    command -v cursor-agent >/dev/null 2>&1 || export PATH="$HOME/.local/bin:$PATH"
+    command -v cursor-agent >/dev/null 2>&1 || { echo "  cursor-agent not on PATH after install"; return 1; }
+    # cursor-agent also satisfies `memorize init` detection (PATH probe), but
+    # ~/.cursor is the canonical signal — create it so detection is form-agnostic.
+    mkdir -p "$HOME/.cursor"
+    echo "  cursor-agent $(cursor-agent --version 2>/dev/null | head -1 || echo '?')"
+  else
+    mkdir -p "$HOME/.cursor"
+    echo "  cursor (detection stub: ~/.cursor; real cursor-agent gated on CURSOR_API_KEY)"
+  fi
 }
 
 assert_artifacts() {
@@ -132,10 +149,48 @@ synthetic_capture_check() {
   rm -f "$err"
 }
 
-# NO live_capture_check: Cursor is a GUI IDE with no headless agent to drive, so
-# a real model-driven tool call cannot be produced in CI (or anywhere scriptable).
-# run.sh skips the tier when the function is absent — this absence is intentional
-# and documented, not an oversight.
+# Gated (model + real CLI): drive a real `cursor-agent -p` run that performs a
+# file-write tool call, and assert memorize captured it via the postToolUse hook.
+# Needs CURSOR_API_KEY (headless auth) + the installed cursor-agent. We use a
+# WRITE prompt, not a shell one: cursor-agent has full write access in -p mode
+# (no approval prompt), whereas terminal commands would block on y/n. memorize
+# capture is LLM-free; the model only makes cursor-agent perform the tool call.
+#
+# This tier ALSO answers the open question — does the LOCAL cursor-agent fire
+# .cursor/hooks.json hooks at all? If capture is zero, we report it as exactly
+# that (the synthetic tier already proved the memorize side works, so a live
+# zero means the CLI didn't fire the hook — a real finding, not a memorize bug).
+# As a bonus probe, we report whether a `cursor` session was minted, which would
+# mean the sessionStart hook fired too (the docs leave local-CLI sessionStart
+# undocumented; cloud agents do NOT fire it).
+live_capture_check() {
+  if [ -z "${CURSOR_API_KEY:-}" ] || ! command -v cursor-agent >/dev/null 2>&1; then
+    skip "live capture (set CURSOR_API_KEY + needs the real cursor-agent CLI)"
+    return
+  fi
+  local before after
+  before="$(_pending_count /work/sample)"
+  if ! ( cd /work/sample && cursor-agent -p "create a file notes.txt containing the word hi" --output-format text ) \
+    >/work/run.log 2>&1; then
+    ko "cursor-agent run failed (CURSOR_API_KEY valid? model available? see below)"
+    tail -n 4 /work/run.log | sed 's/^/      /'
+    return
+  fi
+  sleep 3
+  after="$(_pending_count /work/sample)"
+  if [ "${after:-0}" -gt "${before:-0}" ]; then
+    ok "live capture produced $(( ${after:-0} - ${before:-0} )) observation(s) from a real cursor-agent run (CLI fires postToolUse hooks)"
+  else
+    ko "no observation after a live cursor-agent run — the local cursor-agent may NOT fire .cursor/hooks.json hooks (synthetic tier proves the memorize side works; this is a CLI-surface finding to document, not a memorize bug)"
+    tail -n 4 /work/run.log | sed 's/^/      /'
+  fi
+  # Bonus probe: did sessionStart fire? A minted cursor session is the signal.
+  if ( cd /work/sample && memorize session activity 2>/dev/null ) | grep -qi cursor; then
+    ok "live probe: a cursor session was minted (sessionStart hook fired in the CLI)"
+  else
+    skip "live probe: no cursor session minted — local cursor-agent may not fire sessionStart (docs: cloud agents don't either)"
+  fi
+}
 
 # Tier C — upstream CONTRACT drift guard (gated on CURSOR_CONFORMANCE_LIVE=1).
 # Since Cursor has no driveable CLI, the published hooks contract is the ONLY

@@ -337,9 +337,17 @@ const HERMES: HarnessDescriptor = {
 // in AGENTS.md with no extra wiring (reuses upsertGroundRuleBlock). MCP is
 // registered into `.cursor/mcp.json` (top-level `mcpServers`, Claude format) —
 // additive, since session-start memory is delivered by the sessionStart hook,
-// not MCP. Cursor is an IDE with no headless CLI, so Docker conformance can
-// assert install ARTIFACTS only; live capture/injection dogfood is structurally
-// impossible (documented as a gap, not a passing test).
+// not MCP.
+//
+// Conformance: Cursor ships a headless CLI agent (`cursor-agent`, install via
+// `curl https://cursor.com/install`, drive with `cursor-agent -p` + a
+// CURSOR_API_KEY), so the conformance harness has a REAL gated live tier like
+// opencode/gemini/pi — NOT install-artifacts-only. One open empirical question
+// the live run settles: the docs confirm cursor's CLOUD agents fire postToolUse
+// + preCompact but NOT sessionStart/sessionEnd (VM-lifecycle); whether the LOCAL
+// cursor-agent fires the session-lifecycle hooks is undocumented, so the live
+// tier probes it rather than assuming. The IDE itself is the primary target and
+// fires all four (verified by hand + guarded by the docs-contract drift tier).
 const CURSOR: HarnessDescriptor = {
   id: 'cursor',
   label: 'Cursor',

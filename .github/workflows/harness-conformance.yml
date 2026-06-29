@@ -38,18 +38,22 @@ jobs:
       - uses: actions/checkout@v4
       - name: Build conformance image
         run: docker build -f docker/conformance/Dockerfile -t memorize-conformance .
-      - name: Run conformance (tier B auto-enables when ANTHROPIC_API_KEY secret exists)
+      - name: Run conformance (tier B auto-enables when a provider secret exists)
         env:
-          # memorize capture is LLM-free; this key only lets opencode perform one
-          # tool call in tier B. Absent → tiers A/A' only (live capture skips).
+          # memorize capture is LLM-free; these keys only let the harness perform
+          # one tool call in tier B. Absent → deterministic tiers only.
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          # cursor-agent headless auth (cursor.com/docs/cli/github-actions).
+          CURSOR_API_KEY: ${{ secrets.CURSOR_API_KEY }}
         run: |
           ARGS=(--rm)
           EVENT='${{ github.event_name }}'
+          LIVE=0
+          { [ "$EVENT" = schedule ] || [ "$EVENT" = workflow_dispatch ]; } && LIVE=1
           # Cost/flake control: the model-driven tier B runs on schedule/manual
           # only. PRs get the deterministic, model-free tiers (A/A'/A'').
-          if [ -n "$ANTHROPIC_API_KEY" ] && { [ "$EVENT" = schedule ] || [ "$EVENT" = workflow_dispatch ]; }; then
-            echo "tier B: live capture ENABLED ($EVENT, provider secret present)"
+          if [ -n "$ANTHROPIC_API_KEY" ] && [ "$LIVE" = 1 ]; then
+            echo "tier B: live capture ENABLED ($EVENT, Anthropic secret present)"
             # Each harness script reads only its own *_CONFORMANCE_LIVE flag, so
             # passing the whole set is harmless across the matrix. Both opencode
             # and pi drive an Anthropic model with the same ANTHROPIC_API_KEY.
@@ -60,15 +64,21 @@ jobs:
             ARGS+=(-e PI_CONFORMANCE_LIVE=1 -e 'PI_MODEL=anthropic/claude-haiku-4-5')
             ARGS+=(-e ANTHROPIC_API_KEY)
           else
-            echo "tier B: live capture SKIPPED (deterministic tiers only on $EVENT; model runs on schedule/dispatch)"
+            echo "tier B (Anthropic-driven): SKIPPED (deterministic tiers only on $EVENT; model runs on schedule/dispatch)"
           fi
-          # Tier C (cursor upstream-contract drift guard) needs only NETWORK, no
-          # provider key — so enable it on schedule/dispatch regardless of secrets.
-          # Cursor is a GUI IDE with no tier B; the docs are its only drift sentinel.
-          if [ "$EVENT" = schedule ] || [ "$EVENT" = workflow_dispatch ]; then
+          # Cursor: tier B (live cursor-agent capture) needs CURSOR_API_KEY; tier C
+          # (upstream-contract drift) needs only network. Both gated to schedule/
+          # dispatch. cursor.sh keys its real install + live check on CURSOR_API_KEY.
+          if [ "$LIVE" = 1 ]; then
             echo "tier C: cursor upstream-contract check ENABLED ($EVENT)"
             ARGS+=(-e CURSOR_CONFORMANCE_LIVE=1)
+            if [ -n "$CURSOR_API_KEY" ]; then
+              echo "tier B: cursor live capture ENABLED ($EVENT, CURSOR_API_KEY present)"
+              ARGS+=(-e CURSOR_API_KEY)
+            else
+              echo "tier B: cursor live capture SKIPPED (no CURSOR_API_KEY secret)"
+            fi
           else
-            echo "tier C: cursor upstream-contract check SKIPPED (runs on schedule/dispatch)"
+            echo "tier B/C (cursor): SKIPPED (run on schedule/dispatch)"
           fi
           docker run "${ARGS[@]}" memorize-conformance ${{ matrix.harness }}

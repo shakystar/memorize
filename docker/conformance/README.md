@@ -89,35 +89,37 @@ synthetic-first posture.
 
 ## Status — cursor (install-artifact + synthetic only; live tier N/A)
 
-Cursor (`json-hooks-map` family, but PER-PROJECT) is a GUI IDE (closed-source
-Electron app) with **no headless/CLI agent**, so nothing can be driven to perform
-a tool call in a container. There is therefore **no Tier B (live model) at all** —
-the `cursor.sh` descriptor intentionally omits `live_capture_check`, and there is
-no plugin to load-check either. `install_harness` stubs detection (`mkdir
-~/.cursor`). What IS automated:
+Cursor (`json-hooks-map` family, but PER-PROJECT) ships a **headless CLI agent**
+(`cursor-agent`), so it has the full tier ladder like opencode/gemini/pi — not
+artifacts-only. (An earlier note here wrongly called it GUI-only; corrected.)
 
 - **Tier A (install artifacts)** — the `.cursor/hooks.json` schema we write (the
   four native events `sessionStart`/`postToolUse`/`preCompact`/`sessionEnd`), the
   `.cursor/mcp.json` MCP block, and the AGENTS.md ground rule.
-- **Tier A'' (synthetic, FAITHFUL)** — instead of a hand-typed `memorize hook`
-  proxy, the synthetic tier extracts and executes the **exact command memorize
-  wrote into `.cursor/hooks.json`**, driven the way Cursor's runtime drives it
-  (project-root cwd, documented payload on stdin). It asserts capture across
-  cursor tool names (`Write` shared with Claude; `Shell` new) and the
-  `sessionStart` injection emitting cursor's native `{"additional_context": …}`
-  envelope (snake_case, top-level — not `hookSpecificOutput`). This is the closest
-  automatable proxy for opening the IDE: it proves the artifact we install runs
-  and honors the wire contract, end to end.
-- **Tier C (upstream-contract drift guard, gated + scheduled)** — since there is
-  no live tier to catch upstream renames, the published hooks contract is the only
-  external truth. On schedule/dispatch (`CURSOR_CONFORMANCE_LIVE=1`, network only,
-  no key) `contract_check` fetches [cursor.com/docs/hooks](https://cursor.com/docs/hooks)
-  and asserts every token memorize hardcodes still appears — the four event names,
-  the `additional_context` field, the `Shell`/`Write` tool names, and the
-  `.cursor/hooks.json` path. A Cursor rename turns a green-but-stale synthetic tier
-  into a red check **automatically** — replacing what used to be manual doc-watching.
+- **Tier A'' (synthetic, FAITHFUL)** — runs every PR, model-free. Instead of a
+  hand-typed `memorize hook` proxy, it extracts and executes the **exact command
+  memorize wrote into `.cursor/hooks.json`**, the way Cursor's runtime drives it
+  (project-root cwd, documented payload on stdin), asserting capture across cursor
+  tool names (`Write` shared with Claude; `Shell` new) and the `sessionStart`
+  injection emitting cursor's native `{"additional_context": …}` envelope
+  (snake_case, top-level — not `hookSpecificOutput`). Proves the installed artifact
+  runs and honors the wire contract end to end.
+- **Tier B (live, gated)** — installs the real `cursor-agent`
+  (`curl https://cursor.com/install | bash`) and drives `cursor-agent -p` to make
+  it perform a file-write tool call, asserting memorize captured it via the
+  postToolUse hook. Needs `CURSOR_API_KEY` (headless auth); runs on
+  schedule/dispatch. A WRITE prompt is used (cursor-agent has full write access in
+  `-p` mode — no approval prompt; a shell prompt would block on y/n).
+- **Tier C (upstream-contract drift guard, gated + network-only)** — fetches
+  [cursor.com/docs/hooks](https://cursor.com/docs/hooks) and asserts every token
+  memorize hardcodes still appears (the four event names, `additional_context`,
+  the `Shell`/`Write` tool names, `tool_name`, `.cursor/hooks.json`). Catches an
+  upstream rename automatically. Complements tier B: cheap, keyless, and guards
+  the IDE/cloud surfaces tier B can't drive.
 
-The ONLY residual (truly un-automatable without the GUI): that the real Cursor app
-fires these hooks and reads `additional_context` back into the conversation at
-runtime. Tier C catches contract drift; the runtime behavior is verified once by
-hand and then guarded by the contract check.
+**Open question tier B settles:** the docs confirm cursor's *cloud* agents fire
+`postToolUse` + `preCompact` but NOT `sessionStart`/`sessionEnd` (VM lifecycle).
+Whether the *local* `cursor-agent` fires the session-lifecycle hooks is
+undocumented, so tier B probes it (it reports whether a `cursor` session was
+minted) instead of assuming. The IDE itself is the primary target and is expected
+to fire all four; that is verified by hand once and then guarded by tier C.
