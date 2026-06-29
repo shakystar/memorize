@@ -111,6 +111,29 @@ describe('phase 2 services and cli', () => {
     expect(syncResult.stdout).toContain('Project sync state');
   });
 
+  it('task resume loads an explicit task and rejects unknown flags', { timeout: 30_000 }, () => {
+    const init = runCli(['project', 'init']);
+    expect(init.status).toBe(0);
+
+    const created = runCli(['task', 'create', 'Resume', 'target']);
+    expect(created.status).toBe(0);
+    const taskId = created.stdout.trim().replace(/^Created task /, '');
+
+    // `--task <id>` (and positional) now load that task's startup
+    // context instead of being silently swallowed.
+    const byFlag = runCli(['task', 'resume', '--task', taskId]);
+    expect(byFlag.status).toBe(0);
+    expect(byFlag.stdout).toContain(taskId);
+
+    const byPositional = runCli(['task', 'resume', taskId]);
+    expect(byPositional.status).toBe(0);
+    expect(byPositional.stdout).toContain(taskId);
+
+    // Fail loud: a typo'd flag no longer no-ops into a plausible payload.
+    const bogus = runCli(['task', 'resume', '--bogus']);
+    expect(bogus.status).not.toBe(0);
+  });
+
   it('records task checkpoint and handoff via cli', { timeout: 30_000 }, () => {
     const init = runCli(['project', 'init']);
     expect(init.status).toBe(0);

@@ -103,23 +103,35 @@ async function runListTasks(
 }
 
 async function runResumeTask(
-  _args: string[],
+  args: string[],
   ctx: CliContext,
   projectId: string,
 ): Promise<void> {
-  // Round-3 dogfood finding (codex session 4): `memorize task resume`
-  // showed the project's first active task instead of the calling
-  // session's claimed task — the same Gap A pattern the handoff CLI
-  // had before rc.7. The fix mirrors what runHandoffTask does: ask
-  // the SSoT for the calling session, and pin both selfSessionId
-  // (so the picker excludes us from otherActiveTasks) and taskId
-  // (so we get OUR task back, not whatever happens to be first).
+  // `parseFlags` rejects unknown flags, so a stray `--task` no longer
+  // gets silently swallowed — the silent no-op that made an agent
+  // believe `resume --task <id>` worked when it didn't.
+  const flags = parseFlags(args, { single: ['task'] });
+  if (flags.positional.length > 1) {
+    throw new Error('task resume accepts at most one taskId.');
+  }
+  const explicitTaskId =
+    flags.positional[0]?.trim() || flags.single.task?.trim();
+  // Round-3 dogfood finding (codex session 4): with no explicit target,
+  // `memorize task resume` showed the project's first active task
+  // instead of the calling session's claimed task — the same Gap A
+  // pattern the handoff CLI had before rc.7. The fix mirrors what
+  // runHandoffTask does: ask the SSoT for the calling session, and pin
+  // both selfSessionId (so the picker excludes us from otherActiveTasks)
+  // and taskId (so we get OUR task back, not whatever happens to be
+  // first). An explicit `--task`/positional id overrides that default,
+  // exactly like handoff/done/checkpoint accept `--task`.
   const sessionCtx = await resolveSessionContext(ctx.cwd, {
     debugLabel: 'task-resume',
   });
+  const taskId = explicitTaskId || sessionCtx.taskId;
   const payload = await loadStartContext({
     projectId,
-    ...(sessionCtx.taskId ? { taskId: sessionCtx.taskId } : {}),
+    ...(taskId ? { taskId } : {}),
     ...(sessionCtx.sessionId ? { selfSessionId: sessionCtx.sessionId } : {}),
   });
   console.log(JSON.stringify(payload, null, 2));
