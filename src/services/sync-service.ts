@@ -50,14 +50,35 @@ async function writeState(state: ProjectSyncState): Promise<void> {
 
 export async function updateSyncState(
   projectId: string,
-  patch: Partial<Omit<ProjectSyncState, 'id' | 'projectId' | 'createdAt' | 'schemaVersion'>>,
+  patch: Partial<
+    Omit<
+      ProjectSyncState,
+      'id' | 'projectId' | 'createdAt' | 'schemaVersion' | 'encryptionKey'
+    >
+  > & {
+    // Permit explicitly clearing the E2E key (`encryption disable`). Under
+    // exactOptionalPropertyTypes, `encryptionKey: undefined` is distinct from
+    // "absent" and must be allowed here; the merge below sets it to undefined
+    // and writeJson drops it from the persisted state, removing the key.
+    encryptionKey?: string | undefined;
+  },
 ): Promise<ProjectSyncState> {
   const current = await readStateOrThrow(projectId);
+  // Pull encryptionKey out of the spread: it is the one field that may be
+  // explicitly undefined (to clear it), which the typed literal can't hold.
+  const { encryptionKey, ...rest } = patch;
   const next: ProjectSyncState = {
     ...current,
-    ...patch,
+    ...rest,
     updatedAt: nowIso(),
   };
+  if ('encryptionKey' in patch) {
+    if (encryptionKey === undefined) {
+      delete next.encryptionKey;
+    } else {
+      next.encryptionKey = encryptionKey;
+    }
+  }
   await writeState(next);
   return next;
 }

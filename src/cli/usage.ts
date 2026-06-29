@@ -38,6 +38,7 @@ export function renderScaffoldUsage(): string {
     '  memorize project init        Create a fresh project binding (no import)',
     '  memorize project relocate    Rebind an existing project to a new path (after a move)',
     '  memorize project clone ...   Replica-clone a remote project into a fresh dir',
+    '  memorize project encryption ...  Enable/show E2E payload encryption (enable|show|disable)',
     '  memorize install claude      Wire Memorize into .claude/settings.local.json',
     '  memorize install codex       Wire Memorize into ~/.codex/hooks.json + AGENTS.md',
     '',
