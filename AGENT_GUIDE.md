@@ -613,11 +613,21 @@ Output: tab-separated `id\tstatus\tpriority\ttitle`, sorted by
 
 Prints the task JSON.
 
-### `memorize task resume` (alias `start`)
+### `memorize task resume [<taskId>]` (alias `start`)
 
-Loads the startup context payload for the current project (task
-auto-selected: in_progress → handoff_ready → first) and prints it as
-JSON. This is what an agent reads on `SessionStart`.
+Loads the startup context payload and prints it as JSON. This is what an
+agent reads on `SessionStart`.
+
+- With no argument: targets the calling session's claimed task; if the
+  session has none, the task is auto-selected (in_progress →
+  handoff_ready → first).
+- `<taskId>` (positional) or `--task <taskId>` (single): load the
+  startup context for an explicit task instead — e.g. to read another
+  task's handoff. Mirrors the `--task` override on
+  `handoff` / `done` / `checkpoint`.
+
+Unknown flags are rejected (a stray `--task` is no longer silently
+ignored).
 
 ### `memorize task checkpoint --summary "<text>" [flags]`
 

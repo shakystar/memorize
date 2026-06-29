@@ -16,7 +16,7 @@ export function renderScaffoldUsage(): string {
     'Explicit coordination (optional — ambient memory works without these):',
     '  memorize task create ...     Claim a piece of work explicitly',
     '  memorize task list           List explicitly created tasks',
-    '  memorize task resume         Load startup context for the current task',
+    '  memorize task resume [<id>]  Load startup context (current task, or --task/<id> for another)',
     '  memorize task handoff ...    Record a handoff to the next agent',
     '  memorize task update ...     Correct a task title/note (append-only)',
     '  memorize task done ...       Mark a task complete (handoff_ready -> done)',
