@@ -71,14 +71,23 @@ synthetic_capture_check() {
   done
 
   # Injection path: the SessionStart hook must print additionalContext for the
-  # extension's before_agent_start to inject.
-  local out
-  out="$( cd /work/sample && printf '{}' | memorize hook pi SessionStart 2>/dev/null )"
+  # extension's before_agent_start to inject. Capture stderr so a throw in the
+  # heavier handleSessionStart flow (startSession / locks / detached consolidate)
+  # surfaces here instead of being swallowed.
+  local out err
+  err="$(mktemp)"
+  out="$( cd /work/sample && printf '{}' | memorize hook pi SessionStart 2>"$err" )"
   if printf '%s' "$out" | grep -q 'additionalContext'; then
     ok "synthetic injection [SessionStart]: emitted additionalContext for before_agent_start"
   else
     ko "synthetic injection [SessionStart] emitted no additionalContext (injection path?)"
+    echo "    --- SessionStart hook stderr ---"
+    tail -n 12 "$err" | sed 's/^/      /'
+    echo "    --- SessionStart hook stdout (first 240 chars) ---"
+    printf '%s' "$out" | head -c 240 | sed 's/^/      /'
+    echo ""
   fi
+  rm -f "$err"
 }
 
 # Gated (model; schedule/dispatch): drive REAL pi tool use and assert capture
