@@ -23,6 +23,10 @@ import {
   renderHermesLiveUpdate,
   renderHermesStartupContext,
 } from './hermes/renderer.js';
+import {
+  renderCursorLiveUpdate,
+  renderCursorStartupContext,
+} from './cursor/renderer.js';
 import type { AdapterRuntime } from './types.js';
 
 /** @deprecated alias of {@link HarnessId} — kept for existing call sites. */
@@ -58,5 +62,10 @@ export const adapterRegistry: Record<AdapterAgent, AdapterRuntime> = {
     name: 'hermes',
     renderStartupContext: renderHermesStartupContext,
     renderLiveUpdate: renderHermesLiveUpdate,
+  },
+  cursor: {
+    name: 'cursor',
+    renderStartupContext: renderCursorStartupContext,
+    renderLiveUpdate: renderCursorLiveUpdate,
   },
 };

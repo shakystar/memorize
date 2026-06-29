@@ -1524,3 +1524,185 @@ export async function uninstallHermesIntegration(cwd: string): Promise<string> {
   await stripGroundRuleBlock(path.join(cwd, 'AGENTS.md'));
   return configPath;
 }
+
+// --- Cursor (json-hooks-map, project-scoped) ---------------------------------
+
+// Cursor is in the json-hooks-map family but its on-disk shape diverges from
+// Claude/Codex/Gemini, so it gets a dedicated writer (writeCursorHooks) rather
+// than the shared writeHooksMap:
+//   - `.cursor/hooks.json` is PER-PROJECT (runs from the project root, like
+//     `.claude/`). Schema: `{ "version": 1, "hooks": { "<event>": [{ "command",
+//     "matcher?", "timeout?" }] } }` — FLAT entries, no Claude-style
+//     `{ matcher, hooks: [{type,command}] }` group nesting.
+//   - The four native events map to canonical handlers via the registry's
+//     eventHandlerMap (sessionStart/postToolUse/preCompact/sessionEnd). cursor
+//     reads session-start memory from the sessionStart hook's stdout
+//     `{"additional_context": …}` (injectionWire translates the canonical shape
+//     in runHook), so MCP is additive, not load-bearing.
+//   - `.cursor/mcp.json` (project) registers the memorize MCP server (top-level
+//     `mcpServers`, Claude format) for the recall/record/diagnose tool surface.
+//   - AGENTS.md ground rule (cursor reads AGENTS.md/CLAUDE.md natively as rules).
+// postToolUse is registered with NO matcher — every successful tool reaches the
+// in-handler capture filter (cursor tool names Shell/Read/Write/MCP/Task).
+
+const CURSOR_HOOK_EVENTS = getHarness('cursor').hookEvents;
+
+function cursorHooksPath(cwd: string): string {
+  return path.join(cwd, '.cursor', 'hooks.json');
+}
+
+function cursorMcpPath(cwd: string): string {
+  return path.join(cwd, '.cursor', 'mcp.json');
+}
+
+interface CursorHookEntry {
+  command: string;
+  matcher?: string;
+  timeout?: number;
+}
+
+interface CursorHooksFile {
+  version?: number;
+  hooks?: Record<string, CursorHookEntry[]>;
+  [key: string]: unknown;
+}
+
+async function readCursorHooks(cwd: string): Promise<CursorHooksFile> {
+  try {
+    const raw = await fs.readFile(cursorHooksPath(cwd), 'utf8');
+    const parsed = JSON.parse(raw) as CursorHooksFile;
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+      ? parsed
+      : {};
+  } catch (error) {
+    if (isEnoent(error)) return {};
+    throw error;
+  }
+}
+
+/** Coerce a hooks-event value to a clean entry array (defensive: a hand-edited
+ *  file may hold a scalar/object/garbage under an event key). */
+function coerceCursorEntries(raw: unknown): CursorHookEntry[] {
+  if (!Array.isArray(raw)) return [];
+  return raw
+    .map((e): CursorHookEntry | undefined =>
+      e && typeof e === 'object' && typeof (e as CursorHookEntry).command === 'string'
+        ? (e as CursorHookEntry)
+        : undefined,
+    )
+    .filter((e): e is CursorHookEntry => e !== undefined);
+}
+
+/**
+ * Write memorize's hooks into `.cursor/hooks.json` (idempotent). Per event:
+ * strip every prior memorize entry (any command form, so re-install migrates
+ * npx↔node-abs cleanly), then append the current-form command — preserving the
+ * user's own hook entries and all other config keys. Stamps `version: 1` when
+ * absent (cursor's required envelope field). NOTE: a round-trip drops JSON
+ * comments (same tradeoff as the other config writers).
+ */
+async function writeCursorHooks(cwd: string): Promise<string> {
+  const file = await readCursorHooks(cwd);
+  const form = detectHookCommandForm();
+  const hooks: Record<string, CursorHookEntry[]> = {};
+  for (const [event, value] of Object.entries(file.hooks ?? {})) {
+    hooks[event] = coerceCursorEntries(value);
+  }
+  for (const event of CURSOR_HOOK_EVENTS) {
+    const others = (hooks[event] ?? []).filter(
+      (e) => !isMemorizeHookCommandFor(e.command, 'cursor', event),
+    );
+    hooks[event] = [...others, { command: buildHookCommand(form, 'cursor', event) }];
+  }
+  const configPath = cursorHooksPath(cwd);
+  await writeJson(configPath, { ...file, version: file.version ?? 1, hooks });
+  return configPath;
+}
+
+interface CursorMcpConfig {
+  mcpServers?: Record<string, unknown>;
+  [key: string]: unknown;
+}
+
+async function readCursorMcpConfig(cwd: string): Promise<CursorMcpConfig> {
+  try {
+    const raw = await fs.readFile(cursorMcpPath(cwd), 'utf8');
+    const parsed = JSON.parse(raw) as CursorMcpConfig;
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+      ? parsed
+      : {};
+  } catch (error) {
+    if (isEnoent(error)) return {};
+    throw error;
+  }
+}
+
+/** Merge the memorize MCP server into `.cursor/mcp.json` (Claude-format,
+ *  idempotent). Additive: session-start memory is delivered by the sessionStart
+ *  hook, so MCP just lights up the recall/record/diagnose tool surface.
+ *  Preserves other servers and config keys. */
+async function mergeCursorMcpConfig(cwd: string): Promise<void> {
+  const config = await readCursorMcpConfig(cwd);
+  config.mcpServers = { ...(config.mcpServers ?? {}) };
+  config.mcpServers[MEMORIZE_MCP_KEY] = {
+    command: 'npx',
+    args: ['-y', '@shakystar/memorize', 'mcp'],
+  };
+  await writeJson(cursorMcpPath(cwd), config);
+}
+
+/**
+ * Wire memorize into Cursor: write `.cursor/hooks.json` (per-project), merge the
+ * memorize MCP server into `.cursor/mcp.json`, and plant the AGENTS.md
+ * ground-rule block (cursor reads AGENTS.md natively). Idempotent. Returns the
+ * hooks.json path (cursor's primary integration surface) for the install summary.
+ */
+export async function installCursorIntegration(cwd: string): Promise<string> {
+  const hooksPath = await writeCursorHooks(cwd);
+  await mergeCursorMcpConfig(cwd);
+  await upsertGroundRuleBlock(path.join(cwd, 'AGENTS.md'));
+  return hooksPath;
+}
+
+/**
+ * Reverse installCursorIntegration: strip memorize hook entries from
+ * `.cursor/hooks.json` (dropping events left empty), drop the memorize MCP
+ * server, and strip the AGENTS.md ground-rule. Preserves the user's other
+ * hooks/servers/config and never deletes user-owned AGENTS.md. Idempotent.
+ */
+export async function uninstallCursorIntegration(cwd: string): Promise<string> {
+  const hooksPath = cursorHooksPath(cwd);
+  const file = await readCursorHooks(cwd);
+  if (file.hooks && typeof file.hooks === 'object') {
+    const hooks: Record<string, CursorHookEntry[]> = {};
+    for (const [event, value] of Object.entries(file.hooks)) {
+      const kept = coerceCursorEntries(value).filter(
+        (e) => !isMemorizeHookCommandForAgent(e.command, 'cursor'),
+      );
+      if (kept.length > 0) hooks[event] = kept;
+    }
+    const merged: CursorHooksFile = { ...file };
+    if (Object.keys(hooks).length > 0) merged.hooks = hooks;
+    else delete merged.hooks;
+    try {
+      await writeJson(hooksPath, merged);
+    } catch (error) {
+      if (!isEnoent(error)) throw error;
+    }
+  }
+
+  const config = await readCursorMcpConfig(cwd);
+  if (config.mcpServers && MEMORIZE_MCP_KEY in config.mcpServers) {
+    const servers = { ...config.mcpServers };
+    delete servers[MEMORIZE_MCP_KEY];
+    config.mcpServers = servers;
+    try {
+      await writeJson(cursorMcpPath(cwd), config);
+    } catch (error) {
+      if (!isEnoent(error)) throw error;
+    }
+  }
+
+  await stripGroundRuleBlock(path.join(cwd, 'AGENTS.md'));
+  return hooksPath;
+}

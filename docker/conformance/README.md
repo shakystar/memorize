@@ -86,3 +86,27 @@ synthetic tier (A'') validates the memorize side end-to-end:
 
 Upstream config-schema drift is otherwise tracked manually. Mirrors Gemini's
 synthetic-first posture.
+
+## Status — cursor (install-artifact + synthetic only; live tier N/A)
+
+Cursor (`json-hooks-map` family, but PER-PROJECT) has the WEAKEST conformance of
+any harness, by structure rather than choice: it is a GUI IDE (closed-source
+Electron app) with **no headless/CLI agent**, so nothing can be driven to perform
+a tool call in a container. There is therefore **no Tier B (live) at all** — the
+`cursor.sh` descriptor intentionally omits `live_capture_check`, and there is no
+plugin to load-check either. `install_harness` stubs detection (`mkdir
+~/.cursor`), and the deterministic tiers validate the memorize side end-to-end:
+
+- the `.cursor/hooks.json` schema we write (the four native events
+  `sessionStart`/`postToolUse`/`preCompact`/`sessionEnd`), the `.cursor/mcp.json`
+  MCP block, and the AGENTS.md ground rule,
+- capture across cursor tool names (`Write` shared with Claude; `Shell` new), and
+- the `sessionStart` injection translating our context to cursor's native
+  `{"additional_context": …}` envelope (snake_case, top-level — not
+  `hookSpecificOutput`).
+
+What is NOT covered (and cannot be without the GUI): that the real Cursor app
+actually fires these hooks, reads `additional_context` back into the
+conversation, and emits the documented `tool_name` values. Those are taken from
+[cursor.com/docs/hooks](https://cursor.com/docs/hooks) and tracked manually for
+upstream drift.

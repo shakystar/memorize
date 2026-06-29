@@ -33,7 +33,7 @@ jobs:
       fail-fast: false
       matrix:
         # Add harness ids here as descriptors land in docker/conformance/harnesses/.
-        harness: ${{ github.event_name == 'workflow_dispatch' && fromJSON(format('["{0}"]', github.event.inputs.harness)) || fromJSON('["opencode","gemini","pi","hermes"]') }}
+        harness: ${{ github.event_name == 'workflow_dispatch' && fromJSON(format('["{0}"]', github.event.inputs.harness)) || fromJSON('["opencode","gemini","pi","hermes","cursor"]') }}
     steps:
       - uses: actions/checkout@v4
       - name: Build conformance image

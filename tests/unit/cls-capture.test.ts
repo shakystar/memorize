@@ -36,6 +36,19 @@ describe('CLS capture filter (decision ③ — conservative whitelist)', () => {
     expect(evaluateCapture('terminal', 'ls -la').capture).toBe(false);
   });
 
+  it('captures Cursor tool names: Write as write-tool, Shell as shell', () => {
+    const write = evaluateCapture('Write', '/repo/src/index.ts');
+    expect(write.capture).toBe(true);
+    expect(write.signal).toBe('write-tool');
+    expect(write.filePath).toBe('/repo/src/index.ts');
+    // Cursor runs shell commands through the `Shell` tool (capital S).
+    expect(evaluateCapture('Shell', 'rm -rf build').signal).toBe('mutating-bash');
+    expect(evaluateCapture('Shell', 'git commit -m "x"').signal).toBe(
+      'mutating-bash',
+    );
+    expect(evaluateCapture('Shell', 'ls -la').capture).toBe(false);
+  });
+
   it('captures codex apply_patch edits as write-tool signals (vendor symmetry)', () => {
     const patch = [
       '*** Begin Patch',

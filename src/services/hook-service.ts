@@ -631,26 +631,31 @@ const sharedHookHandlers: Record<string, HookHandler> = {
 
 /**
  * Translate a canonical (Claude-shaped) handler result into the wire envelope a
- * harness's config mechanism expects. Identity for everyone EXCEPT
- * 'yaml-shell-hooks' (hermes): Claude/Codex/Gemini consume the Claude shape
- * directly, and ts-plugins (opencode/pi) translate harness-side in the planted
- * extension. Hermes acts ONLY on `{"context": "..."}` (its pre_llm_call
- * injection channel — every other hook's stdout is ignored), so we map our
- * `hookSpecificOutput.additionalContext` to it and collapse everything else to
- * `{}`. Never throws: a parse failure degrades to the empty result.
+ * harness expects. Identity for everyone whose descriptor leaves `injectionWire`
+ * unset: Claude/Codex/Gemini consume the Claude shape directly, and ts-plugins
+ * (opencode/pi) translate harness-side in the planted extension. The two
+ * harnesses that read a DIFFERENT native field declare it via `injectionWire`:
+ *   - 'context'            ⇒ hermes `{"context": "..."}` (its pre_llm_call
+ *     injection channel; every other hook's stdout is ignored).
+ *   - 'additional_context' ⇒ cursor `{"additional_context": "..."}` (sessionStart
+ *     initial context + postToolUse after-result injection; snake_case + top-level).
+ * For both, we pull `hookSpecificOutput.additionalContext` out of the canonical
+ * shape and re-emit it under the native key, collapsing every other (non-context)
+ * result to `{}`. Never throws: a parse failure degrades to the empty envelope.
  */
 function renderHookWire(
   descriptor: ReturnType<typeof getHarness>,
   canonicalJson: string,
 ): string {
-  if (descriptor.mechanism !== 'yaml-shell-hooks') return canonicalJson;
+  const wireKey = descriptor.injectionWire;
+  if (!wireKey) return canonicalJson;
   try {
     const parsed = JSON.parse(canonicalJson) as {
       hookSpecificOutput?: { additionalContext?: unknown };
     };
     const ctx = parsed.hookSpecificOutput?.additionalContext;
     if (typeof ctx === 'string' && ctx.length > 0) {
-      return JSON.stringify({ context: ctx });
+      return JSON.stringify({ [wireKey]: ctx });
     }
   } catch {
     // fall through to the empty envelope

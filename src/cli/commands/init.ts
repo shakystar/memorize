@@ -85,6 +85,15 @@ export async function runInitCommand(
       'runs on post_tool_call. (Hermes reads AGENTS.md natively for the ground rule.)',
     );
   }
+  if (wiredIds.has('cursor')) {
+    lines.push(
+      '',
+      'Cursor: hooks were written to .cursor/hooks.json and the memorize MCP',
+      'server to .cursor/mcp.json (both per-project) — restart Cursor to load them.',
+      'Session-start memory injects via the sessionStart hook; auto-capture runs',
+      'on postToolUse. (Cursor reads AGENTS.md natively for the ground rule.)',
+    );
+  }
 
   lines.push(
     '',
