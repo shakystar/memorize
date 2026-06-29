@@ -1276,6 +1276,18 @@ export async function consolidate(params: {
       if (inputs.length > 0) {
         await appendEvents(params.projectId, inputs);
       }
+      // Retention BEFORE the reindex: pruneSegments deletes from segments/embeddings
+      // but not search_fts, and the reindex below re-emits kind='segment' rows from
+      // the segments table. Pruning first means the reindex repopulates FTS from the
+      // survivors only — pruning after would leave stale snippets retrievable until a
+      // later rebuild. Never-throw: derived-buffer maintenance can't fail the boundary.
+      if (segmentsWritten > 0) {
+        try {
+          pruneSegments(params.projectId);
+        } catch {
+          // Derived buffer maintenance must never fail the boundary.
+        }
+      }
       // Rebuild + FTS reindex when there are new memories OR new segments — the
       // reindex (deferred by every capture as reindexSearch:false) repopulates
       // search_fts for memories AND re-emits the kind='segment' rows from the
@@ -1300,12 +1312,12 @@ export async function consolidate(params: {
           ...(params.sessionId ? { sessionId: params.sessionId } : {}),
         });
       }
-      // Segment semantic index + retention. Never-throw; embeddings are a no-op
-      // without an endpoint (segments still covered by FTS).
+      // Segment semantic index over the survivors (retention already ran above).
+      // Never-throw; embeddings are a no-op without an endpoint (segments still
+      // covered by FTS).
       if (segmentsWritten > 0) {
         try {
           await ensureSegmentEmbeddings(params.projectId);
-          pruneSegments(params.projectId);
         } catch {
           // Derived buffer maintenance must never fail the boundary.
         }

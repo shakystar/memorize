@@ -150,6 +150,36 @@ describe('segment search + retrieval', () => {
     expect(searchByKind(projectId, 'anything', 'segment')).toHaveLength(0);
   });
 
+  // #193 regression: pruneSegments deletes from segments/embeddings but NOT
+  // search_fts, and the reindex re-emits kind='segment' rows from the segments
+  // table. The consolidation boundary therefore prunes BEFORE its single reindex
+  // so FTS is repopulated from the survivors only — pruning after the reindex
+  // (the original ordering) left the pruned segment's snippet retrievable.
+  it('pruned segments do not survive in FTS when prune precedes reindex', async () => {
+    insertSegments(projectId, [
+      seg('seg_keep', 'fresh apricot harvest notes', '2026-02-01T00:00:00.000Z'),
+      seg('seg_drop', 'stale apricot harvest notes', '2026-01-01T00:00:00.000Z'),
+    ]);
+    // A reindex before pruning indexes BOTH — the pre-fix state where a later
+    // prune would orphan seg_drop's FTS row.
+    await rebuildProjectProjection(projectId, { reindexSearch: true });
+    expect(searchByKind(projectId, 'apricot harvest', 'segment').map((h) => h.entityId)).toEqual(
+      expect.arrayContaining(['seg_keep', 'seg_drop']),
+    );
+
+    // Boundary order: prune first, then reindex from the survivors.
+    pruneSegments(projectId, {
+      maxCount: 1,
+      maxAgeDays: 3650,
+      nowMs: Date.parse('2026-03-01T00:00:00.000Z'),
+    });
+    await rebuildProjectProjection(projectId, { reindexSearch: true });
+
+    const hits = searchByKind(projectId, 'apricot harvest', 'segment').map((h) => h.entityId);
+    expect(hits).toContain('seg_keep');
+    expect(hits).not.toContain('seg_drop');
+  });
+
   it('retrieveSegments returns full text within budget; empty without a task', async () => {
     insertSegments(projectId, [
       seg('seg_b', 'alpha beta gamma project timeline planning', '2026-01-01T00:00:00.000Z'),
