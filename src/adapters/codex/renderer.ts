@@ -79,6 +79,18 @@ export function renderCodexStartupContext(
     });
   }
 
+  if (payload.rawSegments && payload.rawSegments.length > 0) {
+    const segmentLines: string[] = ['Raw session detail (retrieved for this task):'];
+    for (const seg of payload.rawSegments) segmentLines.push(seg.text);
+    blocks.push({
+      priority: 6.5,
+      source: 'memorize.segments',
+      content: wrapUntrusted(segmentLines.join('\n\n'), {
+        source: 'memorize.segments',
+      }),
+    });
+  }
+
   if (payload.task) {
     const task = payload.task;
     const taskLines: string[] = [

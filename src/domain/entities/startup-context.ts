@@ -56,4 +56,9 @@ export interface StartupContextPayload {
     summary?: string;
     createdAt: ISODateString;
   }>;
+  /** Raw transcript detail retrieved for the current task (v10) — verbatim
+   *  conversation content that consolidation compressed away, surfaced ALONGSIDE
+   *  (never replacing) the consolidated memories. Already budget-trimmed; rendered
+   *  at a low priority so it drops before memories under budget pressure. */
+  rawSegments?: Array<{ id: string; text: string }>;
 }

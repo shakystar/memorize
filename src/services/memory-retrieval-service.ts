@@ -6,7 +6,9 @@ import {
   listValidMemories,
   touchMemoryAccess,
 } from './projection-store.js';
-import { searchProject } from './search-service.js';
+import { hybridSearchSegments, searchProject } from './search-service.js';
+import { listSegmentTexts } from './segment-store.js';
+import type { Embedder } from './embeddings-service.js';
 
 /**
  * CLS Phase 1 — retrieval-time ranking for startup injection (decision ②,
@@ -146,6 +148,54 @@ export function retrieveMemoryContext(
   }
 
   return { memories, observations };
+}
+
+/** Max raw segments pulled per query, and their own char budget — SEPARATE from
+ *  MEMORY_POOL_BUDGET_CHARS so segments can never evict consolidated memories. */
+export const SEGMENT_CHANNEL_LIMIT = 6;
+export const SEGMENT_POOL_BUDGET_CHARS = 2000;
+
+export interface RetrievedSegment {
+  id: string;
+  text: string;
+}
+
+/**
+ * Raw-detail channel (v10): hybrid-search the `segment` corpus for the current
+ * task and return full-text segments within their OWN budget. Independent of the
+ * memory/observation pool. Empty when there is no task title or no segments.
+ * Async because it may embed the query (shared `queryVec` avoids a second embed).
+ */
+export async function retrieveSegments(
+  projectId: string,
+  opts: {
+    taskTitle?: string;
+    embedder?: Embedder;
+    queryVec?: number[];
+    budgetChars?: number;
+  } = {},
+): Promise<RetrievedSegment[]> {
+  if (!opts.taskTitle?.trim()) return [];
+  const hits = await hybridSearchSegments(
+    projectId,
+    opts.taskTitle,
+    SEGMENT_CHANNEL_LIMIT,
+    opts.embedder,
+    opts.queryVec,
+  );
+  if (hits.length === 0) return [];
+  const texts = listSegmentTexts(projectId);
+  const budget = opts.budgetChars ?? SEGMENT_POOL_BUDGET_CHARS;
+  const out: RetrievedSegment[] = [];
+  let spent = 0;
+  for (const hit of hits) {
+    const text = texts.get(hit.entityId) ?? hit.snippet;
+    if (!text) continue;
+    if (spent + text.length > budget) continue;
+    spent += text.length;
+    out.push({ id: hit.entityId, text });
+  }
+  return out;
 }
 
 /**
