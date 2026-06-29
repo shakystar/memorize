@@ -19,6 +19,10 @@ import {
   renderPiLiveUpdate,
   renderPiStartupContext,
 } from './pi/renderer.js';
+import {
+  renderHermesLiveUpdate,
+  renderHermesStartupContext,
+} from './hermes/renderer.js';
 import type { AdapterRuntime } from './types.js';
 
 /** @deprecated alias of {@link HarnessId} — kept for existing call sites. */
@@ -49,5 +53,10 @@ export const adapterRegistry: Record<AdapterAgent, AdapterRuntime> = {
     name: 'pi',
     renderStartupContext: renderPiStartupContext,
     renderLiveUpdate: renderPiLiveUpdate,
+  },
+  hermes: {
+    name: 'hermes',
+    renderStartupContext: renderHermesStartupContext,
+    renderLiveUpdate: renderHermesLiveUpdate,
   },
 };

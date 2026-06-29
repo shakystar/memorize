@@ -4,6 +4,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import which from 'which';
+import { parse as parseYaml, stringify as stringifyYaml } from 'yaml';
 
 import { type HarnessId, getHarness } from '../harness/registry.js';
 import { isEnoent, writeJson } from '../storage/fs-utils.js';
@@ -1272,4 +1273,254 @@ export async function uninstallPiIntegration(cwd: string): Promise<string> {
   }
   await stripGroundRuleBlock(path.join(cwd, 'AGENTS.md'));
   return piExtensionPath();
+}
+
+// --- Hermes (yaml-shell-hooks mechanism) -------------------------------------
+
+// Hermes (NousResearch/hermes-agent) integrates WITHOUT a planted plugin: its
+// hooks are shell commands declared in ~/.hermes/config.yaml that Hermes runs as
+// subprocesses, piping a JSON payload on stdin and reading stdout JSON back —
+// exactly the contract `memorize hook <id> <event>` already speaks. So install
+// touches three surfaces, ALL in the user-global ~/.hermes:
+//   1. config.yaml `hooks` — three NATIVE events (pre_llm_call → session-start
+//      injection, post_tool_call → capture, on_session_finalize → compaction
+//      boundary), each pointing at `memorize hook hermes <event>`.
+//   2. config.yaml `mcp_servers.memorize` — Hermes supports MCP natively in the
+//      SAME file (additive; the pre_llm_call hook is what delivers session-start
+//      memory, MCP just adds the recall/record/diagnose tool surface).
+//   3. shell-hooks-allowlist.json — Hermes prompts for first-use approval of
+//      each (event, command) pair. Running `memorize init` IS that consent, so
+//      we pre-approve memorize's OWN commands (scoped — never the global
+//      `hooks_auto_accept`, which would trust arbitrary third-party hooks). This
+//      is what lets capture/injection work in non-interactive runs.
+// Ground rule lands in AGENTS.md (Hermes reads it natively into the system
+// prompt). Hooks are global, so like codex the runner bails when cwd is unbound.
+
+const HERMES_HOOK_EVENTS = getHarness('hermes').hookEvents;
+
+// pre_llm_call BLOCKS the turn waiting for injected context, so give it a
+// generous bound; the other two are fire-and-forget observers (Hermes ignores
+// their stdout) and return fast. Stays well under Hermes's 300s timeout cap.
+const HERMES_HOOK_TIMEOUTS: Partial<Record<string, number>> = {
+  pre_llm_call: 20,
+};
+
+function hermesConfigDir(): string {
+  return path.join(os.homedir(), '.hermes');
+}
+
+function hermesConfigPath(): string {
+  return path.join(hermesConfigDir(), 'config.yaml');
+}
+
+function hermesAllowlistPath(): string {
+  return path.join(hermesConfigDir(), 'shell-hooks-allowlist.json');
+}
+
+/**
+ * The exact command string for each hermes event, in the resolved form. Built
+ * ONCE so config.yaml and the allowlist carry byte-identical strings — Hermes's
+ * allowlist keys on the exact command text, so any drift would re-trigger the
+ * approval prompt.
+ */
+function hermesHookCommands(): Record<string, string> {
+  const form = detectHookCommandForm();
+  const out: Record<string, string> = {};
+  for (const event of HERMES_HOOK_EVENTS) {
+    out[event] = buildHookCommand(form, 'hermes', event);
+  }
+  return out;
+}
+
+interface HermesHookEntry {
+  command: string;
+  matcher?: string;
+  timeout?: number;
+}
+
+interface HermesConfig {
+  hooks?: Record<string, HermesHookEntry[]>;
+  mcp_servers?: Record<string, unknown>;
+  [key: string]: unknown;
+}
+
+async function readHermesConfig(): Promise<HermesConfig> {
+  try {
+    const raw = await fs.readFile(hermesConfigPath(), 'utf8');
+    const parsed = parseYaml(raw) as unknown;
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+      ? (parsed as HermesConfig)
+      : {};
+  } catch (error) {
+    if (isEnoent(error)) return {};
+    throw error;
+  }
+}
+
+/** Coerce a config.yaml hooks-event value to a clean entry array (defensive:
+ *  a hand-edited file may hold a scalar/object/garbage under an event key). */
+function coerceHermesEntries(raw: unknown): HermesHookEntry[] {
+  if (!Array.isArray(raw)) return [];
+  return raw
+    .map((e): HermesHookEntry | undefined => {
+      if (e && typeof e === 'object' && typeof (e as HermesHookEntry).command === 'string') {
+        return e as HermesHookEntry;
+      }
+      return undefined;
+    })
+    .filter((e): e is HermesHookEntry => e !== undefined);
+}
+
+/**
+ * Merge memorize's hooks + MCP server into ~/.hermes/config.yaml (idempotent).
+ * Per event: strip every prior memorize entry (any command form, so re-install
+ * migrates npx↔node-abs cleanly), then append the current-form command —
+ * preserving the user's own hook entries and all other config keys. NOTE: a
+ * round-trip through `yaml` preserves data but not comments/anchors (same
+ * tradeoff as the JSON config writers).
+ */
+async function mergeHermesConfig(commands: Record<string, string>): Promise<string> {
+  const config = await readHermesConfig();
+  const hooks: Record<string, HermesHookEntry[]> = {};
+  for (const [event, value] of Object.entries(config.hooks ?? {})) {
+    hooks[event] = coerceHermesEntries(value);
+  }
+  for (const event of HERMES_HOOK_EVENTS) {
+    const others = (hooks[event] ?? []).filter(
+      (e) => !isMemorizeHookCommandFor(e.command, 'hermes', event),
+    );
+    const timeout = HERMES_HOOK_TIMEOUTS[event];
+    const entry: HermesHookEntry = {
+      command: commands[event]!,
+      ...(timeout !== undefined ? { timeout } : {}),
+    };
+    hooks[event] = [...others, entry];
+  }
+  config.hooks = hooks;
+
+  config.mcp_servers = { ...(config.mcp_servers ?? {}) };
+  config.mcp_servers[MEMORIZE_MCP_KEY] = {
+    command: 'npx',
+    args: ['-y', '@shakystar/memorize', 'mcp'],
+    enabled: true,
+  };
+
+  const configPath = hermesConfigPath();
+  await fs.mkdir(path.dirname(configPath), { recursive: true });
+  await fs.writeFile(configPath, stringifyYaml(config), 'utf8');
+  return configPath;
+}
+
+interface HermesAllowlist {
+  approvals?: Array<{ event?: string; command?: string }>;
+  [key: string]: unknown;
+}
+
+async function readHermesAllowlist(): Promise<HermesAllowlist> {
+  try {
+    const raw = await fs.readFile(hermesAllowlistPath(), 'utf8');
+    const parsed = JSON.parse(raw) as HermesAllowlist;
+    return parsed && typeof parsed === 'object' ? parsed : {};
+  } catch (error) {
+    if (isEnoent(error)) return {};
+    throw error;
+  }
+}
+
+/**
+ * Pre-approve memorize's own (event, command) pairs in
+ * ~/.hermes/shell-hooks-allowlist.json so capture/injection work without the
+ * interactive first-use prompt. Strips any stale memorize approval (different
+ * command form) first, then adds the current ones — preserving the user's and
+ * other tools' approvals. Scoped to memorize's commands ONLY; never sets the
+ * global `hooks_auto_accept`.
+ */
+async function mergeHermesAllowlist(
+  commands: Record<string, string>,
+): Promise<void> {
+  const allowlist = await readHermesAllowlist();
+  const existing = Array.isArray(allowlist.approvals) ? allowlist.approvals : [];
+  // Drop ALL memorize-hermes approvals (any form/event), then re-add current.
+  const others = existing.filter(
+    (a) =>
+      typeof a.command !== 'string' ||
+      !isMemorizeHookCommandForAgent(a.command, 'hermes'),
+  );
+  const ours = HERMES_HOOK_EVENTS.map((event) => ({
+    event,
+    command: commands[event]!,
+  }));
+  allowlist.approvals = [...others, ...ours];
+  const allowlistPath = hermesAllowlistPath();
+  await fs.mkdir(path.dirname(allowlistPath), { recursive: true });
+  await writeJson(allowlistPath, allowlist);
+}
+
+/**
+ * Wire memorize into Hermes: merge hooks + MCP into ~/.hermes/config.yaml,
+ * pre-approve memorize's commands in the shell-hooks allowlist, and plant the
+ * project's AGENTS.md ground-rule block. Idempotent. Returns the config.yaml
+ * path (the primary integration surface) for the install summary.
+ */
+export async function installHermesIntegration(cwd: string): Promise<string> {
+  const commands = hermesHookCommands();
+  const configPath = await mergeHermesConfig(commands);
+  await mergeHermesAllowlist(commands);
+  await upsertGroundRuleBlock(path.join(cwd, 'AGENTS.md'));
+  return configPath;
+}
+
+/**
+ * Reverse installHermesIntegration: strip memorize hook entries from
+ * config.yaml (dropping events left empty) + the memorize MCP server, remove
+ * memorize's allowlist approvals, and strip the AGENTS.md ground-rule. Preserves
+ * the user's other config/approvals and never deletes user-owned AGENTS.md.
+ * Idempotent.
+ */
+export async function uninstallHermesIntegration(cwd: string): Promise<string> {
+  const configPath = hermesConfigPath();
+  const config = await readHermesConfig();
+  let configChanged = false;
+
+  if (config.hooks && typeof config.hooks === 'object') {
+    const hooks: Record<string, HermesHookEntry[]> = {};
+    for (const [event, value] of Object.entries(config.hooks)) {
+      const kept = coerceHermesEntries(value).filter(
+        (e) => !isMemorizeHookCommandForAgent(e.command, 'hermes'),
+      );
+      if (kept.length > 0) hooks[event] = kept;
+    }
+    config.hooks = hooks;
+    configChanged = true;
+  }
+  if (config.mcp_servers && MEMORIZE_MCP_KEY in config.mcp_servers) {
+    const servers = { ...config.mcp_servers };
+    delete servers[MEMORIZE_MCP_KEY];
+    config.mcp_servers = servers;
+    configChanged = true;
+  }
+  if (configChanged) {
+    try {
+      await fs.writeFile(configPath, stringifyYaml(config), 'utf8');
+    } catch (error) {
+      if (!isEnoent(error)) throw error;
+    }
+  }
+
+  const allowlist = await readHermesAllowlist();
+  if (Array.isArray(allowlist.approvals)) {
+    allowlist.approvals = allowlist.approvals.filter(
+      (a) =>
+        typeof a.command !== 'string' ||
+        !isMemorizeHookCommandForAgent(a.command, 'hermes'),
+    );
+    try {
+      await writeJson(hermesAllowlistPath(), allowlist);
+    } catch (error) {
+      if (!isEnoent(error)) throw error;
+    }
+  }
+
+  await stripGroundRuleBlock(path.join(cwd, 'AGENTS.md'));
+  return configPath;
 }

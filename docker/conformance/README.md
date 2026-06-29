@@ -68,3 +68,21 @@ must already exist in `src/harness/registry.ts`.
   (`experimental.session.compacting`) path is not yet exercised end-to-end.
 - Tier B currently uses Anthropic haiku; override with `OPENCODE_MODEL` + the
   matching provider key.
+
+## Status — hermes (synthetic-only)
+
+Hermes (`yaml-shell-hooks` family) is validated by the deterministic tiers only.
+Its real CLI ships as a curl|bash installer that bundles its own
+uv+python+node runtime and needs a Nous provider key even to boot — impractical
+on every PR, and we hold no Nous key for a live run. So `install_harness` STUBS
+detection (`mkdir ~/.hermes`) unless `HERMES_CONFORMANCE_LIVE=1`, and the
+synthetic tier (A'') validates the memorize side end-to-end:
+
+- capture across Hermes tool names (`write_file`/`patch`→write, `terminal`→shell),
+- the `pre_llm_call` injection translating our context to Hermes's native
+  `{"context": …}` envelope, and
+- the once-per-session injection gate (a second `pre_llm_call` for the same
+  `session_id` must NOT re-inject — Hermes fires `pre_llm_call` every turn).
+
+Upstream config-schema drift is otherwise tracked manually. Mirrors Gemini's
+synthetic-first posture.

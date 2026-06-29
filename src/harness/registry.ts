@@ -17,7 +17,13 @@
  * in their own modules and are wired to descriptors by id.
  */
 
-export type HarnessId = 'claude' | 'codex' | 'opencode' | 'gemini' | 'pi';
+export type HarnessId =
+  | 'claude'
+  | 'codex'
+  | 'opencode'
+  | 'gemini'
+  | 'pi'
+  | 'hermes';
 
 export interface HarnessDescriptor {
   /** Stable id; also the `memorize hook <id> <event>` token and (for
@@ -54,10 +60,15 @@ export interface HarnessDescriptor {
    *     (Claude `.claude/settings.local.json`, Codex `~/.codex/hooks.json`;
    *     later Gemini/Cursor/Copilot).
    *   - 'ts-plugin': a TypeScript plugin module that subscribes to lifecycle
-   *     events and shells out (opencode `.opencode/plugins/*.ts`; later pi).
+   *     events and shells out (opencode `.opencode/plugins/*.ts`; pi).
+   *   - 'yaml-shell-hooks': a YAML config (`~/.hermes/config.yaml`) mapping
+   *     event → shell command(s) that Hermes runs as subprocesses, piping a
+   *     JSON payload on stdin and reading stdout JSON back. memorize's `hook`
+   *     command natively speaks that stdin/stdout contract; the only divergence
+   *     is the wire envelope (see `runHook`'s hermes translation).
    * The install writer dispatches on this.
    */
-  mechanism: 'json-hooks-map' | 'ts-plugin';
+  mechanism: 'json-hooks-map' | 'ts-plugin' | 'yaml-shell-hooks';
   /** Whether install should register the memorize MCP server in this harness's
    *  config. Used where MCP fills a gap the hook mechanism can't (e.g. opencode
    *  has no session-start-injection hook, so session-start context arrives via
@@ -76,6 +87,16 @@ export interface HarnessDescriptor {
   /** Hook runner auto-creates a project binding (claude) vs bails when the
    *  cwd is unbound (codex — its hooks are global, so it fires everywhere). */
   autoBindProject: boolean;
+  /**
+   * The harness has no once-per-session injection event, so its SessionStart
+   * handler is wired to a per-TURN event (hermes `pre_llm_call`, the only
+   * stdout channel Hermes injects from). `runHook` then gates injection to the
+   * FIRST turn of each agent session — keyed by the payload's `session_id`,
+   * matched to the agentSessionId stamped at mint — so memory is injected once
+   * (the conversation carries it thereafter), not re-injected every turn.
+   * Harnesses with a real once-per-session SessionStart leave this false/unset.
+   */
+  sessionStartPerTurn?: boolean;
 }
 
 // --- Claude Code -------------------------------------------------------------
@@ -214,6 +235,55 @@ const PI: HarnessDescriptor = {
   autoBindProject: false,
 };
 
+// --- Hermes ------------------------------------------------------------------
+
+// Hermes (NousResearch/hermes-agent) is the first 'yaml-shell-hooks' harness:
+// its hooks live in `~/.hermes/config.yaml` as event → shell command(s) that
+// Hermes runs as subprocesses, piping a JSON payload on stdin and reading
+// stdout JSON. memorize's `hook` command natively speaks that contract, so the
+// command is just `memorize hook hermes <native-event>` (no planted plugin).
+//
+// Event mapping (eventHandlerMap, native → canonical):
+//   - `pre_llm_call` → SessionStart. This is the ONLY stdout channel Hermes
+//     injects from (`{"context": "..."}`), but it fires EVERY turn — so this is
+//     the harness that needs `sessionStartPerTurn` gating (inject on turn 1
+//     only). The handler's `additionalContext` is translated to `{context}` by
+//     runHook's hermes wire renderer.
+//   - `post_tool_call` → PostToolUse capture (Hermes IGNORES its stdout — "all
+//     other hooks are fire-and-forget observers" — so no live-update injection
+//     here; capture still runs).
+//   - `on_session_finalize` → PostCompact boundary (fires on /new, idle GC, or
+//     CLI quit — the moment the session's context is torn down).
+//
+// Hermes reads AGENTS.md natively into the system prompt (alongside CLAUDE.md /
+// .cursorrules / SOUL.md / .hermes.md), so the ground rule lands in AGENTS.md
+// with no extra wiring. It ALSO supports MCP natively (`mcp_servers` in the SAME
+// config.yaml), so registersMcp merges memorize there too — additive, since
+// session-start memory is delivered by the pre_llm_call hook, not MCP. Hooks are
+// global (config.yaml is user-level), so like codex it bails when cwd is unbound.
+const HERMES: HarnessDescriptor = {
+  id: 'hermes',
+  label: 'Hermes',
+  configDirRel: '.hermes',
+  // NATIVE hermes event names; eventHandlerMap routes them to canonical handlers.
+  hookEvents: ['pre_llm_call', 'post_tool_call', 'on_session_finalize'],
+  legacyHookEvents: [],
+  legacyHandledEvents: ['Stop'],
+  eventHandlerMap: {
+    pre_llm_call: 'SessionStart',
+    post_tool_call: 'PostToolUse',
+    on_session_finalize: 'PostCompact',
+  },
+  mechanism: 'yaml-shell-hooks',
+  registersMcp: true,
+  hookScope: 'global',
+  hookPlacement: 'append',
+  groundRuleFile: 'AGENTS.md',
+  plantsSkill: false,
+  autoBindProject: false,
+  sessionStartPerTurn: true,
+};
+
 /** All supported harnesses, in display order. */
 export const harnessRegistry: readonly HarnessDescriptor[] = [
   CLAUDE,
@@ -221,6 +291,7 @@ export const harnessRegistry: readonly HarnessDescriptor[] = [
   OPENCODE,
   GEMINI,
   PI,
+  HERMES,
 ];
 
 const byId: Record<HarnessId, HarnessDescriptor> = {
@@ -229,6 +300,7 @@ const byId: Record<HarnessId, HarnessDescriptor> = {
   opencode: OPENCODE,
   gemini: GEMINI,
   pi: PI,
+  hermes: HERMES,
 };
 
 /** All harness ids, in registry order. */

@@ -9,6 +9,7 @@ import {
   installClaudeIntegration,
   installCodexIntegration,
   installGeminiIntegration,
+  installHermesIntegration,
   installOpencodeIntegration,
   installPiIntegration,
 } from './install-service.js';
@@ -68,6 +69,7 @@ export function defaultOnboardDeps(): OnboardDeps {
       opencode: installOpencodeIntegration,
       gemini: installGeminiIntegration,
       pi: installPiIntegration,
+      hermes: installHermesIntegration,
     },
   };
 }
