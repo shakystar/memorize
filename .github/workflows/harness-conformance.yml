@@ -33,7 +33,7 @@ jobs:
       fail-fast: false
       matrix:
         # Add harness ids here as descriptors land in docker/conformance/harnesses/.
-        harness: ${{ github.event_name == 'workflow_dispatch' && fromJSON(format('["{0}"]', github.event.inputs.harness)) || fromJSON('["opencode","gemini"]') }}
+        harness: ${{ github.event_name == 'workflow_dispatch' && fromJSON(format('["{0}"]', github.event.inputs.harness)) || fromJSON('["opencode","gemini","pi"]') }}
     steps:
       - uses: actions/checkout@v4
       - name: Build conformance image
@@ -50,7 +50,12 @@ jobs:
           # only. PRs get the deterministic, model-free tiers (A/A'/A'').
           if [ -n "$ANTHROPIC_API_KEY" ] && { [ "$EVENT" = schedule ] || [ "$EVENT" = workflow_dispatch ]; }; then
             echo "tier B: live capture ENABLED ($EVENT, provider secret present)"
-            ARGS+=(-e OPENCODE_CONFORMANCE_LIVE=1 -e 'OPENCODE_MODEL=anthropic/claude-haiku-4-5' -e ANTHROPIC_API_KEY)
+            # Each harness script reads only its own *_CONFORMANCE_LIVE flag, so
+            # passing the whole set is harmless across the matrix. Both opencode
+            # and pi drive an Anthropic model with the same ANTHROPIC_API_KEY.
+            ARGS+=(-e OPENCODE_CONFORMANCE_LIVE=1 -e 'OPENCODE_MODEL=anthropic/claude-haiku-4-5')
+            ARGS+=(-e PI_CONFORMANCE_LIVE=1 -e 'PI_MODEL=anthropic/claude-haiku-4-5')
+            ARGS+=(-e ANTHROPIC_API_KEY)
           else
             echo "tier B: live capture SKIPPED (deterministic tiers only on $EVENT; model runs on schedule/dispatch)"
           fi

@@ -15,6 +15,10 @@ import {
   renderGeminiLiveUpdate,
   renderGeminiStartupContext,
 } from './gemini/renderer.js';
+import {
+  renderPiLiveUpdate,
+  renderPiStartupContext,
+} from './pi/renderer.js';
 import type { AdapterRuntime } from './types.js';
 
 /** @deprecated alias of {@link HarnessId} — kept for existing call sites. */
@@ -40,5 +44,10 @@ export const adapterRegistry: Record<AdapterAgent, AdapterRuntime> = {
     name: 'gemini',
     renderStartupContext: renderGeminiStartupContext,
     renderLiveUpdate: renderGeminiLiveUpdate,
+  },
+  pi: {
+    name: 'pi',
+    renderStartupContext: renderPiStartupContext,
+    renderLiveUpdate: renderPiLiveUpdate,
   },
 };

@@ -10,6 +10,7 @@ import {
   installCodexIntegration,
   installGeminiIntegration,
   installOpencodeIntegration,
+  installPiIntegration,
 } from './install-service.js';
 import { setupProject } from './setup-service.js';
 
@@ -66,6 +67,7 @@ export function defaultOnboardDeps(): OnboardDeps {
       codex: installCodexIntegration,
       opencode: installOpencodeIntegration,
       gemini: installGeminiIntegration,
+      pi: installPiIntegration,
     },
   };
 }

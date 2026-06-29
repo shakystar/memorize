@@ -67,6 +67,14 @@ export async function runInitCommand(
       '(opencode has no session-start hook); auto-capture runs via the plugin.',
     );
   }
+  if (wiredIds.has('pi')) {
+    lines.push(
+      '',
+      'pi: restart pi to load the memorize extension (~/.pi/agent/extensions/).',
+      'Session-start memory injects via the before_agent_start hook; auto-capture',
+      'runs on tool_result. (pi reads AGENTS.md natively for the ground rule.)',
+    );
+  }
 
   lines.push(
     '',
