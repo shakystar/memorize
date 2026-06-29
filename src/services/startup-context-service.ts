@@ -1,4 +1,4 @@
-import { adapterRegistry } from '../adapters/index.js';
+import { type AdapterAgent, adapterRegistry } from '../adapters/index.js';
 import { loadStartContext } from './context-service.js';
 import { ensureBoundProjectId } from './project-service.js';
 
@@ -9,7 +9,7 @@ export interface ComposedStartupContext {
 }
 
 export async function composeStartupContext(params: {
-  agent: 'claude' | 'codex';
+  agent: AdapterAgent;
   cwd: string;
   selfSessionId?: string;
   /** When set, pin the startup context to this task instead of
