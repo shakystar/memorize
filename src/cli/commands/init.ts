@@ -75,6 +75,16 @@ export async function runInitCommand(
       'runs on tool_result. (pi reads AGENTS.md natively for the ground rule.)',
     );
   }
+  if (wiredIds.has('hermes')) {
+    lines.push(
+      '',
+      'Hermes: hooks were written to ~/.hermes/config.yaml and memorize’s own',
+      'commands pre-approved in ~/.hermes/shell-hooks-allowlist.json, so capture',
+      'and session-start injection work on the next `hermes` run. Session-start',
+      'memory injects via the pre_llm_call hook (once per session); auto-capture',
+      'runs on post_tool_call. (Hermes reads AGENTS.md natively for the ground rule.)',
+    );
+  }
 
   lines.push(
     '',

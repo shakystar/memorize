@@ -43,16 +43,18 @@ export function transcriptScopeId(transcriptPath: string): string {
  */
 
 /** Tools whose successful use is inherently a state-changing work signal.
- *  Spans harness vocabularies: Claude (Write/Edit/MultiEdit) and Gemini CLI
- *  (`write_file`, and `replace` — Gemini's edit tool). Recognizing a superset
- *  is harmless: a harness that never emits a given name simply never matches it.
- *  (Gemini tool names confirmed via conformance dogfood against gemini-cli.) */
+ *  Spans harness vocabularies: Claude (Write/Edit/MultiEdit), Gemini CLI
+ *  (`write_file`, and `replace` — Gemini's edit tool), and Hermes (`write_file`
+ *  for create, `patch` for edit). Recognizing a superset is harmless: a harness
+ *  that never emits a given name simply never matches it. (Gemini and Hermes
+ *  tool names confirmed via conformance dogfood against their CLIs.) */
 const WRITE_TOOLS = new Set([
   'Write',
   'Edit',
   'MultiEdit',
   'write_file',
   'replace',
+  'patch',
 ]);
 
 /**
@@ -196,11 +198,12 @@ export function evaluateCapture(
   }
 
   // Shell-tool branch across harnesses: Claude `Bash`, Codex `shell`, Gemini
-  // CLI `run_shell_command`.
+  // CLI `run_shell_command`, Hermes `terminal`.
   if (
     toolName === 'Bash' ||
     toolName === 'shell' ||
-    toolName === 'run_shell_command'
+    toolName === 'run_shell_command' ||
+    toolName === 'terminal'
   ) {
     if (TASK_TRANSITION_PATTERN.test(toolInputText)) {
       return {

@@ -33,7 +33,7 @@ jobs:
       fail-fast: false
       matrix:
         # Add harness ids here as descriptors land in docker/conformance/harnesses/.
-        harness: ${{ github.event_name == 'workflow_dispatch' && fromJSON(format('["{0}"]', github.event.inputs.harness)) || fromJSON('["opencode","gemini","pi"]') }}
+        harness: ${{ github.event_name == 'workflow_dispatch' && fromJSON(format('["{0}"]', github.event.inputs.harness)) || fromJSON('["opencode","gemini","pi","hermes"]') }}
     steps:
       - uses: actions/checkout@v4
       - name: Build conformance image
@@ -53,6 +53,9 @@ jobs:
             # Each harness script reads only its own *_CONFORMANCE_LIVE flag, so
             # passing the whole set is harmless across the matrix. Both opencode
             # and pi drive an Anthropic model with the same ANTHROPIC_API_KEY.
+            # Hermes live is intentionally NOT enabled: its installer bundles a
+            # heavy runtime and a live run needs a Nous provider key we don't
+            # hold — its deterministic synthetic tier covers the memorize side.
             ARGS+=(-e OPENCODE_CONFORMANCE_LIVE=1 -e 'OPENCODE_MODEL=anthropic/claude-haiku-4-5')
             ARGS+=(-e PI_CONFORMANCE_LIVE=1 -e 'PI_MODEL=anthropic/claude-haiku-4-5')
             ARGS+=(-e ANTHROPIC_API_KEY)

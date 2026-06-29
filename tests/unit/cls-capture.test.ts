@@ -19,6 +19,23 @@ describe('CLS capture filter (decision ③ — conservative whitelist)', () => {
     }
   });
 
+  it('captures Hermes tool names: write_file/patch as write-tool, terminal as shell', () => {
+    for (const tool of ['write_file', 'patch']) {
+      const verdict = evaluateCapture(tool, '/repo/src/index.ts');
+      expect(verdict.capture).toBe(true);
+      expect(verdict.signal).toBe('write-tool');
+      expect(verdict.filePath).toBe('/repo/src/index.ts');
+    }
+    // Hermes runs shell commands through the `terminal` tool.
+    expect(evaluateCapture('terminal', 'rm -rf build').signal).toBe(
+      'mutating-bash',
+    );
+    expect(evaluateCapture('terminal', 'git commit -m "x"').signal).toBe(
+      'mutating-bash',
+    );
+    expect(evaluateCapture('terminal', 'ls -la').capture).toBe(false);
+  });
+
   it('captures codex apply_patch edits as write-tool signals (vendor symmetry)', () => {
     const patch = [
       '*** Begin Patch',

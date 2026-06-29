@@ -630,6 +630,35 @@ const sharedHookHandlers: Record<string, HookHandler> = {
 };
 
 /**
+ * Translate a canonical (Claude-shaped) handler result into the wire envelope a
+ * harness's config mechanism expects. Identity for everyone EXCEPT
+ * 'yaml-shell-hooks' (hermes): Claude/Codex/Gemini consume the Claude shape
+ * directly, and ts-plugins (opencode/pi) translate harness-side in the planted
+ * extension. Hermes acts ONLY on `{"context": "..."}` (its pre_llm_call
+ * injection channel — every other hook's stdout is ignored), so we map our
+ * `hookSpecificOutput.additionalContext` to it and collapse everything else to
+ * `{}`. Never throws: a parse failure degrades to the empty result.
+ */
+function renderHookWire(
+  descriptor: ReturnType<typeof getHarness>,
+  canonicalJson: string,
+): string {
+  if (descriptor.mechanism !== 'yaml-shell-hooks') return canonicalJson;
+  try {
+    const parsed = JSON.parse(canonicalJson) as {
+      hookSpecificOutput?: { additionalContext?: unknown };
+    };
+    const ctx = parsed.hookSpecificOutput?.additionalContext;
+    if (typeof ctx === 'string' && ctx.length > 0) {
+      return JSON.stringify({ context: ctx });
+    }
+  } catch {
+    // fall through to the empty envelope
+  }
+  return JSON.stringify({});
+}
+
+/**
  * Run a fired lifecycle hook for any registered harness. Replaces the old
  * per-harness `runClaudeHook`/`runCodexHook` (kept as thin wrappers): binding
  * policy (auto-create vs bail-if-unbound) and the handled-event set are read
@@ -665,12 +694,31 @@ export async function runHook(
     descriptor.eventHandlerMap?.[params.eventName] ?? params.eventName;
   const handler = sharedHookHandlers[handlerKey];
   if (!handler) return EMPTY_HOOK_RESULT;
-  return handler({
+
+  // Once-per-session injection gate (hermes). Its SessionStart is wired to the
+  // per-TURN `pre_llm_call`, so without a gate it would mint/re-inject every
+  // turn. If a memorize session already exists for this agent session_id, the
+  // conversation already carries turn-1's injected memory — return the empty
+  // wire envelope and skip the handler entirely (no event-log churn, no
+  // duplicate injection). Turn 1 finds no match and runs the full handler,
+  // which mints the session stamped with this agentSessionId.
+  if (descriptor.sessionStartPerTurn && handlerKey === 'SessionStart') {
+    const { agentSessionId } = parseIdentityPayload(params.stdinPayload);
+    if (agentSessionId) {
+      const existing = await resolveByAgentSessionId(params.cwd, agentSessionId, {
+        debugLabel: 'hook-session-start-per-turn-gate',
+      });
+      if (existing.sessionId) return renderHookWire(descriptor, EMPTY_HOOK_RESULT);
+    }
+  }
+
+  const result = await handler({
     projectId,
     agent: harnessId,
     cwd: params.cwd,
     rawPayload: params.stdinPayload,
   });
+  return renderHookWire(descriptor, result);
 }
 
 export function runClaudeHook(params: {
