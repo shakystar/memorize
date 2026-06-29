@@ -67,5 +67,14 @@ if declare -F synthetic_capture_check >/dev/null; then synthetic_capture_check; 
 echo "== [$HARNESS] tier B: live capture (gated, model) =="
 if declare -F live_capture_check >/dev/null; then live_capture_check; else skip "no live_capture_check"; fi
 
+# Tier C — upstream CONTRACT (gated, network). For harnesses with no driveable
+# CLI (a GUI IDE like Cursor), there is no tier-B live run to catch upstream
+# drift, so the published contract (docs/spec) is the only external truth: this
+# tier fetches it and asserts the event names / payload + output field names /
+# config paths memorize hardcodes still appear. Optional + gated like tier B;
+# turns a silent rename in the harness into a red check on the schedule.
+echo "== [$HARNESS] tier C: upstream contract (gated, network) =="
+if declare -F contract_check >/dev/null; then contract_check; else skip "no contract_check"; fi
+
 echo "== [$HARNESS] summary: PASS=$PASS FAIL=$FAIL =="
 [ "$FAIL" -eq 0 ]

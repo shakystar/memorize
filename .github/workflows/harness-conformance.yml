@@ -62,4 +62,13 @@ jobs:
           else
             echo "tier B: live capture SKIPPED (deterministic tiers only on $EVENT; model runs on schedule/dispatch)"
           fi
+          # Tier C (cursor upstream-contract drift guard) needs only NETWORK, no
+          # provider key — so enable it on schedule/dispatch regardless of secrets.
+          # Cursor is a GUI IDE with no tier B; the docs are its only drift sentinel.
+          if [ "$EVENT" = schedule ] || [ "$EVENT" = workflow_dispatch ]; then
+            echo "tier C: cursor upstream-contract check ENABLED ($EVENT)"
+            ARGS+=(-e CURSOR_CONFORMANCE_LIVE=1)
+          else
+            echo "tier C: cursor upstream-contract check SKIPPED (runs on schedule/dispatch)"
+          fi
           docker run "${ARGS[@]}" memorize-conformance ${{ matrix.harness }}

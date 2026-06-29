@@ -89,24 +89,35 @@ synthetic-first posture.
 
 ## Status — cursor (install-artifact + synthetic only; live tier N/A)
 
-Cursor (`json-hooks-map` family, but PER-PROJECT) has the WEAKEST conformance of
-any harness, by structure rather than choice: it is a GUI IDE (closed-source
+Cursor (`json-hooks-map` family, but PER-PROJECT) is a GUI IDE (closed-source
 Electron app) with **no headless/CLI agent**, so nothing can be driven to perform
-a tool call in a container. There is therefore **no Tier B (live) at all** — the
-`cursor.sh` descriptor intentionally omits `live_capture_check`, and there is no
-plugin to load-check either. `install_harness` stubs detection (`mkdir
-~/.cursor`), and the deterministic tiers validate the memorize side end-to-end:
+a tool call in a container. There is therefore **no Tier B (live model) at all** —
+the `cursor.sh` descriptor intentionally omits `live_capture_check`, and there is
+no plugin to load-check either. `install_harness` stubs detection (`mkdir
+~/.cursor`). What IS automated:
 
-- the `.cursor/hooks.json` schema we write (the four native events
-  `sessionStart`/`postToolUse`/`preCompact`/`sessionEnd`), the `.cursor/mcp.json`
-  MCP block, and the AGENTS.md ground rule,
-- capture across cursor tool names (`Write` shared with Claude; `Shell` new), and
-- the `sessionStart` injection translating our context to cursor's native
-  `{"additional_context": …}` envelope (snake_case, top-level — not
-  `hookSpecificOutput`).
+- **Tier A (install artifacts)** — the `.cursor/hooks.json` schema we write (the
+  four native events `sessionStart`/`postToolUse`/`preCompact`/`sessionEnd`), the
+  `.cursor/mcp.json` MCP block, and the AGENTS.md ground rule.
+- **Tier A'' (synthetic, FAITHFUL)** — instead of a hand-typed `memorize hook`
+  proxy, the synthetic tier extracts and executes the **exact command memorize
+  wrote into `.cursor/hooks.json`**, driven the way Cursor's runtime drives it
+  (project-root cwd, documented payload on stdin). It asserts capture across
+  cursor tool names (`Write` shared with Claude; `Shell` new) and the
+  `sessionStart` injection emitting cursor's native `{"additional_context": …}`
+  envelope (snake_case, top-level — not `hookSpecificOutput`). This is the closest
+  automatable proxy for opening the IDE: it proves the artifact we install runs
+  and honors the wire contract, end to end.
+- **Tier C (upstream-contract drift guard, gated + scheduled)** — since there is
+  no live tier to catch upstream renames, the published hooks contract is the only
+  external truth. On schedule/dispatch (`CURSOR_CONFORMANCE_LIVE=1`, network only,
+  no key) `contract_check` fetches [cursor.com/docs/hooks](https://cursor.com/docs/hooks)
+  and asserts every token memorize hardcodes still appears — the four event names,
+  the `additional_context` field, the `Shell`/`Write` tool names, and the
+  `.cursor/hooks.json` path. A Cursor rename turns a green-but-stale synthetic tier
+  into a red check **automatically** — replacing what used to be manual doc-watching.
 
-What is NOT covered (and cannot be without the GUI): that the real Cursor app
-actually fires these hooks, reads `additional_context` back into the
-conversation, and emits the documented `tool_name` values. Those are taken from
-[cursor.com/docs/hooks](https://cursor.com/docs/hooks) and tracked manually for
-upstream drift.
+The ONLY residual (truly un-automatable without the GUI): that the real Cursor app
+fires these hooks and reads `additional_context` back into the conversation at
+runtime. Tier C catches contract drift; the runtime behavior is verified once by
+hand and then guarded by the contract check.
