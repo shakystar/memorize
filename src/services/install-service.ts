@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url';
 
 import which from 'which';
 
-import { getHarness } from '../harness/registry.js';
+import { type HarnessId, getHarness } from '../harness/registry.js';
 import { isEnoent, writeJson } from '../storage/fs-utils.js';
 import { POST_TOOL_USE_MATCHER } from './capture-service.js';
 
@@ -52,7 +52,7 @@ function resolveCliPath(): string {
 
 function buildHookCommand(
   form: HookCommandForm,
-  agent: 'claude' | 'codex',
+  agent: HarnessId,
   event: string,
 ): string {
   return form === 'bare'
@@ -85,7 +85,7 @@ const MEMORIZE_TOKEN =
  */
 function isMemorizeHookCommandFor(
   command: string,
-  agent: 'claude' | 'codex',
+  agent: HarnessId,
   event: string,
 ): boolean {
   const re = new RegExp(`${MEMORIZE_TOKEN}\\s+${agent}\\s+${event}\\b`);
@@ -100,7 +100,7 @@ function isMemorizeHookCommandFor(
  */
 export function isMemorizeHookCommandForAgent(
   command: string,
-  agent: 'claude' | 'codex',
+  agent: HarnessId,
 ): boolean {
   const re = new RegExp(`${MEMORIZE_TOKEN}\\s+${agent}\\b`);
   return re.test(command);
@@ -185,7 +185,7 @@ function ensureMemorizeCommand(
  */
 function stripMemorizeForEvent(
   list: HookMatcherGroup[] | undefined,
-  agent: 'claude' | 'codex',
+  agent: HarnessId,
   event: string,
 ): HookMatcherGroup[] | undefined {
   if (!list) return undefined;
@@ -243,58 +243,100 @@ function coerceLegacyList(
     .filter((group): group is HookMatcherGroup => group !== undefined);
 }
 
-export async function installClaudeIntegration(cwd: string): Promise<string> {
-  const settingsPath = path.join(cwd, '.claude', 'settings.local.json');
+/**
+ * Prepend a memorize hook entry so our context runs before other layers (the
+ * codex placement). Dedups by command across all groups; OMITS the matcher key
+ * when none is given — preserving codex's historical on-disk shape.
+ */
+function prependMemorizeCommand(
+  list: HookMatcherGroup[] | undefined,
+  command: string,
+  matcher?: string,
+): HookMatcherGroup[] {
+  const current = list ?? [];
+  if (
+    current.some((group) => group.hooks.some((entry) => entry.command === command))
+  ) {
+    return current;
+  }
+  return [
+    {
+      ...(matcher !== undefined ? { matcher } : {}),
+      hooks: [{ type: 'command', command }],
+    },
+    ...current,
+  ];
+}
+
+interface HooksMapSpec {
+  configPath: string;
+  agent: HarnessId;
+  /** Active events to register (this harness's NATIVE event names). */
+  events: readonly string[];
+  /** Events a prior install may have registered that we now strip. */
+  legacyEvents: readonly string[];
+  /** Append after the user's hooks (claude/gemini) or prepend before them (codex). */
+  placement: 'append' | 'prepend';
+  /** Per-event matcher (e.g. tool filter, or codex SessionStart 'startup|resume'). */
+  matchers: Partial<Record<string, string>>;
+}
+
+/**
+ * Shared json-hooks-map writer for every harness in that family (Claude, Codex,
+ * Gemini). Reads the settings/hooks JSON, migrates legacy entry shapes, strips
+ * every memorize entry across (events ∪ legacyEvents) in any command form, then
+ * re-adds memorize entries for `events` with the freshly resolved command form.
+ * Other tools' entries and other settings keys are preserved. Per-harness
+ * divergence is JUST the spec: `append` defaults the matcher to '' (always
+ * present, claude's shape); `prepend` omits the matcher key when none (codex's
+ * shape) — so each harness's exact on-disk output is preserved.
+ */
+async function writeHooksMap(spec: HooksMapSpec): Promise<void> {
   let settings: { hooks?: Record<string, unknown> } = {};
   try {
-    settings = JSON.parse(await fs.readFile(settingsPath, 'utf8')) as {
+    settings = JSON.parse(await fs.readFile(spec.configPath, 'utf8')) as {
       hooks?: Record<string, unknown>;
     };
   } catch (error) {
-    if (!isEnoent(error)) {
-      throw error;
-    }
+    if (!isEnoent(error)) throw error;
   }
 
-  const rawHooks = settings.hooks ?? {};
   const migrated: HooksMap = {};
-  for (const [event, value] of Object.entries(rawHooks)) {
+  for (const [event, value] of Object.entries(settings.hooks ?? {})) {
     const groups = coerceLegacyList(value);
     if (groups) migrated[event] = groups;
   }
 
   const form = detectHookCommandForm();
   const purged: HooksMap = { ...migrated };
-
-  // Strip every existing memorize entry (both active and legacy events,
-  // both npx and bare forms) so the rebuild below leaves exactly the
-  // β-contract entries with the freshly resolved command form.
-  const allEvents = [...CLAUDE_HOOK_EVENTS, ...CLAUDE_LEGACY_MEMORIZE_HOOK_EVENTS];
-  for (const event of allEvents) {
-    const cleaned = stripMemorizeForEvent(purged[event], 'claude', event);
-    if (cleaned) {
-      purged[event] = cleaned;
-    } else {
-      delete purged[event];
-    }
+  for (const event of [...spec.events, ...spec.legacyEvents]) {
+    const cleaned = stripMemorizeForEvent(purged[event], spec.agent, event);
+    if (cleaned) purged[event] = cleaned;
+    else delete purged[event];
   }
 
-  // Re-add memorize entries for the active events only.
   const rebuilt: HooksMap = { ...purged };
-  for (const event of CLAUDE_HOOK_EVENTS) {
-    rebuilt[event] = ensureMemorizeCommand(
-      purged[event],
-      buildHookCommand(form, 'claude', event),
-      CLAUDE_HOOK_MATCHERS[event] ?? '',
-    );
+  for (const event of spec.events) {
+    const command = buildHookCommand(form, spec.agent, event);
+    rebuilt[event] =
+      spec.placement === 'prepend'
+        ? prependMemorizeCommand(purged[event], command, spec.matchers[event])
+        : ensureMemorizeCommand(purged[event], command, spec.matchers[event] ?? '');
   }
 
-  const merged = {
-    ...settings,
-    hooks: rebuilt,
-  };
+  await writeJson(spec.configPath, { ...settings, hooks: rebuilt });
+}
 
-  await writeJson(settingsPath, merged);
+export async function installClaudeIntegration(cwd: string): Promise<string> {
+  const settingsPath = path.join(cwd, '.claude', 'settings.local.json');
+  await writeHooksMap({
+    configPath: settingsPath,
+    agent: 'claude',
+    events: CLAUDE_HOOK_EVENTS,
+    legacyEvents: CLAUDE_LEGACY_MEMORIZE_HOOK_EVENTS,
+    placement: 'append',
+    matchers: CLAUDE_HOOK_MATCHERS,
+  });
   // #68 — plant the single-source-of-truth contract where every Claude
   // session reads it. Default-on; the install command announces it.
   await upsertGroundRuleBlock(path.join(cwd, 'CLAUDE.md'));
@@ -539,80 +581,16 @@ function codexHooksPath(): string {
 
 export async function installCodexHooks(): Promise<string> {
   const hooksPath = codexHooksPath();
-
-  let settings: { hooks?: Record<string, unknown> } = {};
-  try {
-    settings = JSON.parse(await fs.readFile(hooksPath, 'utf8')) as {
-      hooks?: Record<string, unknown>;
-    };
-  } catch (error) {
-    if (!isEnoent(error)) throw error;
-  }
-
-  const rawHooks = settings.hooks ?? {};
-  const migrated: HooksMap = {};
-  for (const [event, value] of Object.entries(rawHooks)) {
-    const groups = coerceLegacyList(value);
-    if (groups) migrated[event] = groups;
-  }
-
-  const form = detectHookCommandForm();
-  const purged: HooksMap = { ...migrated };
-
-  // Strip every existing memorize entry so the rebuild leaves exactly
-  // the β-contract entries with the freshly resolved command form.
-  const allEvents = [...CODEX_HOOK_EVENTS, ...CODEX_LEGACY_MEMORIZE_HOOK_EVENTS];
-  for (const event of allEvents) {
-    const cleaned = stripMemorizeForEvent(purged[event], 'codex', event);
-    if (cleaned) {
-      purged[event] = cleaned;
-    } else {
-      delete purged[event];
-    }
-  }
-
-  // Prepend memorize entries so our context is established before any
-  // other layer (OMX, third-party) runs.
-  const prependMemorize = (
-    list: HookMatcherGroup[] | undefined,
-    command: string,
-    matcher?: string,
-  ): HookMatcherGroup[] => {
-    const current = list ?? [];
-    if (
-      current.some((group) =>
-        group.hooks.some((entry) => entry.command === command),
-      )
-    ) {
-      return current;
-    }
-    return [
-      {
-        ...(matcher !== undefined ? { matcher } : {}),
-        hooks: [{ type: 'command', command }],
-      },
-      ...current,
-    ];
-  };
-
-  const rebuilt: HooksMap = { ...purged };
-  for (const event of CODEX_HOOK_EVENTS) {
-    // Codex SessionStart wants matcher 'startup|resume'; if we add new
-    // codex events later, we'll thread per-event matcher choice here.
-    const matcher = event === 'SessionStart' ? 'startup|resume' : undefined;
-    rebuilt[event] = prependMemorize(
-      purged[event],
-      buildHookCommand(form, 'codex', event),
-      matcher,
-    );
-  }
-
-  const merged = {
-    ...settings,
-    hooks: rebuilt,
-  };
-
-  await writeJson(hooksPath, merged);
+  // Prepend so memorize's context is established before any other layer (OMX,
+  // third-party). Codex SessionStart wants matcher 'startup|resume'.
+  await writeHooksMap({
+    configPath: hooksPath,
+    agent: 'codex',
+    events: CODEX_HOOK_EVENTS,
+    legacyEvents: CODEX_LEGACY_MEMORIZE_HOOK_EVENTS,
+    placement: 'prepend',
+    matchers: { SessionStart: 'startup|resume' },
+  });
   return hooksPath;
 }
 
@@ -701,7 +679,7 @@ async function stripMemorizeFromFile(
  */
 function stripAllMemorizeHooks(
   rawHooks: Record<string, unknown>,
-  agent: 'claude' | 'codex',
+  agent: HarnessId,
   events: readonly string[],
 ): HooksMap {
   const migrated: HooksMap = {};
@@ -824,6 +802,68 @@ export async function installCodexIntegration(cwd: string): Promise<string> {
   await upsertGroundRuleBlock(path.join(cwd, 'AGENTS.md'));
 
   return hooksPath;
+}
+
+// --- Gemini CLI (json-hooks-map) ---------------------------------------------
+
+const GEMINI_HOOK_EVENTS = getHarness('gemini').hookEvents;
+
+function geminiSettingsPath(): string {
+  return path.join(os.homedir(), '.gemini', 'settings.json');
+}
+
+/**
+ * Wire memorize into Gemini CLI via ~/.gemini/settings.json hooks (schema
+ * identical to Claude's). SessionStart injects context through the same
+ * `hookSpecificOutput.additionalContext` field; `AfterTool` → PostToolUse
+ * capture (routed by the descriptor's eventHandlerMap). Global scope — bails at
+ * runtime when the cwd is unbound (like codex). Plants the GEMINI.md ground
+ * rule. Idempotent.
+ */
+export async function installGeminiIntegration(cwd: string): Promise<string> {
+  const settingsPath = geminiSettingsPath();
+  await writeHooksMap({
+    configPath: settingsPath,
+    agent: 'gemini',
+    events: GEMINI_HOOK_EVENTS,
+    legacyEvents: [],
+    placement: 'append',
+    // AfterTool tool matcher (and the capture filter's gemini tool names) are
+    // pinned via conformance dogfood; capture-all until then.
+    matchers: {},
+  });
+  await upsertGroundRuleBlock(path.join(cwd, 'GEMINI.md'));
+  return settingsPath;
+}
+
+/**
+ * Reverse installGeminiIntegration: strip memorize hooks from
+ * ~/.gemini/settings.json (preserving other hooks/keys) and the GEMINI.md
+ * ground-rule block. Idempotent; captured data untouched.
+ */
+export async function uninstallGeminiIntegration(cwd: string): Promise<string> {
+  const settingsPath = geminiSettingsPath();
+  let settings: { hooks?: Record<string, unknown> } | undefined;
+  try {
+    settings = JSON.parse(await fs.readFile(settingsPath, 'utf8')) as {
+      hooks?: Record<string, unknown>;
+    };
+  } catch (error) {
+    if (!isEnoent(error)) throw error;
+  }
+  if (settings) {
+    const cleaned = stripAllMemorizeHooks(
+      settings.hooks ?? {},
+      'gemini',
+      GEMINI_HOOK_EVENTS,
+    );
+    const merged: { hooks?: Record<string, unknown> } = { ...settings };
+    if (Object.keys(cleaned).length > 0) merged.hooks = cleaned;
+    else delete merged.hooks;
+    await writeJson(settingsPath, merged);
+  }
+  await stripGroundRuleBlock(path.join(cwd, 'GEMINI.md'));
+  return settingsPath;
 }
 
 // --- opencode (TS-plugin mechanism) ------------------------------------------

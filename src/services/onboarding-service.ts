@@ -8,6 +8,7 @@ import {
 import {
   installClaudeIntegration,
   installCodexIntegration,
+  installGeminiIntegration,
   installOpencodeIntegration,
 } from './install-service.js';
 import { setupProject } from './setup-service.js';
@@ -64,6 +65,7 @@ export function defaultOnboardDeps(): OnboardDeps {
       // THIS project's AGENTS.md/CLAUDE.md ground-rule block.
       codex: installCodexIntegration,
       opencode: installOpencodeIntegration,
+      gemini: installGeminiIntegration,
     },
   };
 }

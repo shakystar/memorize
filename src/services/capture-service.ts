@@ -42,8 +42,18 @@ export function transcriptScopeId(transcriptPath: string): string {
  * thing we cannot cheaply undo.
  */
 
-/** Tools whose successful use is inherently a state-changing work signal. */
-const WRITE_TOOLS = new Set(['Write', 'Edit', 'MultiEdit']);
+/** Tools whose successful use is inherently a state-changing work signal.
+ *  Spans harness vocabularies: Claude (Write/Edit/MultiEdit) and Gemini CLI
+ *  (`write_file`, and `replace` — Gemini's edit tool). Recognizing a superset
+ *  is harmless: a harness that never emits a given name simply never matches it.
+ *  (Gemini tool names confirmed via conformance dogfood against gemini-cli.) */
+const WRITE_TOOLS = new Set([
+  'Write',
+  'Edit',
+  'MultiEdit',
+  'write_file',
+  'replace',
+]);
 
 /**
  * Codex performs file edits through a single `apply_patch` tool rather than
@@ -185,8 +195,13 @@ export function evaluateCapture(
     };
   }
 
-  // Codex also fires PostToolUse for Bash-like shell tools.
-  if (toolName === 'Bash' || toolName === 'shell') {
+  // Shell-tool branch across harnesses: Claude `Bash`, Codex `shell`, Gemini
+  // CLI `run_shell_command`.
+  if (
+    toolName === 'Bash' ||
+    toolName === 'shell' ||
+    toolName === 'run_shell_command'
+  ) {
     if (TASK_TRANSITION_PATTERN.test(toolInputText)) {
       return {
         capture: true,
