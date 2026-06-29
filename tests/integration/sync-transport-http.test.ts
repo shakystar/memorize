@@ -1,6 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import { createHttpSyncTransport } from '../../src/adapters/sync-transport-http.js';
+import {
+  createHttpSyncTransport,
+  probeHubAuth,
+} from '../../src/adapters/sync-transport-http.js';
 import type { DomainEvent } from '../../src/domain/events.js';
 import { startRelayStub, type RelayStub } from '../harness/relay-stub.js';
 
@@ -134,5 +137,47 @@ describe('http SyncTransport — optional bearer token', () => {
     await expect(
       wrongToken.push({ projectId: 'proj_http', events: [makeEvent('x')] }),
     ).rejects.toThrow(/401/);
+  });
+});
+
+describe('probeHubAuth (#192 — auth login fail-fast)', () => {
+  it('returns "ok" for a token the Hub accepts', async () => {
+    relay = await startRelayStub({ token: 'good' });
+    expect(await probeHubAuth(relay.baseUrl, 'good')).toBe('ok');
+  });
+
+  it('returns "ok" against a tokenless (open) Hub', async () => {
+    relay = await startRelayStub();
+    expect(await probeHubAuth(relay.baseUrl, 'anything')).toBe('ok');
+  });
+
+  it('returns "unauthorized" when the Hub rejects the token (401)', async () => {
+    relay = await startRelayStub({ token: 'good' });
+    expect(await probeHubAuth(relay.baseUrl, 'wrong')).toBe('unauthorized');
+  });
+
+  it('returns "unauthorized" on a 403 (injected fetch)', async () => {
+    const fetchImpl = (async () =>
+      new Response('forbidden', { status: 403 })) as unknown as typeof fetch;
+    expect(
+      await probeHubAuth('https://hub.example', 'x', { fetchImpl }),
+    ).toBe('unauthorized');
+  });
+
+  it('returns "unreachable" on a non-2xx, non-auth status', async () => {
+    const fetchImpl = (async () =>
+      new Response('boom', { status: 500 })) as unknown as typeof fetch;
+    expect(
+      await probeHubAuth('https://hub.example', 'x', { fetchImpl }),
+    ).toBe('unreachable');
+  });
+
+  it('returns "unreachable" when fetch throws (offline/DNS)', async () => {
+    const fetchImpl = (async () => {
+      throw new Error('ECONNREFUSED');
+    }) as unknown as typeof fetch;
+    expect(
+      await probeHubAuth('https://hub.example', 'x', { fetchImpl }),
+    ).toBe('unreachable');
   });
 });

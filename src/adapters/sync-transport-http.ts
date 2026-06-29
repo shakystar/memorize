@@ -37,6 +37,49 @@ function projectEventsUrl(baseUrl: string, remoteProjectId: string): string {
   return `${base}/v1/projects/${encodeURIComponent(remoteProjectId)}/events`;
 }
 
+/**
+ * Outcome of a cheap pre-flight auth probe (#192). `'ok'` = the Hub accepted the
+ * token; `'unauthorized'` = it rejected it (the only fail-fast signal); for
+ * anything else (`'unreachable'`) we cannot conclude and the caller degrades to
+ * "store anyway".
+ */
+export type HubAuthProbe = 'ok' | 'unauthorized' | 'unreachable';
+
+/**
+ * Validate a bearer token against the Hub before storing it (#192 — `auth
+ * login`'s fail-fast check). A project-INDEPENDENT `GET {base}/healthz` carrying
+ * `Authorization: Bearer <token>`: per the wire contract (the in-repo reference
+ * relay `tests/harness/relay-stub.ts` gates EVERY route, /healthz included), a
+ * `401`/`403` means the credentials were rejected — and only that. We
+ * deliberately do NOT probe a project-scoped endpoint, where a `401`/`403`/`404`
+ * could instead mean project ownership/existence and cause a false hard-fail.
+ *
+ * Returns `'unauthorized'` ONLY on `401`/`403`; `'ok'` on any 2xx; and
+ * `'unreachable'` for any other status, or a thrown fetch (offline / DNS / a Hub
+ * that doesn't gate or expose /healthz). The caller hard-fails on
+ * `'unauthorized'` and stores-with-a-note otherwise.
+ */
+export async function probeHubAuth(
+  baseUrl: string,
+  token: string,
+  options: { fetchImpl?: typeof fetch } = {},
+): Promise<HubAuthProbe> {
+  const doFetch = options.fetchImpl ?? fetch;
+  const base = baseUrl.replace(/\/+$/, '');
+  try {
+    const response = await doFetch(`${base}/healthz`, {
+      method: 'GET',
+      headers: { authorization: `Bearer ${token}` },
+    });
+    if (response.status === 401 || response.status === 403) {
+      return 'unauthorized';
+    }
+    return response.ok ? 'ok' : 'unreachable';
+  } catch {
+    return 'unreachable';
+  }
+}
+
 export function createHttpSyncTransport(
   baseUrl: string,
   options: HttpSyncTransportOptions = {},

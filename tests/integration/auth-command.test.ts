@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { runAuthCommand } from '../../src/cli/commands/auth.js';
 import { readToken, setToken } from '../../src/storage/credentials-store.js';
+import { startRelayStub, type RelayStub } from '../harness/relay-stub.js';
 
 let sandbox: string;
 
@@ -34,12 +35,14 @@ afterEach(async () => {
 
 describe('memorize auth (#192)', () => {
   it('login stores a token for the host without echoing it', async () => {
+    // --no-validate keeps this case offline; validation is covered separately.
     const out = await run([
       'login',
       '--remote-url',
       'https://hub.example.com/',
       '--token',
       'mzk_secret',
+      '--no-validate',
     ]);
 
     expect(await readToken('https://hub.example.com')).toBe('mzk_secret');
@@ -49,7 +52,9 @@ describe('memorize auth (#192)', () => {
   });
 
   it('login requires --remote-url', async () => {
-    await expect(run(['login', '--token', 'x'])).rejects.toThrow(/remote-url/);
+    await expect(
+      run(['login', '--token', 'x', '--no-validate']),
+    ).rejects.toThrow(/remote-url/);
   });
 
   it('status reports per-host and lists all hosts', async () => {
@@ -90,5 +95,61 @@ describe('memorize auth (#192)', () => {
 
   it('rejects an unknown subcommand', async () => {
     await expect(run(['bogus'])).rejects.toThrow(/Usage/);
+  });
+});
+
+describe('memorize auth login — Hub validation (#192)', () => {
+  let relay: RelayStub;
+
+  afterEach(async () => {
+    await relay?.close();
+  });
+
+  it('validates a good token against the Hub and stores it', async () => {
+    relay = await startRelayStub({ token: 'mzk_good' });
+    const out = await run([
+      'login',
+      '--remote-url',
+      relay.baseUrl,
+      '--token',
+      'mzk_good',
+    ]);
+    expect(out).toMatch(/token validated/);
+    expect(await readToken(relay.baseUrl)).toBe('mzk_good');
+  });
+
+  it('rejects a bad token (401) and stores nothing', async () => {
+    relay = await startRelayStub({ token: 'mzk_good' });
+    await expect(
+      run(['login', '--remote-url', relay.baseUrl, '--token', 'mzk_wrong']),
+    ).rejects.toThrow(/rejected/i);
+    expect(await readToken(relay.baseUrl)).toBeUndefined();
+  });
+
+  it('stores anyway with a warning when the Hub is unreachable', async () => {
+    // Port 1 is unconnectable; the probe degrades to "store anyway".
+    const out = await run([
+      'login',
+      '--remote-url',
+      'http://127.0.0.1:1',
+      '--token',
+      'mzk_offline',
+    ]);
+    expect(out).toMatch(/Could not reach/i);
+    expect(await readToken('http://127.0.0.1:1')).toBe('mzk_offline');
+  });
+
+  it('--no-validate skips the probe entirely (stores even a bad token)', async () => {
+    relay = await startRelayStub({ token: 'mzk_good' });
+    const out = await run([
+      'login',
+      '--remote-url',
+      relay.baseUrl,
+      '--token',
+      'mzk_wrong',
+      '--no-validate',
+    ]);
+    expect(out).not.toMatch(/validated/);
+    expect(await readToken(relay.baseUrl)).toBe('mzk_wrong');
   });
 });

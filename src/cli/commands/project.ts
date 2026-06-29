@@ -5,7 +5,7 @@ import { createHttpSyncTransport } from '../../adapters/sync-transport-http.js';
 import type { SyncTransportConfig } from '../../domain/entities.js';
 import type { SyncTransport } from '../../domain/sync-transport.js';
 import { ACTOR_USER } from '../../domain/common.js';
-import { resolveSyncToken } from '../../storage/credentials-store.js';
+import { resolveSyncToken, setToken } from '../../storage/credentials-store.js';
 import { generateProjectKey, keyId } from '../../services/encryption-service.js';
 import {
   createProject,
@@ -40,9 +40,11 @@ import { renderScaffoldUsage } from '../usage.js';
  * written to ProjectSyncState so later boundaries auto-sync with no flag.
  *
  * For `--remote-url`, the bearer token follows the #192 ladder (explicit
- * `--token` → host credential store → env). Only an explicit `--token` is
- * persisted into the per-project config; a token resolved from the host store
- * stays there (auto-sync re-resolves), avoiding secret sprawl.
+ * `--token` → host credential store → env). Anti-sprawl (#192): an explicit
+ * `--token` is written THROUGH to the host credential store (the git-credential
+ * model — authenticate once per host) and is NEVER persisted into the per-project
+ * config, which carries only `{ type, url }`. Auto-sync then re-resolves the
+ * token host-side at runtime, so the secret lives in exactly one place.
  */
 async function resolveTransportFlags(flags: {
   'remote-path'?: string;
@@ -56,14 +58,16 @@ async function resolveTransportFlags(flags: {
   }
   if (remoteUrl) {
     const explicit = flags.token;
+    // Write an explicit --token through to the host store so future syncs of any
+    // project on this host resolve it without re-passing the flag, and so it is
+    // not duplicated into every project's sync state (anti-sprawl).
+    if (explicit) {
+      await setToken(remoteUrl, explicit);
+    }
     const token = await resolveSyncToken(remoteUrl, explicit);
     return {
       transport: createHttpSyncTransport(remoteUrl, token ? { token } : {}),
-      config: {
-        type: 'http',
-        url: remoteUrl,
-        ...(explicit ? { token: explicit } : {}),
-      },
+      config: { type: 'http', url: remoteUrl },
     };
   }
   if (remotePath) {

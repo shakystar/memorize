@@ -460,7 +460,7 @@ no flags (P3-b).
 | `<remoteProjectId>` | positional, required | The remote project id to replicate |
 | `--remote-path <path>` | single | Filesystem transport location of the source |
 | `--remote-url <url>` | single | HTTP relay URL of the source (alternative to `--remote-path`) |
-| `--token <t>` | single | Bearer token for `--remote-url`. Optional once `memorize auth login` has stored one for the host (#192) |
+| `--token <t>` | single | Bearer token for `--remote-url`. Optional once `memorize auth login` has stored one for the host. When passed, it is written through to the host credential store (not the per-project state) (#192) |
 | `--encryption-key <b64>` | single | E2E key (#182) for an encrypted source; must match the origin's key (verify by `kid`). Seeded before the clone-time pull so it can decrypt |
 
 Pulls existing events on clone; if the source has not pushed yet it binds
@@ -505,18 +505,27 @@ never co-stored.
 
 | Action | Purpose |
 |---|---|
-| `login --remote-url <url> [--token <t>]` | Store a bearer token for the URL's host. Without `--token`, the token is read from stdin (keeps it out of shell history) |
+| `login --remote-url <url> [--token <t>] [--no-validate]` | Store a bearer token for the URL's host. Without `--token`, the token is read from stdin (keeps it out of shell history) |
 | `status [--remote-url <url>]` | With a URL, report whether a token is stored for that host; without, list all hosts that have one (never the tokens) |
 | `logout --remote-url <url>` | Remove the stored token for the URL's host |
 
+`login` **validates** the token against the Hub before saving (a cheap
+authenticated `GET {host}/healthz`) so a typo'd or expired key fails fast
+here rather than as a deferred auto-sync failure later. Only a definitive
+`401`/`403` aborts (nothing is stored); an unreachable or non-conformant Hub
+degrades to "stored anyway" with a warning, so offline/CI provisioning still
+works. Pass `--no-validate` to skip the network probe entirely.
+
 Resolution order for the bearer token (most→least specific): explicit
-`--token` → per-project persisted token → this host store → the
-`MEMORIZE_SYNC_TOKEN` env escape hatch. A token resolved from the store is
-**not** baked back into per-project sync state, so it is not duplicated
-across projects. Storage: a `0600` JSON file at `MEMORIZE_ROOT/credentials`
-keyed by normalized host — plaintext at rest, honest like git's `store`
-helper (an OS-keychain backend is the hardening path). Same experimental
-caveats as `project sync`.
+`--token` → per-project persisted token (legacy state only) → this host store
+→ the `MEMORIZE_SYNC_TOKEN` env escape hatch. **Anti-sprawl:** an explicit
+`--token` passed to `project clone`/`sync` is written **through** to this host
+store and is **not** persisted into per-project sync state — that config keeps
+only `{ type, url }`, and auto-sync re-resolves the token host-side at runtime,
+so the secret lives in exactly one place. Storage: a `0600` JSON file at
+`MEMORIZE_ROOT/credentials` keyed by normalized host — plaintext at rest,
+honest like git's `store` helper (an OS-keychain backend is the hardening
+path). Same experimental caveats as `project sync`.
 
 ### `memorize project decision list [--all] [--json]`
 
