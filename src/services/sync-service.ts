@@ -25,6 +25,7 @@ import { getSyncFile } from '../storage/path-resolver.js';
 import {
   decryptEventPayload,
   encryptEventPayload,
+  isEncryptedEnvelope,
 } from './encryption-service.js';
 import { rebuildProjectProjection } from './projection-store.js';
 
@@ -206,6 +207,23 @@ export async function pullProject(
 
   let inserted = 0;
   if (response.events.length > 0) {
+    // Fail closed (#195/#198): with no key configured but encrypted envelopes on
+    // the wire (e.g. cloning a keyed project without --encryption-key), refuse
+    // BEFORE any write. Inserting ciphertext would bind the replica to an
+    // unusable projection AND burn the event ids, so a later keyed pull is then
+    // dropped as a duplicate and the clone cannot self-repair.
+    if (!state.encryptionKey && response.events.some((e) => isEncryptedEnvelope(e.payload))) {
+      // Leave syncStatus as-is (mirrors a transport.pull() failure above): the
+      // retry with the key sets it back to idle. Touching it here would append a
+      // sync.state.updated to a fresh clone's store before its project.created.
+      throw new Error(
+        `Cannot pull project ${projectId}: the remote sent encrypted payloads ` +
+          `but no encryption key is configured. Provision the key first — clone ` +
+          `with \`memorize project clone ${state.remoteProjectId} --remote-url ` +
+          `<url> --encryption-key <key>\`, or set it on this project with ` +
+          `\`memorize project encryption enable --key <key>\` — then pull again.`,
+      );
+    }
     // Decrypt payloads back to plaintext before they hit the local store, so the
     // SQLite log and projection only ever see cleartext (#182). Plaintext
     // payloads (un-keyed peers, legacy events) pass through untouched.
@@ -299,6 +317,22 @@ export async function cloneProject(
     };
     await writeJson(getSyncFile(remoteProjectId), initial);
     await bindProject(cwd, remoteProjectId);
+  } else if (encryptionKey) {
+    // Re-clone recovery: a prior keyless clone of an encrypted remote seeded the
+    // sync state WITHOUT a key and then failed closed in the pull below (no events
+    // landed). Retrying with the key must adopt it, but updateSyncState would
+    // append a `sync.state.updated` as the store's first event and make rebuild
+    // throw "no project.created" — so patch the sync file directly, mirroring the
+    // seed path above.
+    const syncFile = getSyncFile(remoteProjectId);
+    const current = await readJson<ProjectSyncState>(syncFile);
+    if (current && current.encryptionKey !== encryptionKey) {
+      await writeJson(syncFile, {
+        ...current,
+        encryptionKey,
+        updatedAt: nowIso(),
+      });
+    }
   }
 
   const result = await pullProject(remoteProjectId, transport);
