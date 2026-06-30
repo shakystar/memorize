@@ -202,4 +202,48 @@ describe('install codex hooks', () => {
     );
     expect(anyLegacy).toBe(false);
   });
+
+  it('strips the legacy resolved-binary (.cmd shim) form on re-install instead of duplicating', async () => {
+    // Pre-#122 Windows installs wrote `which.sync('memorize')` verbatim — the
+    // `.cmd` shim path. The old token required whitespace right after
+    // `memorize`, so the `.cmd` between name and `hook` made it un-strippable,
+    // and every re-install ADDED a new entry alongside it. Seed that exact shape
+    // and assert a fresh install collapses to a single memorize entry.
+    const { mkdir, writeFile } = await import('node:fs/promises');
+    const hooksPath = join(codexHome, '.codex', 'hooks.json');
+    await mkdir(join(codexHome, '.codex'), { recursive: true });
+    const legacyCmd =
+      'C:/Users/me/AppData/Roaming/npm/memorize.cmd hook codex SessionStart';
+    await writeFile(
+      hooksPath,
+      JSON.stringify(
+        {
+          hooks: {
+            SessionStart: [
+              {
+                matcher: 'startup|resume',
+                hooks: [{ type: 'command', command: legacyCmd }],
+              },
+            ],
+          },
+        },
+        null,
+        2,
+      ),
+      'utf8',
+    );
+
+    expect(runCli(['install', 'codex']).status).toBe(0);
+
+    const raw = await readFile(hooksPath, 'utf8');
+    // The legacy .cmd entry must be gone (stripped, not left orphaned).
+    expect(raw).not.toContain('memorize.cmd');
+    const hooks = JSON.parse(raw) as {
+      hooks: Record<string, Array<{ hooks: Array<{ command: string }> }>>;
+    };
+    const memorizeCount = (hooks.hooks.SessionStart ?? []).filter((group) =>
+      group.hooks.some((h) => /memorize hook codex|memorize\b.*hook codex/.test(h.command)),
+    ).length;
+    expect(memorizeCount).toBe(1);
+  });
 });
