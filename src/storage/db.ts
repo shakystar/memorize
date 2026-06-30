@@ -250,6 +250,20 @@ const MIGRATIONS: ReadonlyArray<(db: Database.Database) => void> = [
       CREATE INDEX IF NOT EXISTS idx_segments_created ON segments(created_at);
     `);
   },
+  // v11 — per-event provenance (3.0.0 Phase 0). Two NULLABLE additive columns on
+  // the append-only events table: `writer` = originating actor identity,
+  // `source_project_id` = originating store id. Existing rows read back NULL.
+  // Captured on append and preserved across sync, but UNCONSUMED for now (no
+  // projection/reader reads them) — the foundation for later writer group-by,
+  // workspace union, and origin-scoped recovery. Separate ALTER (not folded into
+  // the v1 CREATE) so DBs already past v1 get the columns on upgrade; nullable +
+  // no default makes it an O(1) metadata-only change even on large stores.
+  (db) => {
+    db.exec(`
+      ALTER TABLE events ADD COLUMN writer TEXT;
+      ALTER TABLE events ADD COLUMN source_project_id TEXT;
+    `);
+  },
 ];
 
 function runMigrations(db: Database.Database): void {

@@ -19,6 +19,14 @@ export interface AppendEventInput<TPayload extends DomainEventPayload> {
   scopeType: DomainEvent['scopeType'];
   scopeId: string;
   actor: string;
+  /**
+   * Optional provenance overrides (Phase 0). Omitted in the normal local-append
+   * path, where `writer` defaults to `actor` and `sourceProjectId` to
+   * `projectId` — so existing callers need no change. Set explicitly only when
+   * the event's origin differs from the local actor/store.
+   */
+  writer?: string;
+  sourceProjectId?: string;
   payload: TPayload;
 }
 
@@ -42,10 +50,12 @@ function insertEvent(db: Database.Database, event: DomainEvent): void {
   db.prepare(
     `INSERT INTO events
        (id, schema_version, created_at, updated_at, type,
-        project_id, scope_type, scope_id, actor, payload)
+        project_id, scope_type, scope_id, actor,
+        writer, source_project_id, payload)
      VALUES
        (@id, @schemaVersion, @createdAt, @updatedAt, @type,
-        @projectId, @scopeType, @scopeId, @actor, @payload)`,
+        @projectId, @scopeType, @scopeId, @actor,
+        @writer, @sourceProjectId, @payload)`,
   ).run({
     id: event.id,
     schemaVersion: event.schemaVersion,
@@ -56,6 +66,8 @@ function insertEvent(db: Database.Database, event: DomainEvent): void {
     scopeType: event.scopeType,
     scopeId: event.scopeId,
     actor: event.actor,
+    writer: event.writer ?? null,
+    sourceProjectId: event.sourceProjectId ?? null,
     payload: JSON.stringify(event.payload),
   });
 }
@@ -74,6 +86,10 @@ export async function appendEvent<TPayload extends DomainEventPayload>(
     scopeType: input.scopeType,
     scopeId: input.scopeId,
     actor: input.actor,
+    // Phase 0 provenance: default writer to the local actor, source to the local
+    // store. Unchanged callers leave input.writer/input.sourceProjectId unset.
+    writer: input.writer ?? input.actor,
+    sourceProjectId: input.sourceProjectId ?? input.projectId,
     payload: input.payload,
   };
 
@@ -109,6 +125,8 @@ export async function appendEvents<TPayload extends DomainEventPayload>(
       scopeType: input.scopeType,
       scopeId: input.scopeId,
       actor: input.actor,
+      writer: input.writer ?? input.actor,
+      sourceProjectId: input.sourceProjectId ?? input.projectId,
       payload: input.payload,
     };
   });
@@ -142,10 +160,12 @@ export async function insertExternalEvents(
   const insert = db.prepare(
     `INSERT OR IGNORE INTO events
        (id, schema_version, created_at, updated_at, type,
-        project_id, scope_type, scope_id, actor, payload)
+        project_id, scope_type, scope_id, actor,
+        writer, source_project_id, payload)
      VALUES
        (@id, @schemaVersion, @createdAt, @updatedAt, @type,
-        @projectId, @scopeType, @scopeId, @actor, @payload)`,
+        @projectId, @scopeType, @scopeId, @actor,
+        @writer, @sourceProjectId, @payload)`,
   );
   const insertAll = db.transaction((rows: DomainEvent[]): number => {
     let inserted = 0;
@@ -160,6 +180,10 @@ export async function insertExternalEvents(
         scopeType: event.scopeType,
         scopeId: event.scopeId,
         actor: event.actor,
+        // Preserve foreign provenance verbatim; NULL when a pre-3.0.0 peer omits
+        // it (origin resolved in a later phase; unconsumed for now).
+        writer: event.writer ?? null,
+        sourceProjectId: event.sourceProjectId ?? null,
         payload: JSON.stringify(event.payload),
       });
       inserted += info.changes;
@@ -179,6 +203,8 @@ interface EventRow {
   scope_type: DomainEvent['scopeType'];
   scope_id: string;
   actor: string;
+  writer: string | null;
+  source_project_id: string | null;
   payload: string;
 }
 
@@ -193,6 +219,12 @@ function rowToEvent(row: EventRow): DomainEvent {
     scopeType: row.scope_type,
     scopeId: row.scope_id,
     actor: row.actor,
+    // Spread (not assign) so absent provenance stays absent under
+    // exactOptionalPropertyTypes rather than becoming an explicit `undefined`.
+    ...(row.writer != null ? { writer: row.writer } : {}),
+    ...(row.source_project_id != null
+      ? { sourceProjectId: row.source_project_id }
+      : {}),
     payload: JSON.parse(row.payload) as unknown,
   };
 }

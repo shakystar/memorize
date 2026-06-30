@@ -52,6 +52,15 @@ export interface DomainEvent<TPayload = unknown> extends BaseEntity {
   scopeType: 'policy' | 'project' | 'workstream' | 'task' | 'session';
   scopeId: EntityId;
   actor: string;
+  /**
+   * Per-event provenance (3.0.0 Phase 0). `writer` = the originating actor
+   * identity; `sourceProjectId` = the originating store id. OPTIONAL and
+   * currently UNCONSUMED — captured on append and preserved across sync so later
+   * phases can group, filter, and recover by origin. Absent on legacy/pre-3.0.0
+   * events (column NULL).
+   */
+  writer?: string;
+  sourceProjectId?: EntityId;
   payload: TPayload;
 }
 
