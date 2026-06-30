@@ -181,7 +181,7 @@ describe('CliConsolidator (host-CLI extractor — #44)', () => {
     expect(calls[0]!.env[SUPPRESS_HOOKS_ENV_VAR]).toBe('1');
     expect(calls[0]!.windowsHide).toBe(true);
     // Prompt arrives via stdin (not argv), with system prompt prepended.
-    expect(child.stdinData).toContain('memory consolidator');
+    expect(child.stdinData).toContain('consolidation extractor');
     expect(child.stdinData).toContain('## Observations');
     expect(child.stdinData).toContain('Decided to use sqlite');
     // #57 — the shared system prompt asks for the lifecycle-evidence fields
