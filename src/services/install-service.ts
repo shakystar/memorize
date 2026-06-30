@@ -66,6 +66,12 @@ function buildHookCommand(
  * matter the form. Precedes the `hook <agent> <event>` suffix:
  *   - npx form:  `npx @shakystar/memorize hook ...`
  *   - bare form (legacy): `memorize hook ...`
+ *   - resolved-binary form (legacy, esp. Windows): a path to the launcher with
+ *     an OS extension — `C:/.../npm/memorize.cmd hook ...` (also `.exe`/`.ps1`/
+ *     `.bat`, quoted or not). Before #122, `which.sync('memorize')` returned the
+ *     `.cmd` shim and install wrote it verbatim; the old token (which required
+ *     whitespace immediately after `memorize`) MISSED the `.cmd` between name and
+ *     `hook`, so these survived every re-install and DUPLICATED. Recognized now.
  *   - node-abs form (#122): `node "<.../memorize/.../dist/cli/index.js>" hook ...`
  *     — no `memorize` token adjacent to `hook`; identified instead by a
  *     path that contains `memorize` and ends in `cli/index.js`
@@ -76,7 +82,7 @@ function buildHookCommand(
  * and doctor (presence) so the two can never drift.
  */
 const MEMORIZE_TOKEN =
-  '(?:(?:@shakystar/)?memorize\\s+hook|memorize[^"\\s]*[/\\\\]cli[/\\\\]index\\.js"?\\s+hook)';
+  '(?:(?:@shakystar/)?memorize(?:\\.cmd|\\.exe|\\.ps1|\\.bat)?"?\\s+hook|memorize[^"\\s]*[/\\\\]cli[/\\\\]index\\.js"?\\s+hook)';
 
 /**
  * Matches any historical or current memorize hook command shape so
