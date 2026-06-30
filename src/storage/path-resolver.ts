@@ -1,7 +1,7 @@
 import os from 'node:os';
 import path from 'node:path';
 
-import { assertValidId } from '../domain/common.js';
+import { assertValidId, isPersonalStoreId } from '../domain/common.js';
 
 export function getMemorizeRoot(): string {
   return process.env.MEMORIZE_ROOT ?? path.join(os.homedir(), '.memorize');
@@ -9,6 +9,17 @@ export function getMemorizeRoot(): string {
 
 export function getProjectsRoot(): string {
   return path.join(getMemorizeRoot(), 'projects');
+}
+
+/**
+ * Host-level home of the global/personal memory store (Path A) — a SIBLING of
+ * `projects/`, deliberately NOT under it, so the personal store never appears in
+ * `listProjects()` (which reads `projects/`) and stays out of every project
+ * enumeration sweep (refresh, setup, sync). One directory per account, mirroring
+ * the #192 host-store pattern (`credentials`, `profile/`).
+ */
+export function getPersonalRoot(): string {
+  return path.join(getMemorizeRoot(), 'personal');
 }
 
 function ensureWithinRoot(candidate: string, root: string): string {
@@ -27,6 +38,10 @@ function ensureWithinRoot(candidate: string, root: string): string {
 
 export function getProjectRoot(projectId: string): string {
   assertValidId(projectId, 'projectId');
+  // The reserved personal store routes to its own host-level dir, outside
+  // `projects/`. Every derived path (db file, sync, topics, locks) flows through
+  // here, so this single redirect isolates the whole store with no other change.
+  if (isPersonalStoreId(projectId)) return getPersonalRoot();
   const projectsRoot = getProjectsRoot();
   return ensureWithinRoot(path.join(projectsRoot, projectId), projectsRoot);
 }

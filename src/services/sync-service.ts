@@ -2,6 +2,7 @@ import {
   ACTOR_SYSTEM,
   CURRENT_SCHEMA_VERSION,
   assertValidId,
+  isPersonalStoreId,
   nowIso,
 } from '../domain/common.js';
 import type { ProjectSyncState, SyncTransportConfig } from '../domain/entities.js';
@@ -28,6 +29,23 @@ import {
   isEncryptedEnvelope,
 } from './encryption-service.js';
 import { rebuildProjectProjection } from './projection-store.js';
+
+/**
+ * Hard privacy boundary (Path A, decision §4-#4): the global/personal store
+ * NEVER leaves the host. It has no sync state, so the normal path already fails,
+ * but every sync entry point asserts this explicitly so a future caller cannot
+ * accidentally push, pull, clone, or even build a push payload for personal
+ * memory. This is the structural fix for the #181-class personal-preference
+ * leak — enforced in code, not by convention.
+ */
+function assertNotPersonalStore(projectId: string): void {
+  if (isPersonalStoreId(projectId)) {
+    throw new Error(
+      `Refusing to sync the personal store (${projectId}): global personal ` +
+        `memory is private and never leaves this host.`,
+    );
+  }
+}
 
 async function readStateOrThrow(projectId: string): Promise<ProjectSyncState> {
   const state = await readJson<ProjectSyncState>(getSyncFile(projectId));
@@ -87,6 +105,7 @@ export async function updateSyncState(
 export async function buildPushPayload(
   projectId: string,
 ): Promise<SyncPushRequest> {
+  assertNotPersonalStore(projectId);
   const state = await readStateOrThrow(projectId);
   // Seq-watermark slice: events with seq greater than the lastPushed row,
   // in seq order. Still excludes local sync bookkeeping events.
@@ -139,6 +158,7 @@ export async function pushProject(
   projectId: string,
   transport: SyncTransport,
 ): Promise<SyncPushResponse> {
+  assertNotPersonalStore(projectId);
   let state = await readStateOrThrow(projectId);
   // First push self-binds the remote (true-replica origin). One-time write.
   if (!state.remoteProjectId) {
@@ -189,6 +209,7 @@ export async function pullProject(
   projectId: string,
   transport: SyncTransport,
 ): Promise<SyncPullResult> {
+  assertNotPersonalStore(projectId);
   const state = await readStateOrThrow(projectId);
   if (!state.remoteProjectId) {
     throw new Error(
@@ -279,6 +300,7 @@ export async function cloneProject(
   encryptionKey?: string,
 ): Promise<CloneResult> {
   assertValidId(remoteProjectId, 'remoteProjectId');
+  assertNotPersonalStore(remoteProjectId);
 
   // Fresh-cwd guard. Bound to the SAME id → idempotent re-pull below. Bound to
   // a DIFFERENT id → refuse: that is a diverged-history merge (#30 follow-up),

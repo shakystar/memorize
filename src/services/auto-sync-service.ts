@@ -1,5 +1,6 @@
 import { createFileSyncTransport } from '../adapters/sync-transport-file.js';
 import { createHttpSyncTransport } from '../adapters/sync-transport-http.js';
+import { isPersonalStoreId } from '../domain/common.js';
 import type { ProjectSyncState } from '../domain/entities.js';
 import type { SyncTransport } from '../domain/sync-transport.js';
 import { resolveSyncToken } from '../storage/credentials-store.js';
@@ -53,6 +54,9 @@ function isConfigured(state: ProjectSyncState | undefined): state is ProjectSync
 
 /** Push at a boundary. No-op (silent) unless sync is fully configured. */
 export async function autoPush(projectId: string): Promise<AutoSyncResult> {
+  // The personal store never syncs (Path A privacy boundary). It has no sync
+  // state so this is already a no-op, but short-circuit explicitly.
+  if (isPersonalStoreId(projectId)) return { ran: false, reason: 'not-configured' };
   try {
     const state = await readSyncState(projectId);
     if (!isConfigured(state)) return { ran: false, reason: 'not-configured' };
@@ -73,6 +77,7 @@ export async function autoPush(projectId: string): Promise<AutoSyncResult> {
 
 /** Pull at session start. No-op (silent) unless sync is fully configured. */
 export async function autoPull(projectId: string): Promise<AutoSyncResult> {
+  if (isPersonalStoreId(projectId)) return { ran: false, reason: 'not-configured' };
   try {
     const state = await readSyncState(projectId);
     if (!isConfigured(state)) return { ran: false, reason: 'not-configured' };

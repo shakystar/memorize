@@ -61,6 +61,22 @@ export function renderCodexStartupContext(
     });
   }
 
+  if (payload.personalMemories && payload.personalMemories.length > 0) {
+    const personalLines: string[] = [
+      '## Personal memory (cross-project; your preferences & working style)',
+    ];
+    for (const memory of payload.personalMemories) {
+      personalLines.push(`- [${memory.kind}/s${memory.salience}] ${memory.text}`);
+    }
+    blocks.push({
+      priority: 2.2,
+      source: 'memorize.personal',
+      content: wrapUntrusted(personalLines.join('\n'), {
+        source: 'memorize.personal',
+      }),
+    });
+  }
+
   if (payload.recentObservations && payload.recentObservations.length > 0) {
     const observationLines: string[] = [
       '## Recent work signals (prior session tail)',

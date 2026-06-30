@@ -116,6 +116,28 @@ describe('parseExtractedMemories (defensive LLM reply parsing)', () => {
     expect(parseExtractedMemories('Nothing durable here.\n[]')).toEqual([]);
   });
 
+  it('keeps the Path A personal flag only when explicitly true', () => {
+    const parsed = parseExtractedMemories(
+      JSON.stringify([
+        { kind: 'decision', text: 'user prefers full sentences', salience: 8, personal: true },
+        { kind: 'progress', text: 'project fact', salience: 5 },
+        { kind: 'rationale', text: 'not personal', salience: 4, personal: false },
+        { kind: 'decision', text: 'truthy not true', salience: 4, personal: 'yes' },
+      ]),
+    );
+    expect(parsed[0]).toEqual({
+      kind: 'decision',
+      text: 'user prefers full sentences',
+      salience: 8,
+      personal: true,
+    });
+    // Absent / false / non-true-boolean ⇒ no `personal` key (project memory),
+    // so project items keep their exact prior shape.
+    expect(parsed[1]).toEqual({ kind: 'progress', text: 'project fact', salience: 5 });
+    expect(parsed[2]).toEqual({ kind: 'rationale', text: 'not personal', salience: 4 });
+    expect(parsed[3]).toEqual({ kind: 'decision', text: 'truthy not true', salience: 4 });
+  });
+
   it('keeps supersede fields when present', () => {
     const parsed = parseExtractedMemories(
       JSON.stringify([

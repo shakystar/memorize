@@ -17,12 +17,54 @@ import { semanticMemoryScores } from './search-service.js';
 
 /** Tight embed timeout at SessionStart — the network must never block boot. */
 const SESSION_START_EMBED_TIMEOUT_MS = 5_000;
+
+/**
+ * Path A: small fixed slot for the global personal-memory channel at startup.
+ * Personal memory is cross-project and few, so a salience-ranked top-N is the
+ * right shape — no task-relevance ranking (preferences aren't task-specific)
+ * and no embed call (SessionStart must stay fast). Deliberately small so it can
+ * never crowd out the project memory channel.
+ */
+const PERSONAL_MEMORY_SLOT = 5;
+
+/**
+ * Top personal memories for the startup channel. Best-effort and never-throw:
+ * a missing/unreadable personal store yields []. Guarded by personalStoreExists
+ * so a user who has never captured personal memory does not get an empty store
+ * materialized at every SessionStart.
+ */
+function loadPersonalMemoryChannel(): StartupContextPayload['personalMemories'] {
+  if (!personalStoreExists()) return undefined;
+  try {
+    const rows = listPersonalMemories()
+      .sort((a, b) => {
+        if (b.memory.salience !== a.memory.salience) {
+          return b.memory.salience - a.memory.salience;
+        }
+        return a.memory.createdAt < b.memory.createdAt ? 1 : -1;
+      })
+      .slice(0, PERSONAL_MEMORY_SLOT);
+    if (rows.length === 0) return undefined;
+    return rows.map(({ memory }) => ({
+      id: memory.id,
+      kind: memory.kind,
+      text: memory.text,
+      salience: memory.salience,
+    }));
+  } catch {
+    return undefined;
+  }
+}
 import {
   getMemoryIndex,
   getRule,
   getWorkstream,
   listOpenConflicts,
 } from './projection-store.js';
+import {
+  listPersonalMemories,
+  personalStoreExists,
+} from './personal-store-service.js';
 import {
   readDefaultWorkstreamForProject,
   readProject,
@@ -198,6 +240,10 @@ export async function loadStartContext(params: {
     }
   }
 
+  // Path A: global personal memory in its own channel, alongside (never mixed
+  // into) the project memory pool. Best-effort; absent when no personal store.
+  const personalMemories = loadPersonalMemoryChannel();
+
   return {
     ...(rawSegments.length > 0 ? { rawSegments } : {}),
     ...(retrieved.memories.length > 0
@@ -211,6 +257,7 @@ export async function loadStartContext(params: {
           })),
         }
       : {}),
+    ...(personalMemories ? { personalMemories } : {}),
     ...(retrieved.observations.length > 0
       ? {
           recentObservations: retrieved.observations.map((observation) => ({

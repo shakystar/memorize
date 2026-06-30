@@ -346,6 +346,45 @@ project, mirroring how `search` resolves the project.
   superseded-by / deduped-by pointers), followed by the memory text.
 - Fails with `no memory found with id <id>` when the id is unknown.
 
+### `memorize personal import --source <label>` (+ `personal list`, `personal show`)
+
+Path A: the **global / personal** memory pipeline — a host-level,
+account-scoped store for memory that follows the user **across
+projects** (personal preferences, working-style facts), kept
+deliberately separate from shared project memory. It is NOT a project
+and NOT a `scopeType` value: it has its own event log + projection +
+consolidation under a reserved id, living in `~/.memorize/personal/`
+(a sibling of `projects/`, so it never appears in project listings).
+
+- **Primary path — automatic.** At each consolidation boundary the
+  extractor classifies every memory as personal vs project and routes
+  the personal ones here, applying the SAME short-term→long-term CLS
+  logic memorize already uses for project memory. This is how
+  cross-project personal context (which used to live only in your
+  harness's own memory) gets captured and managed by memorize. The
+  classifier is also the leak fix: personal items are diverted OUT of
+  the project store, not left in it (the #181 class of bug).
+- **Secondary path — explicit import.** `personal import` lets you push
+  in pre-existing external notes (your harness memory, a notes folder)
+  on purpose, distilled to the same JSON shape.
+- **It never leaves the host.** The personal store is hard-excluded from
+  sync/teams: every sync entry point refuses the reserved id, so
+  personal memory is structurally private.
+- `personal import --source <label>` reads the SAME extractor-shaped
+  JSON array on stdin as `memory import`
+  (`[{"kind":"decision"|"rationale"|"progress","text":string,"salience":1-10,...}]`),
+  is idempotent (dedup by kind + normalized text), and reports
+  `{imported, skippedDuplicates}`. Unlike `memory import` it needs no
+  bound project — the store is global.
+- `personal list [--json] [--limit <N>]` and
+  `personal show <memoryId> [--json]` read the personal store with the
+  same shapes as their `memory` counterparts.
+- **Startup injection.** At SessionStart the top personal memories (a
+  small, salience-ranked fixed slot) are surfaced in their OWN context
+  channel (`memorize.personal`), alongside but never mixed into the
+  project memory pool — so the personal/project boundary is visible in
+  context, not just in storage.
+
 ### `memorize init [--nested]`
 
 **The recommended one-shot onboarding command** — prefer it over running

@@ -13,6 +13,7 @@ import { runInstallCommand } from './commands/install.js';
 import { runMcpCommand } from './commands/mcp.js';
 import { runMemoryCommand } from './commands/memory.js';
 import { runMemoryIndexCommand } from './commands/memory-index.js';
+import { runPersonalCommand } from './commands/personal.js';
 import { runMigrateCommand } from './commands/migrate.js';
 import { runProjectCommand } from './commands/project.js';
 import { runProjectionCommand } from './commands/projection.js';
@@ -34,6 +35,7 @@ const handlers: Record<string, CommandHandler> = {
   projection: runProjectionCommand,
   memory: runMemoryCommand,
   'memory-index': runMemoryIndexCommand,
+  personal: runPersonalCommand,
   events: runEventsCommand,
   migrate: runMigrateCommand,
   export: runExportCommand,
@@ -75,6 +77,9 @@ const SESSION_MANAGING_COMMANDS = new Set([
   // `auth` manages host credentials and may run outside any bound project; a
   // heartbeat from it would falsely signal agent liveness.
   'auth',
+  // `personal` operates on the global account-level store, not a cwd project; a
+  // heartbeat would falsely signal liveness on whatever project the cwd binds.
+  'personal',
 ]);
 
 async function main(): Promise<void> {
