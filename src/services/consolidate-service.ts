@@ -31,6 +31,11 @@ import {
   listValidMemories,
   rebuildProjectProjection,
 } from './projection-store.js';
+import {
+  consolidatePersonalMemories,
+  listPersonalMemories,
+  personalStoreExists,
+} from './personal-store-service.js';
 
 /**
  * CLS Phase 1 — boundary consolidation (the expensive half of D3, run ONCE
@@ -68,6 +73,13 @@ export interface ExtractedMemory {
   kind: ConsolidatedMemoryKind;
   text: string;
   salience: number;
+  /**
+   * Path A: true when this item is durable PERSONAL memory about the user
+   * (cross-project preferences, working style, identity) rather than memory
+   * about THIS project. consolidate() routes personal items into the global
+   * personal store instead of the project store. Absent ⇒ project memory.
+   */
+  personal?: boolean;
   /** Id of an existing valid memory this one contradicts/replaces. */
   supersedesMemoryId?: string;
   supersedeReason?: string;
@@ -89,6 +101,13 @@ export interface ConsolidationInput {
   transcriptTail?: string;
   /** Currently-valid memories, for contradiction checks. */
   existingMemories: ConsolidatedMemory[];
+  /**
+   * Path A: currently-valid PERSONAL memories (cross-project), shown to the
+   * extractor so it does not re-extract a personal fact it already knows. Pure
+   * dedup context — personal supersession is a follow-up, so ids here are not
+   * acted on.
+   */
+  existingPersonalMemories?: ConsolidatedMemory[];
 }
 
 /**
@@ -216,9 +235,21 @@ const EXTRACTION_SYSTEM_PROMPT = [
   'conventions, facts, and state regardless.',
   'Return ONLY a JSON array of:',
   '{"kind":"decision"|"rationale"|"progress","text":string,',
-  '"salience":1-10,"supersedesMemoryId"?:string,"supersedeReason"?:string,',
+  '"salience":1-10,"personal"?:boolean,"supersedesMemoryId"?:string,',
+  '"supersedeReason"?:string,',
   '"obsoleteWhen"?:string,"kindMisfit"?:boolean,"kindMisfitReason"?:string,',
   '"supersedesNote"?:string,"tags"?:string[]}',
+  // Path A personal/project split. Personal memory is captured automatically
+  // into a SEPARATE, private, cross-project store; this flag is how an item
+  // gets there. Bias to project (omit personal) when unsure, so a misclassified
+  // project fact is never lost from shared memory.
+  'Classification: set "personal":true for a durable fact about the USER that',
+  'holds ACROSS projects — their stable preferences, working/communication',
+  'style, identity, and standing personal directives (things that belong to the',
+  'person, not to this project). OMIT personal (project memory) for anything',
+  'specific to THIS project: its decisions, constraints, progress, architecture,',
+  'conventions. When unsure, omit personal. Existing personal memories are',
+  'listed separately for dedup — do not re-extract what is already there.',
   'Rules: text is one self-contained sentence; salience reflects how much a',
   'future session would regret not knowing it; set supersedesMemoryId ONLY',
   'when an existing memory (listed with its id) is contradicted by the new',
@@ -241,12 +272,22 @@ function buildExtractionUserContent(input: ConsolidationInput): string {
   const memoryLines = input.existingMemories.map(
     (m) => `- id=${m.id} [${m.kind}] ${m.text}`,
   );
+  const personalLines = (input.existingPersonalMemories ?? []).map(
+    (m) => `- [${m.kind}] ${m.text}`,
+  );
   return [
     '## Observations (this session window)',
     observationLines.join('\n') || '(none)',
     '',
     '## Existing valid memories (for contradiction check)',
     memoryLines.join('\n') || '(none)',
+    ...(personalLines.length > 0
+      ? [
+          '',
+          '## Existing personal memories (cross-project; do not re-extract these as personal)',
+          personalLines.join('\n'),
+        ]
+      : []),
     ...(input.transcriptTail
       ? ['', '## Conversation since last boundary (untrusted, format unstable)', input.transcriptTail]
       : []),
@@ -610,6 +651,9 @@ export function parseExtractedMemories(
         salience: clampSalience(
           typeof item.salience === 'number' ? item.salience : 5,
         ),
+        // Path A: only present when true, so project items keep their exact
+        // prior shape (existing toEqual assertions stay green).
+        ...(item.personal === true ? { personal: true } : {}),
         ...(typeof item.supersedesMemoryId === 'string'
           ? { supersedesMemoryId: item.supersedesMemoryId }
           : {}),
@@ -1002,6 +1046,12 @@ export interface ConsolidateResult {
    * from an unconfigured one without overloading the backend field.
    */
   outcome: 'ok' | 'noop';
+  /**
+   * Path A: memories the extractor classified as PERSONAL and routed into the
+   * global personal store (not this project). Present only when > 0, so the
+   * common project-only boundary keeps its prior result shape.
+   */
+  personalConsolidated?: number;
 }
 
 /**
@@ -1061,7 +1111,15 @@ export async function consolidate(params: {
   transcriptPath?: string;
   /** Override extractor (tests). Defaults to LLM-if-configured else rules. */
   consolidator?: Consolidator;
+  /**
+   * Path A: route personal-classified items into the global personal store
+   * (default true). Set false to keep ALL extracted memories in the project
+   * store regardless of classification — used by the benchmark, where the
+   * (personal-life) dialogue must stay in the measured store.
+   */
+  routePersonal?: boolean;
 }): Promise<ConsolidateResult> {
+  const routePersonal = params.routePersonal ?? true;
   const startedAt = Date.now();
 
   // Backend is resolved BEFORE the lock so even a lock-contention failure
@@ -1189,6 +1247,13 @@ export async function consolidate(params: {
       const existing = listValidMemories(params.projectId).map(
         (row) => row.memory,
       );
+      // Path A: show the extractor existing personal memories (dedup context)
+      // only when routing is on AND the personal store already exists — never
+      // materialize an empty personal store just to read it.
+      const existingPersonal =
+        routePersonal && personalStoreExists()
+          ? listPersonalMemories().map((row) => row.memory)
+          : [];
 
       // Extractor failure (LLM timeout, HTTP error, unparseable reply)
       // intentionally propagates WITHOUT advancing the watermark — the next
@@ -1198,14 +1263,26 @@ export async function consolidate(params: {
         observations,
         ...(transcriptTail ? { transcriptTail } : {}),
         existingMemories: existing,
+        ...(existingPersonal.length > 0
+          ? { existingPersonalMemories: existingPersonal }
+          : {}),
       });
+
+      // Path A: split personal-classified items off to the global store. With
+      // routing off (benchmark), everything stays project memory as before.
+      const personalItems = routePersonal
+        ? extracted.filter((item) => item.personal)
+        : [];
+      const projectItems = routePersonal
+        ? extracted.filter((item) => !item.personal)
+        : extracted;
 
       const validIds = new Set(existing.map((m) => m.id));
       const sourceObservationIds = observations.map((o) => o.id);
       const inputs: AppendEventInput<DomainEventPayload>[] = [];
       let supersededCount = 0;
 
-      for (const item of extracted) {
+      for (const item of projectItems) {
         const memory = createConsolidatedMemory({
           projectId: params.projectId,
           kind: item.kind,
@@ -1331,6 +1408,28 @@ export async function consolidate(params: {
           // Derived buffer maintenance must never fail the boundary.
         }
       }
+
+      // Path A: route personal-classified items into the global personal store
+      // (its own lock + projection + embeddings). Best-effort like the other
+      // post-extraction writes: a failure here must NOT fail the project
+      // boundary or block the watermark — the window's personal items are
+      // dropped (logged), not retried, so the project side stays consistent.
+      let personalConsolidated = 0;
+      if (personalItems.length > 0) {
+        try {
+          personalConsolidated = await consolidatePersonalMemories({
+            items: personalItems,
+            actor: params.actor,
+            ...(params.sessionId ? { sessionId: params.sessionId } : {}),
+            sourceObservationIds,
+          });
+        } catch (error) {
+          process.stderr.write(
+            `WARN: personal memory routing deferred (${error instanceof Error ? error.message : String(error)})\n`,
+          );
+        }
+      }
+
       // Advance the event watermark past the observation window. Guarded:
       // a cat-1 conversation-only boundary has no observation events to mark.
       if (rawObservationEvents.length > 0) {
@@ -1346,12 +1445,13 @@ export async function consolidate(params: {
       }
 
       return {
-        consolidated: extracted.length,
+        consolidated: projectItems.length,
         superseded: supersededCount,
         observationsProcessed: observations.length,
         extractor: extractorKind,
         backend: backendLabel,
         outcome: observations.length > 0 ? 'ok' : 'noop',
+        ...(personalConsolidated > 0 ? { personalConsolidated } : {}),
       };
     },
     { holdTimeoutMs: CONSOLIDATE_LOCK_HOLD_TIMEOUT_MS },

@@ -33,9 +33,11 @@ async function readStdin(): Promise<string | undefined> {
 /**
  * `memorize personal …` — the global/personal memory pipeline (Path A). A
  * host-level, account-scoped store for cross-project personal memory that is
- * deliberately separate from project memory: the only way IN is this explicit
- * import path (no extractor auto-classification → no #181-style leak), and it
- * never leaves the host over sync. The store is bound to no cwd, so — unlike
+ * deliberately separate from project memory. The PRIMARY capture path is
+ * automatic — the consolidation extractor classifies personal items and routes
+ * them here (see personal-store-service). This `import` subcommand is the
+ * SECONDARY, explicit path for pushing in pre-existing external notes. The
+ * store never leaves the host over sync, and is bound to no cwd, so — unlike
  * `memory …` — these commands need no bound project.
  */
 export async function runPersonalCommand(

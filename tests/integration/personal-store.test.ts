@@ -6,8 +6,15 @@ import { spawnSync } from 'node:child_process';
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import { PERSONAL_STORE_ID } from '../../src/domain/common.js';
+import { CURRENT_SCHEMA_VERSION, PERSONAL_STORE_ID } from '../../src/domain/common.js';
+import { createObservation } from '../../src/domain/entities.js';
 import { autoPull, autoPush } from '../../src/services/auto-sync-service.js';
+import {
+  type Consolidator,
+  consolidate,
+} from '../../src/services/consolidate-service.js';
+import { rebuildProjectProjection } from '../../src/services/projection-store.js';
+import { appendEvent } from '../../src/storage/event-store.js';
 import {
   ensurePersonalStore,
   importPersonalMemories,
@@ -115,6 +122,107 @@ describe('global personal memory store (Path A)', () => {
     // The reserved id's memories are NOT visible under any other project id,
     // and the personal store holds none of a project's.
     expect(listValidMemories(PERSONAL_STORE_ID)).toHaveLength(1);
+  });
+});
+
+describe('auto-classification routing (consolidation → personal store)', () => {
+  const projectId = 'proj_route_test1';
+  const ts = '2026-06-30T00:00:00.000Z';
+
+  async function seedProjectWithObservation(): Promise<void> {
+    await appendEvent({
+      type: 'project.created',
+      projectId,
+      scopeType: 'project',
+      scopeId: projectId,
+      actor: 'test',
+      payload: {
+        id: projectId,
+        schemaVersion: CURRENT_SCHEMA_VERSION,
+        createdAt: ts,
+        updatedAt: ts,
+        title: 'Route',
+        summary: 'routing test project',
+        goals: [],
+        status: 'active',
+        rootPath: '/tmp/route',
+        activeWorkstreamIds: [],
+        activeTaskIds: [],
+        acceptedDecisionIds: [],
+        ruleIds: [],
+      } as never,
+    });
+    // One observation so consolidate() does not no-op before extraction.
+    const observation = createObservation({
+      projectId,
+      signal: 'mutating-bash',
+      toolName: 'Bash',
+      summary: 'git commit -m wip',
+    });
+    await appendEvent({
+      type: 'observation.captured',
+      projectId,
+      scopeType: 'session',
+      scopeId: projectId,
+      actor: 'test',
+      payload: observation,
+    });
+    await rebuildProjectProjection(projectId);
+  }
+
+  // Extractor that classifies one item personal, one project — ignores input.
+  const mixed: Consolidator = {
+    async extract() {
+      return [
+        { kind: 'progress' as const, text: 'project: wired the auth module', salience: 5 },
+        {
+          kind: 'decision' as const,
+          text: 'user prefers full sentences over fragments',
+          salience: 8,
+          personal: true,
+        },
+      ];
+    },
+  };
+
+  it('routes personal items to the personal store and project items to the project store', async () => {
+    await seedProjectWithObservation();
+
+    const result = await consolidate({
+      projectId,
+      actor: 'test',
+      consolidator: mixed,
+    });
+    expect(result.consolidated).toBe(1); // project memories only
+    expect(result.personalConsolidated).toBe(1);
+
+    const projectMemories = listValidMemories(projectId).map((r) => r.memory);
+    expect(projectMemories).toHaveLength(1);
+    expect(projectMemories[0]!.text).toContain('auth module');
+
+    const personalMemories = listPersonalMemories().map((r) => r.memory);
+    expect(personalMemories).toHaveLength(1);
+    expect(personalMemories[0]!.text).toContain('full sentences');
+    // Routed (not imported): consolidation provenance, not an import source.
+    expect(personalMemories[0]!.importSource).toBeUndefined();
+    expect(personalMemories[0]!.sourceObservationIds.length).toBeGreaterThan(0);
+  });
+
+  it('routePersonal:false keeps every item in the project store (benchmark path)', async () => {
+    await seedProjectWithObservation();
+
+    const result = await consolidate({
+      projectId,
+      actor: 'test',
+      consolidator: mixed,
+      routePersonal: false,
+    });
+    expect(result.consolidated).toBe(2);
+    expect(result.personalConsolidated).toBeUndefined();
+
+    expect(listValidMemories(projectId)).toHaveLength(2);
+    // The personal store was never even created.
+    expect(existsSync(join(getPersonalRoot(), 'memorize.db'))).toBe(false);
   });
 });
 

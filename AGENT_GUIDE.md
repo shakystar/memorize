@@ -356,11 +356,17 @@ and NOT a `scopeType` value: it has its own event log + projection +
 consolidation under a reserved id, living in `~/.memorize/personal/`
 (a sibling of `projects/`, so it never appears in project listings).
 
-- **The only way in is this explicit import path.** There is no
-  extractor auto-classification routing things into personal memory —
-  that would risk leaking personal preferences into shared project
-  memory (the #181 class of bug). You decide what is personal and import
-  it here on purpose.
+- **Primary path — automatic.** At each consolidation boundary the
+  extractor classifies every memory as personal vs project and routes
+  the personal ones here, applying the SAME short-term→long-term CLS
+  logic memorize already uses for project memory. This is how
+  cross-project personal context (which used to live only in your
+  harness's own memory) gets captured and managed by memorize. The
+  classifier is also the leak fix: personal items are diverted OUT of
+  the project store, not left in it (the #181 class of bug).
+- **Secondary path — explicit import.** `personal import` lets you push
+  in pre-existing external notes (your harness memory, a notes folder)
+  on purpose, distilled to the same JSON shape.
 - **It never leaves the host.** The personal store is hard-excluded from
   sync/teams: every sync entry point refuses the reserved id, so
   personal memory is structurally private.

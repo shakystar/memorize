@@ -1,16 +1,28 @@
+import { existsSync } from 'node:fs';
+import path from 'node:path';
+
 import {
   ACTOR_SYSTEM,
   CURRENT_SCHEMA_VERSION,
   PERSONAL_STORE_ID,
   nowIso,
 } from '../domain/common.js';
-import { createWorkstream } from '../domain/entities.js';
-import type { Project } from '../domain/entities.js';
+import { createConsolidatedMemory, createWorkstream } from '../domain/entities.js';
+import type { ConsolidatedMemory, Project } from '../domain/entities.js';
 import {
   appendEvent,
+  appendEvents,
   ensureProjectDirectories,
+  type AppendEventInput,
 } from '../storage/event-store.js';
-import { getPersonalRoot } from '../storage/path-resolver.js';
+import { withFileLock } from '../storage/file-lock.js';
+import {
+  getPersonalRoot,
+  getProjectDbFile,
+  getProjectRoot,
+} from '../storage/path-resolver.js';
+import type { ExtractedMemory } from './consolidate-service.js';
+import { ensureEmbeddings } from './embeddings-service.js';
 import {
   importMemories,
   type MemoryImportResult,
@@ -30,9 +42,13 @@ import {
  *  - own event log + projection + consolidation under a reserved id
  *    (PERSONAL_STORE_ID), living in `~/.memorize/personal/` (getPersonalRoot),
  *    a sibling of `projects/` so it never appears in project enumeration;
- *  - the ONLY way in is the explicit personal-import path (decision §4-#1:
- *    separate input path, NOT extractor auto-classification — that would
- *    re-introduce the #181 personal-preference leak);
+ *  - two ways in: (1) PRIMARY — the consolidation extractor classifies each
+ *    item personal vs project and routes personal ones here automatically
+ *    (consolidatePersonalMemories, called from consolidate()), so personal
+ *    context is captured and managed by the same CLS logic as project memory;
+ *    the classifier diverts personal items OUT of the project store, which is
+ *    the structural fix for the #181 leak; (2) SECONDARY — the explicit
+ *    `personal import` path for pre-existing external notes;
  *  - structurally excluded from sync/teams (assertNotPersonalStore in
  *    sync-service): personal memory is private and never leaves the host.
  *
@@ -123,4 +139,75 @@ export async function importPersonalMemories(params: {
 /** The valid (non-superseded) memories in the global personal store. */
 export function listPersonalMemories(): ValidMemoryRow[] {
   return listValidMemories(PERSONAL_STORE_ID);
+}
+
+/**
+ * Whether the personal store has been created yet. Used to read existing
+ * personal memories for extractor dedup WITHOUT lazily creating an empty store
+ * for every user who never captures personal memory (getDb would otherwise
+ * materialize `~/.memorize/personal/` on first read).
+ */
+export function personalStoreExists(): boolean {
+  return existsSync(getProjectDbFile(PERSONAL_STORE_ID));
+}
+
+/**
+ * Path A auto-capture: route the personal-classified items from a project's
+ * consolidation boundary into the global personal store, applying the SAME CLS
+ * long-term logic (consolidated memories, projection, embeddings, retrieval).
+ * Called from consolidate() after extraction.
+ *
+ * sourceObservationIds carry the project-side provenance (the observations live
+ * in the project store — opaque here, used only as dedup provenance). Personal
+ * supersession is a follow-up, so supersedesMemoryId is intentionally not acted
+ * on. Takes the personal store's own lock so concurrent consolidations from
+ * DIFFERENT projects serialize their personal-store writes. Returns the count.
+ */
+export async function consolidatePersonalMemories(params: {
+  items: ExtractedMemory[];
+  actor: string;
+  sessionId?: string;
+  sourceObservationIds: string[];
+}): Promise<number> {
+  if (params.items.length === 0) return 0;
+  await ensurePersonalStore();
+  return withFileLock(
+    path.join(getProjectRoot(PERSONAL_STORE_ID), 'locks'),
+    'consolidate',
+    async () => {
+      const inputs: AppendEventInput<ConsolidatedMemory>[] = params.items.map(
+        (item) => {
+          const memory = createConsolidatedMemory({
+            projectId: PERSONAL_STORE_ID,
+            kind: item.kind,
+            text: item.text,
+            salience: item.salience,
+            ...(params.sessionId ? { sessionId: params.sessionId } : {}),
+            sourceObservationIds: params.sourceObservationIds,
+            ...(item.obsoleteWhen ? { obsoleteWhen: item.obsoleteWhen } : {}),
+            ...(item.kindMisfit ? { kindMisfit: true } : {}),
+            ...(item.kindMisfitReason
+              ? { kindMisfitReason: item.kindMisfitReason }
+              : {}),
+            ...(item.supersedesNote
+              ? { supersedesNote: item.supersedesNote }
+              : {}),
+            ...(item.tags ? { tags: item.tags } : {}),
+          });
+          return {
+            type: 'memory.consolidated',
+            projectId: PERSONAL_STORE_ID,
+            scopeType: 'session',
+            scopeId: params.sessionId ?? PERSONAL_STORE_ID,
+            actor: params.actor,
+            payload: memory,
+          };
+        },
+      );
+      await appendEvents(PERSONAL_STORE_ID, inputs);
+      await rebuildProjectProjection(PERSONAL_STORE_ID, { reindexSearch: true });
+      await ensureEmbeddings(PERSONAL_STORE_ID);
+      return inputs.length;
+    },
+  );
 }
