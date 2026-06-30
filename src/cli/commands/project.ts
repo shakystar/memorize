@@ -2,7 +2,7 @@ import path from 'node:path';
 
 import { createFileSyncTransport } from '../../adapters/sync-transport-file.js';
 import { createHttpSyncTransport } from '../../adapters/sync-transport-http.js';
-import type { SyncTransportConfig } from '../../domain/entities.js';
+import type { ProjectSyncState, SyncTransportConfig } from '../../domain/entities.js';
 import type { SyncTransport } from '../../domain/sync-transport.js';
 import { ACTOR_USER } from '../../domain/common.js';
 import { resolveSyncToken, setToken } from '../../storage/credentials-store.js';
@@ -80,6 +80,26 @@ async function resolveTransportFlags(flags: {
     };
   }
   throw new Error('--remote-path or --remote-url is required.');
+}
+
+function redactSyncStateForDisplay(state: ProjectSyncState): Record<string, unknown> {
+  const { encryptionKey, syncTransport, ...display } = state;
+  const out: Record<string, unknown> = { ...display };
+  if (syncTransport) {
+    out.syncTransport =
+      syncTransport.type === 'http' && syncTransport.token
+        ? { ...syncTransport, token: '[redacted]' }
+        : syncTransport;
+  }
+  if (encryptionKey) {
+    out.encryptionKey = '[redacted]';
+    try {
+      out.encryptionKeyId = keyId(encryptionKey);
+    } catch {
+      out.encryptionKeyId = 'unavailable';
+    }
+  }
+  return out;
 }
 
 export async function runProjectCommand(
@@ -431,7 +451,7 @@ export async function runProjectCommand(
     const queues = await getQueueSnapshot(projectId);
     console.log(
       `Project sync state: ${JSON.stringify(
-        { state: syncState, queues },
+        { state: syncState ? redactSyncStateForDisplay(syncState) : syncState, queues },
         null,
         2,
       )}`,
