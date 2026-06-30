@@ -1,9 +1,29 @@
+import { getHarness } from '../../harness/registry.js';
 import {
   installClaudeIntegration,
   installCodexIntegration,
 } from '../../services/install-service.js';
 import { getMemorizeRoot } from '../../storage/path-resolver.js';
 import type { CliContext } from '../context.js';
+
+/**
+ * The standing "this harness is frozen" notice. memorize is Claude Code-first;
+ * non-Claude harness integrations are kept in-tree and still install/run, but
+ * are no longer conformance-gated in CI and may drift as the harness changes
+ * upstream (community-maintained, fixes welcome via PR). Shared by `install` and
+ * `init` so the wording can never drift. `labels` is one or more harness labels.
+ */
+export function frozenHarnessNotice(labels: string[]): string[] {
+  const list = labels.join(', ');
+  const isAre = labels.length > 1 ? 'are' : 'is';
+  return [
+    '',
+    `NOTE: ${list} ${isAre} FROZEN — community-maintained, support not guaranteed.`,
+    'memorize is Claude Code-first. Non-Claude harness integrations remain in the',
+    'tree and still install and run, but are no longer covered by conformance CI',
+    'and may drift as the harness changes upstream. Fixes are welcome via PR.',
+  ];
+}
 
 /**
  * The two things memorize cannot do on the user's behalf after wiring codex,
@@ -51,6 +71,10 @@ export async function runInstallCommand(
     console.log(
       'Added a memorize ground-rule block to AGENTS.md (removed by `memorize uninstall codex`).',
     );
+    // codex is a frozen (Claude-first) harness — say so before the action items.
+    for (const line of frozenHarnessNotice([getHarness('codex').label])) {
+      console.log(line);
+    }
     // Surface the two steps memorize cannot do on the user's behalf (shared
     // with `init` so the wording can never drift).
     for (const line of codexPostInstallNotice()) {

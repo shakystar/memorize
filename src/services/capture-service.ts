@@ -1,3 +1,5 @@
+import path from 'node:path';
+
 import type { AdapterAgent } from '../adapters/index.js';
 import {
   type Observation,
@@ -5,6 +7,9 @@ import {
   createObservation,
 } from '../domain/entities.js';
 import { appendEvent } from '../storage/event-store.js';
+import { getDb } from '../storage/db.js';
+import { withFileLock } from '../storage/file-lock.js';
+import { getProjectRoot } from '../storage/path-resolver.js';
 import { rebuildProjectProjection } from './projection-store.js';
 import {
   resolveByAgentSessionId,
@@ -44,10 +49,12 @@ export function transcriptScopeId(transcriptPath: string): string {
 
 /** Tools whose successful use is inherently a state-changing work signal.
  *  Spans harness vocabularies: Claude (Write/Edit/MultiEdit), Gemini CLI
- *  (`write_file`, and `replace` — Gemini's edit tool), and Hermes (`write_file`
- *  for create, `patch` for edit). Recognizing a superset is harmless: a harness
- *  that never emits a given name simply never matches it. (Gemini and Hermes
- *  tool names confirmed via conformance dogfood against their CLIs.) */
+ *  (`write_file`, and `replace` — Gemini's edit tool), Hermes (`write_file`
+ *  for create, `patch` for edit), and Cursor (`Write`, shared with Claude).
+ *  Recognizing a superset is harmless: a harness that never emits a given name
+ *  simply never matches it. (Gemini and Hermes tool names confirmed via
+ *  conformance dogfood; Cursor's are documented, not live-dogfooded — it has no
+ *  headless CLI.) */
 const WRITE_TOOLS = new Set([
   'Write',
   'Edit',
@@ -198,12 +205,13 @@ export function evaluateCapture(
   }
 
   // Shell-tool branch across harnesses: Claude `Bash`, Codex `shell`, Gemini
-  // CLI `run_shell_command`, Hermes `terminal`.
+  // CLI `run_shell_command`, Hermes `terminal`, Cursor `Shell`.
   if (
     toolName === 'Bash' ||
     toolName === 'shell' ||
     toolName === 'run_shell_command' ||
-    toolName === 'terminal'
+    toolName === 'terminal' ||
+    toolName === 'Shell'
   ) {
     if (TASK_TRANSITION_PATTERN.test(toolInputText)) {
       return {
@@ -239,6 +247,9 @@ export interface PostToolUsePayloadFields {
   toolInputText: string;
   transcriptPath?: string;
   agentSessionId?: string;
+  conversationId?: string;
+  generationId?: string;
+  toolUseId?: string;
 }
 
 /**
@@ -252,7 +263,9 @@ export function parsePostToolUsePayload(
 ): PostToolUsePayloadFields {
   let parsed: unknown;
   try {
-    parsed = raw ? JSON.parse(raw) : {};
+    // Cursor pipes hook payloads as UTF-8 WITH a BOM; JSON.parse rejects a
+    // leading U+FEFF, which would silently drop every capture. Strip it.
+    parsed = raw ? JSON.parse(raw.replace(/^\uFEFF/, '')) : {};
   } catch {
     return { toolInputText: '' };
   }
@@ -269,6 +282,12 @@ export function parsePostToolUsePayload(
   // the owning memorize session when env/pid/tty resolution misses (#108).
   const agentSessionId =
     typeof obj.session_id === 'string' ? obj.session_id : undefined;
+  const conversationId =
+    typeof obj.conversation_id === 'string' ? obj.conversation_id : undefined;
+  const generationId =
+    typeof obj.generation_id === 'string' ? obj.generation_id : undefined;
+  const toolUseId =
+    typeof obj.tool_use_id === 'string' ? obj.tool_use_id : undefined;
 
   // Flatten tool_input into a single searchable text. For Write/Edit the
   // interesting field is file_path; for Bash it is command. Fall back to a
@@ -297,7 +316,28 @@ export function parsePostToolUsePayload(
     toolInputText,
     ...(transcriptPath ? { transcriptPath } : {}),
     ...(agentSessionId ? { agentSessionId } : {}),
+    ...(conversationId ? { conversationId } : {}),
+    ...(generationId ? { generationId } : {}),
+    ...(toolUseId ? { toolUseId } : {}),
   };
+}
+
+function hasCapturedToolUse(
+  projectId: string,
+  agentSessionId: string,
+  toolUseId: string,
+): boolean {
+  const row = getDb(projectId)
+    .prepare(
+      `SELECT 1
+         FROM events
+        WHERE type = 'observation.captured'
+          AND json_extract(payload, '$.agentSessionId') = ?
+          AND json_extract(payload, '$.toolUseId') = ?
+        LIMIT 1`,
+    )
+    .get(agentSessionId, toolUseId);
+  return Boolean(row);
 }
 
 /**
@@ -318,6 +358,7 @@ export async function captureObservation(params: {
   const payload = parsePostToolUsePayload(params.rawPayload);
   const verdict = evaluateCapture(payload.toolName, payload.toolInputText);
   if (!verdict.capture || !verdict.signal) return undefined;
+  const signal = verdict.signal;
 
   const sessionCtx = await resolveSessionContext(params.cwd, {
     debugLabel: 'hook-post-tool-use',
@@ -344,36 +385,61 @@ export async function captureObservation(params: {
   // and apply_patch) lets Phase 2 live sharing detect cross-session file
   // collisions without re-parsing the clipped summary. Bash signals carry a
   // command, not a path — left unset there.
-  const observation = createObservation({
-    projectId: params.projectId,
-    signal: verdict.signal,
-    ...(sessionId ? { sessionId } : {}),
-    ...(payload.toolName ? { toolName: payload.toolName } : {}),
-    ...(verdict.summary ? { summary: verdict.summary } : {}),
-    ...(verdict.filePath ? { filePath: verdict.filePath } : {}),
-    ...(payload.transcriptPath
-      ? { transcriptPath: payload.transcriptPath }
-      : {}),
-  });
+  const appendCapturedObservation = async (): Promise<Observation | undefined> => {
+    if (
+      params.agent === 'cursor' &&
+      payload.agentSessionId &&
+      payload.toolUseId &&
+      hasCapturedToolUse(params.projectId, payload.agentSessionId, payload.toolUseId)
+    ) {
+      return undefined;
+    }
+
+    const observation = createObservation({
+      projectId: params.projectId,
+      signal,
+      ...(sessionId ? { sessionId } : {}),
+      ...(payload.toolName ? { toolName: payload.toolName } : {}),
+      ...(verdict.summary ? { summary: verdict.summary } : {}),
+      ...(verdict.filePath ? { filePath: verdict.filePath } : {}),
+      ...(payload.transcriptPath
+        ? { transcriptPath: payload.transcriptPath }
+        : {}),
+      ...(payload.agentSessionId ? { agentSessionId: payload.agentSessionId } : {}),
+      ...(payload.conversationId ? { conversationId: payload.conversationId } : {}),
+      ...(payload.generationId ? { generationId: payload.generationId } : {}),
+      ...(payload.toolUseId ? { toolUseId: payload.toolUseId } : {}),
+    });
 
   // Scope fallback ladder: real session → stable per-conversation key
   // (transcript) → project. The transcript step stops distinct conversations
   // from collapsing onto one `projectId` scope when the session is unknown
   // (#108), while staying constant across compaction's session splits (#109).
-  const scopeId =
-    sessionId ??
-    (payload.transcriptPath
-      ? transcriptScopeId(payload.transcriptPath)
-      : params.projectId);
+    const scopeId =
+      sessionId ??
+      (payload.transcriptPath
+        ? transcriptScopeId(payload.transcriptPath)
+        : params.projectId);
 
-  await appendEvent({
-    type: 'observation.captured',
-    projectId: params.projectId,
-    scopeType: 'session',
-    scopeId,
-    actor: params.agent,
-    payload: observation,
-  });
-  await rebuildProjectProjection(params.projectId, { reindexSearch: false });
-  return observation;
+    await appendEvent({
+      type: 'observation.captured',
+      projectId: params.projectId,
+      scopeType: 'session',
+      scopeId,
+      actor: params.agent,
+      payload: observation,
+    });
+    await rebuildProjectProjection(params.projectId, { reindexSearch: false });
+    return observation;
+  };
+
+  if (params.agent === 'cursor' && payload.agentSessionId && payload.toolUseId) {
+    return withFileLock(
+      path.join(getProjectRoot(params.projectId), 'locks'),
+      'cursor-post-tool-use',
+      appendCapturedObservation,
+    );
+  }
+
+  return appendCapturedObservation();
 }

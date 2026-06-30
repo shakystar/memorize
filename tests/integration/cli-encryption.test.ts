@@ -108,6 +108,17 @@ describe('project encryption provisioning (#182)', () => {
     expect(out).toContain(keyId(key));
   });
 
+  it('redacts the stored key from sync status output', async () => {
+    const key = generateProjectKey();
+    await run(['encryption', 'enable', '--key', key]);
+
+    const out = await run(['sync']);
+    expect(out).toContain('Project sync state');
+    expect(out).not.toContain(key);
+    expect(out).toContain('"encryptionKey": "[redacted]"');
+    expect(out).toContain(`"encryptionKeyId": "${keyId(key)}"`);
+  });
+
   it('disable removes the key so future pushes are plaintext', async () => {
     await run(['encryption', 'enable']);
     await run(['encryption', 'disable']);

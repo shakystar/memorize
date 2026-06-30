@@ -11,6 +11,8 @@ export interface Checkpoint extends BaseEntity {
   promotedDecisions: EntityId[];
   deferredItems: string[];
   discardableItems: string[];
+  /** Stable hook logical id for idempotent boundary handling. */
+  sourceHookId?: string;
 }
 
 export function createCheckpoint(input: {
@@ -23,6 +25,7 @@ export function createCheckpoint(input: {
   promotedDecisions?: string[];
   deferredItems?: string[];
   discardableItems?: string[];
+  sourceHookId?: string;
 }): Checkpoint {
   return {
     ...baseEntity('checkpoint'),
@@ -35,5 +38,6 @@ export function createCheckpoint(input: {
     promotedDecisions: input.promotedDecisions ?? [],
     deferredItems: input.deferredItems ?? [],
     discardableItems: input.discardableItems ?? [],
+    ...(input.sourceHookId ? { sourceHookId: input.sourceHookId } : {}),
   };
 }

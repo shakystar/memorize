@@ -87,6 +87,13 @@ no task lists, no summaries.**
      prepended so they run before any other layer, and the hook is a
      no-op in directories not bound to a memorize project).
 
+   > **Support tiers.** Claude Code is the first-class, fully maintained
+   > harness. The non-Claude integrations (Codex, opencode, Gemini CLI, pi,
+   > Hermes, Cursor) are **frozen** — still wired by `init`, but no longer
+   > conformance-gated and not guaranteed to track upstream changes
+   > (community-maintained, PRs welcome). `init` prints a `frozen` notice
+   > when it wires one; relay it so the user knows support is best-effort.
+
    Safe to re-run. To create a SEPARATE project inside an already-bound
    directory (a monorepo subpackage), add `--nested`.
 

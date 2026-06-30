@@ -118,6 +118,9 @@ export async function seedQuestionConsolidated(
           transcriptPath: file,
           boundary: 'manual',
           consolidator,
+          // The benchmark's dialogue IS personal-life content; it must stay in
+          // the measured project store, not be siphoned into the personal store.
+          routePersonal: false,
         });
       } catch {
         try {

@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import { createObservation } from '../../src/domain/entities.js';
 import {
   ExtractionParseError,
+  LlmConsolidator,
   RuleBasedConsolidator,
   parseExtractedMemories,
   resolveLlmConfig,
@@ -71,6 +72,52 @@ describe('RuleBasedConsolidator (degraded extractor — decision ①)', () => {
   });
 });
 
+describe('LlmConsolidator prompt contract', () => {
+  it('sends deterministic durability, kind, and scope rules to the HTTP extractor', async () => {
+    let requestBody: {
+      messages?: Array<{ role: string; content: string }>;
+    } | undefined;
+    const fetchImpl = (async (_url: string | URL | Request, init?: RequestInit) => {
+      requestBody = JSON.parse(String(init?.body));
+      return {
+        ok: true,
+        json: async () => ({ choices: [{ message: { content: '[]' } }] }),
+      } as Response;
+    }) as typeof fetch;
+
+    const consolidator = new LlmConsolidator({
+      endpoint: 'https://llm.example.test/v1',
+      apiKey: 'sk-test',
+      model: 'test-model',
+      fetchImpl,
+    });
+
+    await consolidator.extract({ observations: [], existingMemories: [] });
+
+    const systemPrompt = requestBody?.messages?.find(
+      (message) => message.role === 'system',
+    )?.content;
+    expect(systemPrompt).toContain(
+      'First decide whether a candidate is durable enough to extract',
+    );
+    expect(systemPrompt).toContain(
+      'Only classify items that survive this durability filter.',
+    );
+    expect(systemPrompt).toContain(
+      'if the item is user-centered and not explicitly tied to this repo, product, or workstream, set personal:true',
+    );
+    expect(systemPrompt).toContain(
+      'If it is artifact-centered or task/release/code-centered, omit personal.',
+    );
+    expect(systemPrompt).toContain('If neither rule decides, extract nothing.');
+    expect(systemPrompt).toContain(
+      'Do not turn a user-wide preference into project memory merely because it was stated during a project session.',
+    );
+    expect(systemPrompt).not.toContain('When unsure, omit personal');
+    expect(systemPrompt).not.toContain('they never reduce');
+  });
+});
+
 describe('parseExtractedMemories (defensive LLM reply parsing)', () => {
   it('parses a clean JSON array', () => {
     const parsed = parseExtractedMemories(
@@ -114,6 +161,28 @@ describe('parseExtractedMemories (defensive LLM reply parsing)', () => {
   it('returns [] for a genuinely empty array reply (clean result)', () => {
     expect(parseExtractedMemories('[]')).toEqual([]);
     expect(parseExtractedMemories('Nothing durable here.\n[]')).toEqual([]);
+  });
+
+  it('keeps the Path A personal flag only when explicitly true', () => {
+    const parsed = parseExtractedMemories(
+      JSON.stringify([
+        { kind: 'decision', text: 'user prefers full sentences', salience: 8, personal: true },
+        { kind: 'progress', text: 'project fact', salience: 5 },
+        { kind: 'rationale', text: 'not personal', salience: 4, personal: false },
+        { kind: 'decision', text: 'truthy not true', salience: 4, personal: 'yes' },
+      ]),
+    );
+    expect(parsed[0]).toEqual({
+      kind: 'decision',
+      text: 'user prefers full sentences',
+      salience: 8,
+      personal: true,
+    });
+    // Absent / false / non-true-boolean ⇒ no `personal` key (project memory),
+    // so project items keep their exact prior shape.
+    expect(parsed[1]).toEqual({ kind: 'progress', text: 'project fact', salience: 5 });
+    expect(parsed[2]).toEqual({ kind: 'rationale', text: 'not personal', salience: 4 });
+    expect(parsed[3]).toEqual({ kind: 'decision', text: 'truthy not true', salience: 4 });
   });
 
   it('keeps supersede fields when present', () => {

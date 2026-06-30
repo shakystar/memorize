@@ -8,6 +8,7 @@ import {
 import {
   installClaudeIntegration,
   installCodexIntegration,
+  installCursorIntegration,
   installGeminiIntegration,
   installHermesIntegration,
   installOpencodeIntegration,
@@ -70,6 +71,7 @@ export function defaultOnboardDeps(): OnboardDeps {
       gemini: installGeminiIntegration,
       pi: installPiIntegration,
       hermes: installHermesIntegration,
+      cursor: installCursorIntegration,
     },
   };
 }

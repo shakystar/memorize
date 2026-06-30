@@ -1,4 +1,5 @@
 import { spawn } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import fs from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 
@@ -17,6 +18,7 @@ import {
 import { findAncestorPidByName } from '../shared/process-tree.js';
 import { hasUnmigratedNdjson } from './migrate-service.js';
 import { SESSION_ENV_VAR } from '../storage/cwd-session-store.js';
+import { getDb } from '../storage/db.js';
 import { withFileLock } from '../storage/file-lock.js';
 import { getProjectRoot } from '../storage/path-resolver.js';
 import path from 'node:path';
@@ -76,7 +78,10 @@ function parseJsonObject(raw: string | undefined): Record<string, unknown> {
   if (!raw) return {};
   let parsed: unknown;
   try {
-    parsed = JSON.parse(raw);
+    // Cursor pipes hook payloads as UTF-8 WITH a BOM; JSON.parse rejects a
+    // leading U+FEFF, which would silently drop every payload (no capture,
+    // no session-id linking). Strip it before parsing.
+    parsed = JSON.parse(raw.replace(/^\uFEFF/, ''));
   } catch {
     process.stderr.write('WARN: hook stdin is not valid JSON; ignoring\n');
     return {};
@@ -94,6 +99,65 @@ function readStringField(
 ): string | undefined {
   const value = obj[key];
   return typeof value === 'string' ? value : undefined;
+}
+
+export function isCursorOriginPayload(raw: string | undefined): boolean {
+  const obj = parseJsonObject(raw);
+  return (
+    typeof obj.cursor_version === 'string' ||
+    (Array.isArray(obj.workspace_roots) &&
+      (typeof obj.conversation_id === 'string' ||
+        typeof obj.generation_id === 'string' ||
+        typeof obj.session_id === 'string'))
+  );
+}
+
+function effectiveHookAgent(
+  harnessId: HarnessId,
+  rawPayload: string | undefined,
+): AdapterAgent {
+  if (harnessId !== 'cursor' && isCursorOriginPayload(rawPayload)) {
+    return 'cursor';
+  }
+  return harnessId;
+}
+
+function hookPayloadHash(raw: string | undefined): string {
+  return createHash('sha256')
+    .update(raw?.replace(/^\uFEFF/, '') ?? '')
+    .digest('hex')
+    .slice(0, 32);
+}
+
+function cursorBoundarySourceHookId(
+  ctx: HookContext,
+  handlerKey: string,
+): string | undefined {
+  if (ctx.agent !== 'cursor' || !isCursorOriginPayload(ctx.rawPayload)) {
+    return undefined;
+  }
+  const obj = parseJsonObject(ctx.rawPayload);
+  const agentSessionId = readStringField(obj, 'session_id') ?? 'no-session';
+  const generationId = readStringField(obj, 'generation_id');
+  const toolUseId = readStringField(obj, 'tool_use_id');
+  const transcriptPath = readStringField(obj, 'transcript_path');
+  const stablePart = toolUseId ?? generationId ?? transcriptPath ?? hookPayloadHash(ctx.rawPayload);
+  return `cursor:${handlerKey}:${agentSessionId}:${stablePart}`;
+}
+
+function findCheckpointIdBySourceHookId(
+  projectId: string,
+  sourceHookId: string,
+): string | undefined {
+  const row = getDb(projectId)
+    .prepare(
+      `SELECT id
+         FROM checkpoints
+        WHERE json_extract(data, '$.sourceHookId') = ?
+        LIMIT 1`,
+    )
+    .get(sourceHookId) as { id: string } | undefined;
+  return row?.id;
 }
 
 export interface PostCompactPayload {
@@ -144,7 +208,7 @@ function prepareHookText(
 function transcriptPathFromPayload(raw: string | undefined): string | undefined {
   if (!raw) return undefined;
   try {
-    const obj = JSON.parse(raw) as Record<string, unknown>;
+    const obj = JSON.parse(raw.replace(/^\uFEFF/, '')) as Record<string, unknown>;
     return typeof obj.transcript_path === 'string' ? obj.transcript_path : undefined;
   } catch {
     return undefined;
@@ -330,7 +394,7 @@ const handleSessionStart: HookHandler = async (ctx) => {
   const agentPid = process.ppid
     ? await findAncestorPidByName({
         startPid: process.ppid,
-        targetNames: ['claude', 'codex'],
+        targetNames: ['claude', 'codex', 'cursor'],
       })
     : undefined;
 
@@ -396,6 +460,25 @@ const handleSessionStart: HookHandler = async (ctx) => {
       path.join(getProjectRoot(ctx.projectId), 'locks'),
       'session-start',
       async () => {
+        if (identity.agentSessionId) {
+          const existing = await resolveByAgentSessionId(
+            ctx.cwd,
+            identity.agentSessionId,
+            { debugLabel: 'hook-session-start-lock-recheck' },
+          );
+          if (existing.sessionId) {
+            const composed = await composeStartupContext({
+              agent: ctx.agent,
+              cwd: ctx.cwd,
+              selfSessionId: existing.sessionId,
+              ...(existing.taskId ? { taskId: existing.taskId } : {}),
+            });
+            return {
+              sessionId: existing.sessionId,
+              startupContext: composed.startupContext,
+            };
+          }
+        }
         const composed = await composeStartupContext({
           agent: ctx.agent,
           cwd: ctx.cwd,
@@ -456,26 +539,54 @@ const handlePostCompact: HookHandler = async (ctx) => {
   const summary =
     prepareHookText(payload.compactSummary, 'hook.PostCompact.compact_summary') ??
     'Compact summary unavailable';
-  const checkpoint = await createCheckpoint({
-    projectId: ctx.projectId,
-    sessionId,
-    ...(activeTaskId ? { taskId: activeTaskId } : {}),
-    summary,
-  });
+  const sourceHookId = cursorBoundarySourceHookId(ctx, 'PostCompact');
+  const createOrReuseCheckpoint = async (): Promise<{
+    id: string;
+    created: boolean;
+  }> => {
+    if (sourceHookId) {
+      const existingCheckpointId = findCheckpointIdBySourceHookId(
+        ctx.projectId,
+        sourceHookId,
+      );
+      if (existingCheckpointId) {
+        return { id: existingCheckpointId, created: false };
+      }
+    }
+    const checkpoint = await createCheckpoint({
+      projectId: ctx.projectId,
+      sessionId,
+      ...(activeTaskId ? { taskId: activeTaskId } : {}),
+      summary,
+      ...(sourceHookId ? { sourceHookId } : {}),
+    });
+    return { id: checkpoint.id, created: true };
+  };
+  const checkpoint = sourceHookId
+    ? await withFileLock(
+        path.join(getProjectRoot(ctx.projectId), 'locks'),
+        'cursor-post-compact',
+        createOrReuseCheckpoint,
+      )
+    : await createOrReuseCheckpoint();
 
   // Compaction is a CLS boundary: consolidate the observation window that
   // is about to fall out of the agent's context — detached (#46), so the
   // hook returns immediately. The child autoPushes its own new events.
-  await spawnDetachedConsolidate(
-    ctx,
-    sessionId,
-    'post-compact',
-    transcriptPathFromPayload(ctx.rawPayload),
-  );
+  if (checkpoint.created) {
+    await spawnDetachedConsolidate(
+      ctx,
+      sessionId,
+      'post-compact',
+      transcriptPathFromPayload(ctx.rawPayload),
+    );
+  }
 
   // P3-b: propagate this boundary's capture events to siblings (background,
   // no-op unless syncTransport is configured; never throws).
-  await autoPush(ctx.projectId);
+  if (checkpoint.created) {
+    await autoPush(ctx.projectId);
+  }
 
   // PostCompact / PreCompact / Stop must NOT include `hookSpecificOutput`
   // — Claude Code's schema validator rejects it on these events. Top-level
@@ -631,26 +742,31 @@ const sharedHookHandlers: Record<string, HookHandler> = {
 
 /**
  * Translate a canonical (Claude-shaped) handler result into the wire envelope a
- * harness's config mechanism expects. Identity for everyone EXCEPT
- * 'yaml-shell-hooks' (hermes): Claude/Codex/Gemini consume the Claude shape
- * directly, and ts-plugins (opencode/pi) translate harness-side in the planted
- * extension. Hermes acts ONLY on `{"context": "..."}` (its pre_llm_call
- * injection channel — every other hook's stdout is ignored), so we map our
- * `hookSpecificOutput.additionalContext` to it and collapse everything else to
- * `{}`. Never throws: a parse failure degrades to the empty result.
+ * harness expects. Identity for everyone whose descriptor leaves `injectionWire`
+ * unset: Claude/Codex/Gemini consume the Claude shape directly, and ts-plugins
+ * (opencode/pi) translate harness-side in the planted extension. The two
+ * harnesses that read a DIFFERENT native field declare it via `injectionWire`:
+ *   - 'context'            ⇒ hermes `{"context": "..."}` (its pre_llm_call
+ *     injection channel; every other hook's stdout is ignored).
+ *   - 'additional_context' ⇒ cursor `{"additional_context": "..."}` (sessionStart
+ *     initial context + postToolUse after-result injection; snake_case + top-level).
+ * For both, we pull `hookSpecificOutput.additionalContext` out of the canonical
+ * shape and re-emit it under the native key, collapsing every other (non-context)
+ * result to `{}`. Never throws: a parse failure degrades to the empty envelope.
  */
 function renderHookWire(
   descriptor: ReturnType<typeof getHarness>,
   canonicalJson: string,
 ): string {
-  if (descriptor.mechanism !== 'yaml-shell-hooks') return canonicalJson;
+  const wireKey = descriptor.injectionWire;
+  if (!wireKey) return canonicalJson;
   try {
     const parsed = JSON.parse(canonicalJson) as {
       hookSpecificOutput?: { additionalContext?: unknown };
     };
     const ctx = parsed.hookSpecificOutput?.additionalContext;
     if (typeof ctx === 'string' && ctx.length > 0) {
-      return JSON.stringify({ context: ctx });
+      return JSON.stringify({ [wireKey]: ctx });
     }
   } catch {
     // fall through to the empty envelope
@@ -680,6 +796,7 @@ export async function runHook(
   // never auto-creating state. Bind BEFORE the handled-event gate to preserve
   // the historical auto-bind side effect on claude.
   const descriptor = getHarness(harnessId);
+  const effectiveAgent = effectiveHookAgent(harnessId, params.stdinPayload);
   const projectId = descriptor.autoBindProject
     ? await ensureBoundProjectId(params.cwd)
     : await getBoundProjectId(params.cwd);
@@ -714,7 +831,7 @@ export async function runHook(
 
   const result = await handler({
     projectId,
-    agent: harnessId,
+    agent: effectiveAgent,
     cwd: params.cwd,
     rawPayload: params.stdinPayload,
   });

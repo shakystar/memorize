@@ -1,10 +1,19 @@
 # Harness conformance (Docker)
 
+> **FROZEN — no longer a CI gate.** memorize is now Claude Code-first. The
+> non-Claude harness integrations (codex/opencode/gemini/pi/hermes/cursor) are kept
+> in-tree and still install/run, but their support is **not guaranteed** and
+> they are **not** gated by CI any more — the `harness-conformance.yml` workflow
+> was removed. This harness is retained as a **manual** tool: a contributor
+> fixing or reviving a frozen harness should run it themselves
+> (`docker run --rm memorize-conformance <id>`) and paste the result in the PR.
+> Upstream-drift catching is now best-effort/community, not automated.
+
 Repeatable, containerised verification that memorize's integration still works
 against the **real** agent-harness CLIs. This replaces manual dogfooding for the
-parts that can be automated and is the backbone of harness-compatibility
-maintenance: when an upstream harness changes its config schema, paths, or
-plugin API, a scheduled run here turns that silent drift into a red check.
+parts that can be automated and was historically the backbone of harness-
+compatibility maintenance: when an upstream harness changes its config schema,
+paths, or plugin API, a run here turns that silent drift into a visible failure.
 
 ## Tiers
 
@@ -51,11 +60,14 @@ must already exist in `src/harness/registry.ts`.
 
 ## Tiers (when each runs)
 
-- Tier A, A', **A''** run on every PR touching harness code (model-free,
-  deterministic). A'' feeds the MAPPED tool payloads the plugin emits
-  (`Write`/`Edit`/`shell`) to the real `memorize hook` and asserts capture.
-- Tier B (live, model) runs on **schedule + manual dispatch only** — cost/flake
-  control. Auto-enables when the `ANTHROPIC_API_KEY` repo secret exists.
+These tiers no longer run automatically (the CI workflow was removed). Run them
+**manually** when touching or reviving a frozen harness:
+
+- Tier A, A', **A''** are model-free and deterministic. A'' feeds the MAPPED tool
+  payloads the plugin emits (`Write`/`Edit`/`shell`) to the real `memorize hook`
+  and asserts capture.
+- Tier B (live, model) needs a provider key; enable per harness with its
+  `<ID>_CONFORMANCE_LIVE=1` flag plus the matching key (see Run, above).
 
 ## Status — opencode (validated against opencode 1.17.11 in CI)
 
@@ -86,3 +98,40 @@ synthetic tier (A'') validates the memorize side end-to-end:
 
 Upstream config-schema drift is otherwise tracked manually. Mirrors Gemini's
 synthetic-first posture.
+
+## Status — cursor (install-artifact + synthetic only; live tier N/A)
+
+Cursor (`json-hooks-map` family, but PER-PROJECT) ships a **headless CLI agent**
+(`cursor-agent`), so it has the full tier ladder like opencode/gemini/pi — not
+artifacts-only. (An earlier note here wrongly called it GUI-only; corrected.)
+
+- **Tier A (install artifacts)** — the `.cursor/hooks.json` schema we write (the
+  four native events `sessionStart`/`postToolUse`/`preCompact`/`sessionEnd`), the
+  `.cursor/mcp.json` MCP block, and the AGENTS.md ground rule.
+- **Tier A'' (synthetic, FAITHFUL)** — runs every PR, model-free. Instead of a
+  hand-typed `memorize hook` proxy, it extracts and executes the **exact command
+  memorize wrote into `.cursor/hooks.json`**, the way Cursor's runtime drives it
+  (project-root cwd, documented payload on stdin), asserting capture across cursor
+  tool names (`Write` shared with Claude; `Shell` new) and the `sessionStart`
+  injection emitting cursor's native `{"additional_context": …}` envelope
+  (snake_case, top-level — not `hookSpecificOutput`). Proves the installed artifact
+  runs and honors the wire contract end to end.
+- **Tier B (live, gated)** — installs the real `cursor-agent`
+  (`curl https://cursor.com/install | bash`) and drives `cursor-agent -p` to make
+  it perform a file-write tool call, asserting memorize captured it via the
+  postToolUse hook. Needs `CURSOR_API_KEY` (headless auth); runs on
+  schedule/dispatch. A WRITE prompt is used (cursor-agent has full write access in
+  `-p` mode — no approval prompt; a shell prompt would block on y/n).
+- **Tier C (upstream-contract drift guard, gated + network-only)** — fetches
+  [cursor.com/docs/hooks](https://cursor.com/docs/hooks) and asserts every token
+  memorize hardcodes still appears (the four event names, `additional_context`,
+  the `Shell`/`Write` tool names, `tool_name`, `.cursor/hooks.json`). Catches an
+  upstream rename automatically. Complements tier B: cheap, keyless, and guards
+  the IDE/cloud surfaces tier B can't drive.
+
+**Open question tier B settles:** the docs confirm cursor's *cloud* agents fire
+`postToolUse` + `preCompact` but NOT `sessionStart`/`sessionEnd` (VM lifecycle).
+Whether the *local* `cursor-agent` fires the session-lifecycle hooks is
+undocumented, so tier B probes it (it reports whether a `cursor` session was
+minted) instead of assuming. The IDE itself is the primary target and is expected
+to fire all four; that is verified by hand once and then guarded by tier C.

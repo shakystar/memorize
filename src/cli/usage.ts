@@ -31,6 +31,7 @@ export function renderScaffoldUsage(): string {
     'Setup (usually run by the AI assistant):',
     '  memorize init                One-shot: bind cwd + import context + detect & wire agent(s)',
     '  memorize memory import ...   Ingest agent-distilled memories (stdin JSON)',
+    '  memorize personal import ... Ingest personal (cross-project, never-synced) memories',
     '',
     'Setup escape hatches (advanced — `memorize init` covers the common case):',
     '  memorize setup               Detect installed agents + wire global integration only',
