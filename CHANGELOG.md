@@ -14,6 +14,48 @@ log layout or the public CLI surface.
 > entries by hand. See
 > [CONTRIBUTING.md](.github/CONTRIBUTING.md#releasing).
 
+## [2.5.0](https://github.com/shakystar/memorize/compare/v2.4.0...v2.5.0) (2026-06-30)
+
+
+### Features
+
+* **benchmark:** aggregative-recall localization harness (graph-recovery, miss-analysis, extraction-recall) ([#187](https://github.com/shakystar/memorize/issues/187)) ([c1ba612](https://github.com/shakystar/memorize/commit/c1ba612a7ca9eb07ad3a578ddfb9077792c42f25))
+* **benchmark:** consolidation-ON e2e harness on LongMemEval-S ([#183](https://github.com/shakystar/memorize/issues/183)) ([55e628d](https://github.com/shakystar/memorize/commit/55e628d39921aaf5e1823867bbb84e719e22e521))
+* **benchmark:** counting-track harness (count accuracy 3-way + extraction-miss audit) ([#189](https://github.com/shakystar/memorize/issues/189)) ([eaaf41e](https://github.com/shakystar/memorize/commit/eaaf41e52cf2be893818c0443e3ca342438ffe37))
+* **benchmark:** end-to-end QA-accuracy harness on LongMemEval-S ([#177](https://github.com/shakystar/memorize/issues/177)) ([d1d924b](https://github.com/shakystar/memorize/commit/d1d924b2ee23a502aee72967e279d1fb4a4510b7))
+* **benchmark:** Phase 0 bottleneck-localization harness (oracle ablation + gold-coverage) ([#186](https://github.com/shakystar/memorize/issues/186)) ([2f906b1](https://github.com/shakystar/memorize/commit/2f906b14d4a1eddbc641542c1e5ff3140c7acc04))
+* **benchmark:** resumable e2e QA-accuracy harness on LongMemEval-S (official protocol) ([#179](https://github.com/shakystar/memorize/issues/179)) ([b98ebd2](https://github.com/shakystar/memorize/commit/b98ebd21dd0fb6555c7a90a7bc8a97d80b5a7251))
+* **benchmark:** retrieval-recall harness on LongMemEval-S (bm25 + hybrid) ([#170](https://github.com/shakystar/memorize/issues/170)) ([daddb4c](https://github.com/shakystar/memorize/commit/daddb4c93466ec7571f481a625bdfc8a3e0384ec))
+* **benchmark:** temporal/sum codegen harness — measures TReMu codegen vs raw reader ([#190](https://github.com/shakystar/memorize/issues/190)) ([7800f1e](https://github.com/shakystar/memorize/commit/7800f1e7b0a4212c8261b50ab8dc56c60aae56f9))
+* **consolidate:** generalize the memory extractor out of the coding-only domain ([#181](https://github.com/shakystar/memorize/issues/181)) ([ac7c1a6](https://github.com/shakystar/memorize/commit/ac7c1a6f59c03d86780550b67e0223ae03b17186))
+* **cursor:** integrate Cursor coding agent (json-hooks-map, project-scoped, full lifecycle) + conformance ([#212](https://github.com/shakystar/memorize/issues/212)) ([7e33ffc](https://github.com/shakystar/memorize/commit/7e33ffcb382e51a3528c4dbce8d48396b541b07c))
+* **gemini:** integrate Gemini CLI (json-hooks-map) + generalize the hooks writer ([#197](https://github.com/shakystar/memorize/issues/197)) ([5e9a75f](https://github.com/shakystar/memorize/commit/5e9a75ff8192446ce77f3450655dbb7f1ab94efa))
+* **hermes:** integrate Hermes coding agent (yaml-shell-hooks, full 3-pillar) ([#203](https://github.com/shakystar/memorize/issues/203)) ([ca92ea0](https://github.com/shakystar/memorize/commit/ca92ea037d3f1c6350c68202912ca7ffb29be975))
+* multi-harness foundation — harness registry + memorize mcp server ([#188](https://github.com/shakystar/memorize/issues/188)) ([049b7e9](https://github.com/shakystar/memorize/commit/049b7e96d68ffd9ce1b7fc58fc77fd4ee9b9e876))
+* **opencode:** integrate opencode harness + Docker conformance automation ([#194](https://github.com/shakystar/memorize/issues/194)) ([b12cff8](https://github.com/shakystar/memorize/commit/b12cff8ded2088c22d132ba33de30bf4934aa6bb))
+* **personal:** global personal-memory pipeline (Path A) — capture → store → injection ([#214](https://github.com/shakystar/memorize/issues/214)) ([8d4385a](https://github.com/shakystar/memorize/commit/8d4385af0ea903a3944f63641c9d918c85506f67))
+* **pi:** integrate pi coding agent (ts-plugin, full session-start injection) ([#199](https://github.com/shakystar/memorize/issues/199)) ([8eb2b67](https://github.com/shakystar/memorize/commit/8eb2b679febd83b6c5ad13663185c1390d82959b))
+* **retrieval:** raw transcript segments — verbatim detail retrievable alongside consolidated memories ([#193](https://github.com/shakystar/memorize/issues/193)) ([3c81488](https://github.com/shakystar/memorize/commit/3c8148867556207dc8d3172ea216f8a28086d9d0))
+* **sync:** CLI provisioning for E2E payload encryption keys ([#182](https://github.com/shakystar/memorize/issues/182)) ([#198](https://github.com/shakystar/memorize/issues/198)) ([44a7ed1](https://github.com/shakystar/memorize/commit/44a7ed10de46ee3cff7223c13b6f4a19d46e8132))
+* **sync:** client-side E2E encryption of synced event payloads ([#182](https://github.com/shakystar/memorize/issues/182)) ([#195](https://github.com/shakystar/memorize/issues/195)) ([bfc3606](https://github.com/shakystar/memorize/commit/bfc3606ab5bf203a20114896eac8830075af6362))
+* **sync:** finish [#192](https://github.com/shakystar/memorize/issues/192) — fail-fast auth-login validation + token anti-sprawl ([#202](https://github.com/shakystar/memorize/issues/202)) ([321a450](https://github.com/shakystar/memorize/commit/321a450f0b0fce356b0e019cc43b6f9f971ed890))
+* **sync:** host-level credential store + `memorize auth login` ([#192](https://github.com/shakystar/memorize/issues/192)) ([#200](https://github.com/shakystar/memorize/issues/200)) ([7715042](https://github.com/shakystar/memorize/commit/7715042fbd30a7b30ebfa2d1094855d5bd0ad191))
+
+
+### Bug Fixes
+
+* **benchmark:** fire CLI entry guard via pathToFileURL (Windows) ([#173](https://github.com/shakystar/memorize/issues/173)) ([96d74d8](https://github.com/shakystar/memorize/commit/96d74d88f9da7bb5f97b9856b5924d58dc33f104))
+* **consolidate:** tighten extractor scope classification (personal vs project) ([#181](https://github.com/shakystar/memorize/issues/181)) ([#217](https://github.com/shakystar/memorize/issues/217)) ([88b96e4](https://github.com/shakystar/memorize/commit/88b96e41ac28ad975d958f62ecfdf3744a4c3775))
+* **embeddings:** split oversized embed batches to fit model context ([#174](https://github.com/shakystar/memorize/issues/174)) ([3747de3](https://github.com/shakystar/memorize/commit/3747de37829f3331bb87c5ddbcd002ecd23b3d68))
+* **install:** recognize legacy resolved-binary (.cmd shim) hook form so re-install dedups instead of accumulating ([#211](https://github.com/shakystar/memorize/issues/211)) ([8f791fe](https://github.com/shakystar/memorize/commit/8f791fe344112362bc72b54023ef39f2857ef584))
+* keep mcp context read-only when unbound ([7f68fac](https://github.com/shakystar/memorize/commit/7f68facccc627304c319b49b46f0df2b96eb575f))
+* **realtime-share:** scan sibling git ops by window, not the post-watermark delta ([#168](https://github.com/shakystar/memorize/issues/168)) ([#206](https://github.com/shakystar/memorize/issues/206)) ([4a4f8d8](https://github.com/shakystar/memorize/commit/4a4f8d83076aa9a623c3a25664748a0f2b1f90d1))
+* redact sync status encryption key ([c27ff3c](https://github.com/shakystar/memorize/commit/c27ff3ccceeaf2cea95d9cdee34327c90bbd7a6c))
+* **search:** OR-join FTS tokens so NL queries return results ([#178](https://github.com/shakystar/memorize/issues/178)) ([811903d](https://github.com/shakystar/memorize/commit/811903d072f76be1f5e6c95c2930cd97edee13e0))
+* **sync:** fail closed when pulling encrypted payloads without a key ([#195](https://github.com/shakystar/memorize/issues/195), [#198](https://github.com/shakystar/memorize/issues/198)) ([#205](https://github.com/shakystar/memorize/issues/205)) ([adccffa](https://github.com/shakystar/memorize/commit/adccffa4c27741e68223b79f3628589b8865116e))
+* **task:** `task resume` accepts an explicit --task/&lt;id&gt; target and rejects unknown flags ([#209](https://github.com/shakystar/memorize/issues/209)) ([6030786](https://github.com/shakystar/memorize/commit/60307860b38cdeb906be82799dfc7c14e84fa2fd))
+* **task:** fail loud when task resume --task &lt;id&gt; does not resolve ([#210](https://github.com/shakystar/memorize/issues/210)) ([f1222c3](https://github.com/shakystar/memorize/commit/f1222c3fd68547e0eff90de1650bed1570a43b86))
+
 ## [2.4.0](https://github.com/shakystar/memorize/compare/v2.3.1...v2.4.0) (2026-06-24)
 
 
