@@ -86,3 +86,40 @@ synthetic tier (A'') validates the memorize side end-to-end:
 
 Upstream config-schema drift is otherwise tracked manually. Mirrors Gemini's
 synthetic-first posture.
+
+## Status — cursor (install-artifact + synthetic only; live tier N/A)
+
+Cursor (`json-hooks-map` family, but PER-PROJECT) ships a **headless CLI agent**
+(`cursor-agent`), so it has the full tier ladder like opencode/gemini/pi — not
+artifacts-only. (An earlier note here wrongly called it GUI-only; corrected.)
+
+- **Tier A (install artifacts)** — the `.cursor/hooks.json` schema we write (the
+  four native events `sessionStart`/`postToolUse`/`preCompact`/`sessionEnd`), the
+  `.cursor/mcp.json` MCP block, and the AGENTS.md ground rule.
+- **Tier A'' (synthetic, FAITHFUL)** — runs every PR, model-free. Instead of a
+  hand-typed `memorize hook` proxy, it extracts and executes the **exact command
+  memorize wrote into `.cursor/hooks.json`**, the way Cursor's runtime drives it
+  (project-root cwd, documented payload on stdin), asserting capture across cursor
+  tool names (`Write` shared with Claude; `Shell` new) and the `sessionStart`
+  injection emitting cursor's native `{"additional_context": …}` envelope
+  (snake_case, top-level — not `hookSpecificOutput`). Proves the installed artifact
+  runs and honors the wire contract end to end.
+- **Tier B (live, gated)** — installs the real `cursor-agent`
+  (`curl https://cursor.com/install | bash`) and drives `cursor-agent -p` to make
+  it perform a file-write tool call, asserting memorize captured it via the
+  postToolUse hook. Needs `CURSOR_API_KEY` (headless auth); runs on
+  schedule/dispatch. A WRITE prompt is used (cursor-agent has full write access in
+  `-p` mode — no approval prompt; a shell prompt would block on y/n).
+- **Tier C (upstream-contract drift guard, gated + network-only)** — fetches
+  [cursor.com/docs/hooks](https://cursor.com/docs/hooks) and asserts every token
+  memorize hardcodes still appears (the four event names, `additional_context`,
+  the `Shell`/`Write` tool names, `tool_name`, `.cursor/hooks.json`). Catches an
+  upstream rename automatically. Complements tier B: cheap, keyless, and guards
+  the IDE/cloud surfaces tier B can't drive.
+
+**Open question tier B settles:** the docs confirm cursor's *cloud* agents fire
+`postToolUse` + `preCompact` but NOT `sessionStart`/`sessionEnd` (VM lifecycle).
+Whether the *local* `cursor-agent` fires the session-lifecycle hooks is
+undocumented, so tier B probes it (it reports whether a `cursor` session was
+minted) instead of assuming. The IDE itself is the primary target and is expected
+to fire all four; that is verified by hand once and then guarded by tier C.

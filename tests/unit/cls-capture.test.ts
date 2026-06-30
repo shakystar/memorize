@@ -36,6 +36,19 @@ describe('CLS capture filter (decision ③ — conservative whitelist)', () => {
     expect(evaluateCapture('terminal', 'ls -la').capture).toBe(false);
   });
 
+  it('captures Cursor tool names: Write as write-tool, Shell as shell', () => {
+    const write = evaluateCapture('Write', '/repo/src/index.ts');
+    expect(write.capture).toBe(true);
+    expect(write.signal).toBe('write-tool');
+    expect(write.filePath).toBe('/repo/src/index.ts');
+    // Cursor runs shell commands through the `Shell` tool (capital S).
+    expect(evaluateCapture('Shell', 'rm -rf build').signal).toBe('mutating-bash');
+    expect(evaluateCapture('Shell', 'git commit -m "x"').signal).toBe(
+      'mutating-bash',
+    );
+    expect(evaluateCapture('Shell', 'ls -la').capture).toBe(false);
+  });
+
   it('captures codex apply_patch edits as write-tool signals (vendor symmetry)', () => {
     const patch = [
       '*** Begin Patch',
@@ -180,6 +193,25 @@ describe('PostToolUse payload parsing (defensive)', () => {
     expect(parsePostToolUsePayload('[1,2]').toolName).toBeUndefined();
     expect(parsePostToolUsePayload(undefined).toolInputText).toBe('');
     expect(parsePostToolUsePayload('not json').agentSessionId).toBeUndefined();
+  });
+
+  it('strips a leading UTF-8 BOM (Cursor pipes hook payloads with a BOM)', () => {
+    // Cursor sends the hook payload as UTF-8 WITH a BOM; before the strip,
+    // JSON.parse threw on the leading U+FEFF → toolName undefined → every
+    // Cursor capture silently dropped. Confirmed against a real captured payload.
+    const bom = String.fromCharCode(0xfeff);
+    const parsed = parsePostToolUsePayload(
+      bom +
+        JSON.stringify({
+          tool_name: 'Write',
+          tool_input: { file_path: '/repo/a.ts', content: 'x' },
+        }),
+    );
+    expect(parsed.toolName).toBe('Write');
+    // …and the parsed result is actually capturable (full path, not dropped).
+    expect(
+      evaluateCapture(parsed.toolName, parsed.toolInputText).capture,
+    ).toBe(true);
   });
 });
 

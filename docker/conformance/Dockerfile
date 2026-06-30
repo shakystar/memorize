@@ -16,8 +16,11 @@ FROM node:22-bookworm-slim
 
 # better-sqlite3 ships prebuilds for linux x64; keep the toolchain available as
 # a fallback so `pnpm install` never fails on a missing native binary.
+# curl is needed by the gated live tiers that hit the network: the cursor-agent
+# installer + cursor docs-contract fetch (cursor.sh tiers B/C) and the hermes
+# installer.
 RUN apt-get update \
-  && apt-get install -y --no-install-recommends python3 make g++ ca-certificates git \
+  && apt-get install -y --no-install-recommends python3 make g++ ca-certificates git curl \
   && rm -rf /var/lib/apt/lists/*
 
 RUN corepack enable

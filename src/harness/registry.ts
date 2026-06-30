@@ -23,7 +23,8 @@ export type HarnessId =
   | 'opencode'
   | 'gemini'
   | 'pi'
-  | 'hermes';
+  | 'hermes'
+  | 'cursor';
 
 export interface HarnessDescriptor {
   /** Stable id; also the `memorize hook <id> <event>` token and (for
@@ -97,6 +98,22 @@ export interface HarnessDescriptor {
    * Harnesses with a real once-per-session SessionStart leave this false/unset.
    */
   sessionStartPerTurn?: boolean;
+  /**
+   * How this harness wants memorize's injected context wired on stdout. The
+   * shared handlers always emit Claude's `hookSpecificOutput.additionalContext`;
+   * `renderHookWire` translates that to the harness's native field when it
+   * differs:
+   *   - undefined ⇒ Claude's shape, consumed directly (Claude/Codex/Gemini; the
+   *     ts-plugin harnesses opencode/pi translate harness-side in the planted
+   *     extension, so they also leave this unset).
+   *   - 'context'            ⇒ hermes `{"context": "..."}` (its pre_llm_call
+   *     injection channel; every other hook's stdout is ignored).
+   *   - 'additional_context' ⇒ cursor `{"additional_context": "..."}` — the
+   *     field cursor reads from sessionStart (initial system context) and
+   *     postToolUse (injected after the tool result). snake_case + top-level,
+   *     NOT nested under hookSpecificOutput.
+   */
+  injectionWire?: 'context' | 'additional_context';
 }
 
 // --- Claude Code -------------------------------------------------------------
@@ -282,6 +299,77 @@ const HERMES: HarnessDescriptor = {
   plantsSkill: false,
   autoBindProject: false,
   sessionStartPerTurn: true,
+  injectionWire: 'context',
+};
+
+// --- Cursor ------------------------------------------------------------------
+
+// Cursor integrates via the 'json-hooks-map' family, but its on-disk shape and
+// injection wire DIVERGE from Claude/Codex/Gemini — so it gets a dedicated
+// writer (writeCursorHooks) rather than the shared writeHooksMap:
+//   - hooks file: `.cursor/hooks.json`, shape `{ "version": 1, "hooks": {
+//     "<event>": [{ "command", "matcher?", "timeout?" }] } }`. FLAT entries —
+//     NO Claude-style `{ matcher, hooks: [{type,command}] }` group nesting.
+//   - Cursor's hooks are PER-PROJECT (run from the project root, like Claude's
+//     `.claude/`), so hookScope is 'project' and autoBindProject is true — a
+//     project-scoped hook only fires inside its own repo, so auto-binding on
+//     SessionStart is safe (unlike the global harnesses, which must bail when
+//     the cwd is unbound because their hooks fire everywhere).
+//
+// Cursor's hook surface is the FULLEST of any harness: all four canonical
+// lifecycle boundaries map to NATIVE cursor events (eventHandlerMap):
+//   - `sessionStart`  → SessionStart. INJECTS memory: cursor reads stdout
+//     `{"additional_context": "..."}` into the conversation's initial system
+//     context, so cursor gets real session-start injection THROUGH the hook
+//     (like gemini/pi, unlike opencode). injectionWire 'additional_context'
+//     translates the canonical Claude shape to that field.
+//   - `postToolUse`   → PostToolUse capture (+ live-update via the same
+//     `additional_context` field, injected after the tool result). Registered
+//     with NO matcher — every successful tool reaches the in-handler filter
+//     (cursor tool names: Shell/Read/Write/MCP/Task; see capture-service).
+//   - `preCompact`    → PostCompact boundary. Cursor fires this BEFORE
+//     compaction (its payload carries context_usage, not a compact_summary —
+//     the handler degrades to "summary unavailable"); the consolidation side
+//     effect is the point, not the cosmetic return.
+//   - `sessionEnd`    → SessionEnd (pause + final consolidate), like Claude.
+//
+// Cursor reads AGENTS.md / CLAUDE.md natively as rules, so the ground rule lands
+// in AGENTS.md with no extra wiring (reuses upsertGroundRuleBlock). MCP is
+// registered into `.cursor/mcp.json` (top-level `mcpServers`, Claude format) —
+// additive, since session-start memory is delivered by the sessionStart hook,
+// not MCP.
+//
+// Conformance: Cursor ships a headless CLI agent (`cursor-agent`, install via
+// `curl https://cursor.com/install`, drive with `cursor-agent -p` + a
+// CURSOR_API_KEY), so the conformance harness has a REAL gated live tier like
+// opencode/gemini/pi — NOT install-artifacts-only. One open empirical question
+// the live run settles: the docs confirm cursor's CLOUD agents fire postToolUse
+// + preCompact but NOT sessionStart/sessionEnd (VM-lifecycle); whether the LOCAL
+// cursor-agent fires the session-lifecycle hooks is undocumented, so the live
+// tier probes it rather than assuming. The IDE itself is the primary target and
+// fires all four (verified by hand + guarded by the docs-contract drift tier).
+const CURSOR: HarnessDescriptor = {
+  id: 'cursor',
+  label: 'Cursor',
+  configDirRel: '.cursor',
+  // NATIVE cursor event names; eventHandlerMap routes them to canonical handlers.
+  hookEvents: ['sessionStart', 'postToolUse', 'preCompact', 'sessionEnd'],
+  legacyHookEvents: [],
+  legacyHandledEvents: ['Stop'],
+  eventHandlerMap: {
+    sessionStart: 'SessionStart',
+    postToolUse: 'PostToolUse',
+    preCompact: 'PostCompact',
+    sessionEnd: 'SessionEnd',
+  },
+  mechanism: 'json-hooks-map',
+  registersMcp: true,
+  hookScope: 'project',
+  hookPlacement: 'append',
+  groundRuleFile: 'AGENTS.md',
+  plantsSkill: false,
+  autoBindProject: true,
+  injectionWire: 'additional_context',
 };
 
 /** All supported harnesses, in display order. */
@@ -292,6 +380,7 @@ export const harnessRegistry: readonly HarnessDescriptor[] = [
   GEMINI,
   PI,
   HERMES,
+  CURSOR,
 ];
 
 const byId: Record<HarnessId, HarnessDescriptor> = {
@@ -301,6 +390,7 @@ const byId: Record<HarnessId, HarnessDescriptor> = {
   gemini: GEMINI,
   pi: PI,
   hermes: HERMES,
+  cursor: CURSOR,
 };
 
 /** All harness ids, in registry order. */

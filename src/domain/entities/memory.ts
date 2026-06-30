@@ -38,6 +38,14 @@ export interface Observation extends BaseEntity {
   filePath?: string;
   /** Transcript locator for the boundary consolidator (hybrid ownership, D2). */
   transcriptPath?: string;
+  /** Upstream agent conversation id, when the hook payload exposes one. */
+  agentSessionId?: string;
+  /** Cursor conversation id, used only as provenance/idempotency metadata. */
+  conversationId?: string;
+  /** Cursor generation id, used only as provenance/idempotency metadata. */
+  generationId?: string;
+  /** Upstream tool call id, used to dedupe dual-source Cursor hooks. */
+  toolUseId?: string;
 }
 
 export function createObservation(input: {
@@ -48,6 +56,10 @@ export function createObservation(input: {
   summary?: string;
   filePath?: string;
   transcriptPath?: string;
+  agentSessionId?: string;
+  conversationId?: string;
+  generationId?: string;
+  toolUseId?: string;
 }): Observation {
   return {
     ...baseEntity('obs'),
@@ -58,6 +70,10 @@ export function createObservation(input: {
     ...(input.summary ? { summary: input.summary } : {}),
     ...(input.filePath ? { filePath: input.filePath } : {}),
     ...(input.transcriptPath ? { transcriptPath: input.transcriptPath } : {}),
+    ...(input.agentSessionId ? { agentSessionId: input.agentSessionId } : {}),
+    ...(input.conversationId ? { conversationId: input.conversationId } : {}),
+    ...(input.generationId ? { generationId: input.generationId } : {}),
+    ...(input.toolUseId ? { toolUseId: input.toolUseId } : {}),
   };
 }
 
