@@ -346,6 +346,34 @@ project, mirroring how `search` resolves the project.
   superseded-by / deduped-by pointers), followed by the memory text.
 - Fails with `no memory found with id <id>` when the id is unknown.
 
+### `memorize personal import --source <label>` (+ `personal list`, `personal show`)
+
+Path A: the **global / personal** memory pipeline — a host-level,
+account-scoped store for memory that follows the user **across
+projects** (personal preferences, working-style facts), kept
+deliberately separate from shared project memory. It is NOT a project
+and NOT a `scopeType` value: it has its own event log + projection +
+consolidation under a reserved id, living in `~/.memorize/personal/`
+(a sibling of `projects/`, so it never appears in project listings).
+
+- **The only way in is this explicit import path.** There is no
+  extractor auto-classification routing things into personal memory —
+  that would risk leaking personal preferences into shared project
+  memory (the #181 class of bug). You decide what is personal and import
+  it here on purpose.
+- **It never leaves the host.** The personal store is hard-excluded from
+  sync/teams: every sync entry point refuses the reserved id, so
+  personal memory is structurally private.
+- `personal import --source <label>` reads the SAME extractor-shaped
+  JSON array on stdin as `memory import`
+  (`[{"kind":"decision"|"rationale"|"progress","text":string,"salience":1-10,...}]`),
+  is idempotent (dedup by kind + normalized text), and reports
+  `{imported, skippedDuplicates}`. Unlike `memory import` it needs no
+  bound project — the store is global.
+- `personal list [--json] [--limit <N>]` and
+  `personal show <memoryId> [--json]` read the personal store with the
+  same shapes as their `memory` counterparts.
+
 ### `memorize init [--nested]`
 
 **The recommended one-shot onboarding command** — prefer it over running
