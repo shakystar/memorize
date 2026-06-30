@@ -56,6 +56,25 @@ export function renderClaudeStartupContext(
     });
   }
 
+  if (payload.personalMemories && payload.personalMemories.length > 0) {
+    const personalLines: string[] = [
+      'Personal memory (cross-project; your preferences & working style):',
+    ];
+    for (const memory of payload.personalMemories) {
+      personalLines.push(`- [${memory.kind}/s${memory.salience}] ${memory.text}`);
+    }
+    // Priority 2.2: just below the project memory pool (2), above the
+    // observation tail (2.5) — a distinct, high-value channel that does not
+    // compete with project memories for the same slot.
+    blocks.push({
+      priority: 2.2,
+      source: 'memorize.personal',
+      content: wrapUntrusted(personalLines.join('\n'), {
+        source: 'memorize.personal',
+      }),
+    });
+  }
+
   if (payload.recentObservations && payload.recentObservations.length > 0) {
     const observationLines: string[] = ['Recent work signals (prior session tail):'];
     for (const observation of payload.recentObservations) {

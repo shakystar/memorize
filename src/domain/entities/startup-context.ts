@@ -48,6 +48,17 @@ export interface StartupContextPayload {
     salience: number;
     createdAt: ISODateString;
   }>;
+  /** Path A: global personal memory (cross-project preferences, working style)
+   *  surfaced in its OWN dedicated channel, ranked by salience — NOT mixed into
+   *  the project `consolidatedMemories` pool. A small fixed slot (top-N) so it
+   *  never crowds out project memory; rendered as a distinct section so the
+   *  personal/project boundary is visible in context too. */
+  personalMemories?: Array<{
+    id: string;
+    kind: ConsolidatedMemoryKind;
+    text: string;
+    salience: number;
+  }>;
   /** CLS short-term layer: tail of the previous session's raw observations
    *  (high-signal only — the capture filter already rejected chatter). */
   recentObservations?: Array<{

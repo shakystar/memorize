@@ -379,6 +379,11 @@ consolidation under a reserved id, living in `~/.memorize/personal/`
 - `personal list [--json] [--limit <N>]` and
   `personal show <memoryId> [--json]` read the personal store with the
   same shapes as their `memory` counterparts.
+- **Startup injection.** At SessionStart the top personal memories (a
+  small, salience-ranked fixed slot) are surfaced in their OWN context
+  channel (`memorize.personal`), alongside but never mixed into the
+  project memory pool — so the personal/project boundary is visible in
+  context, not just in storage.
 
 ### `memorize init [--nested]`
 

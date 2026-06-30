@@ -6,9 +6,11 @@ import { spawnSync } from 'node:child_process';
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
+import { renderClaudeStartupContext } from '../../src/adapters/claude/renderer.js';
 import { CURRENT_SCHEMA_VERSION, PERSONAL_STORE_ID } from '../../src/domain/common.js';
 import { createObservation } from '../../src/domain/entities.js';
 import { autoPull, autoPush } from '../../src/services/auto-sync-service.js';
+import { loadStartContext } from '../../src/services/context-service.js';
 import {
   type Consolidator,
   consolidate,
@@ -222,6 +224,68 @@ describe('auto-classification routing (consolidation → personal store)', () =>
 
     expect(listValidMemories(projectId)).toHaveLength(2);
     // The personal store was never even created.
+    expect(existsSync(join(getPersonalRoot(), 'memorize.db'))).toBe(false);
+  });
+});
+
+describe('startup injection (dedicated personal channel)', () => {
+  const projectId = 'proj_inject_test1';
+  const ts = '2026-06-30T00:00:00.000Z';
+
+  async function seedProject(): Promise<void> {
+    await appendEvent({
+      type: 'project.created',
+      projectId,
+      scopeType: 'project',
+      scopeId: projectId,
+      actor: 'test',
+      payload: {
+        id: projectId,
+        schemaVersion: CURRENT_SCHEMA_VERSION,
+        createdAt: ts,
+        updatedAt: ts,
+        title: 'Inject',
+        summary: 'injection test project',
+        goals: [],
+        status: 'active',
+        rootPath: '/tmp/inject',
+        activeWorkstreamIds: [],
+        activeTaskIds: [],
+        acceptedDecisionIds: [],
+        ruleIds: [],
+      } as never,
+    });
+    await rebuildProjectProjection(projectId);
+  }
+
+  it('surfaces personal memory in its own channel, separate from the project pool', async () => {
+    await seedProject();
+    await importPersonalMemories({
+      actor: 'claude',
+      source: 'notes',
+      itemsJson: JSON.stringify([
+        { kind: 'decision', text: 'user prefers full sentences', salience: 9 },
+      ]),
+    });
+
+    const payload = await loadStartContext({ projectId });
+    expect(payload.personalMemories?.map((m) => m.text)).toContain(
+      'user prefers full sentences',
+    );
+    // Not mixed into the project memory pool (which is empty here).
+    expect(payload.consolidatedMemories ?? []).toHaveLength(0);
+
+    const rendered = renderClaudeStartupContext(payload);
+    expect(rendered).toContain('Personal memory (cross-project');
+    expect(rendered).toContain('full sentences');
+    expect(rendered).toContain('memorize.personal');
+  });
+
+  it('omits the personal channel entirely when no personal store exists', async () => {
+    await seedProject();
+    const payload = await loadStartContext({ projectId });
+    expect(payload.personalMemories).toBeUndefined();
+    // And the personal store was not materialized just by loading startup context.
     expect(existsSync(join(getPersonalRoot(), 'memorize.db'))).toBe(false);
   });
 });
