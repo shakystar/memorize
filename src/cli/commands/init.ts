@@ -2,7 +2,7 @@ import { getHarness } from '../../harness/registry.js';
 import { onboardProject } from '../../services/onboarding-service.js';
 import type { CliContext } from '../context.js';
 import { parseFlags } from '../parse-flags.js';
-import { codexPostInstallNotice } from './install.js';
+import { codexPostInstallNotice, frozenHarnessNotice } from './install.js';
 
 /**
  * `memorize init` — one-shot onboarding for the current directory. Replaces the
@@ -36,8 +36,10 @@ export async function runInitCommand(
   ];
 
   for (const w of result.wired) {
-    const scope = getHarness(w.id).hookScope === 'global' ? 'global' : 'per-project';
-    lines.push(`OK  ${w.label} wired (${scope}): ${w.configPath}`);
+    const descriptor = getHarness(w.id);
+    const scope = descriptor.hookScope === 'global' ? 'global' : 'per-project';
+    const tier = descriptor.supportTier === 'frozen' ? ', frozen' : '';
+    lines.push(`OK  ${w.label} wired (${scope}${tier}): ${w.configPath}`);
   }
 
   if (result.wired.length === 0) {
@@ -46,8 +48,8 @@ export async function runInitCommand(
       '',
       'No supported AI agent detected yet.',
       'Install one, then re-run `memorize init`. Or wire one manually:',
-      '  memorize install codex     (global)',
-      '  memorize install claude    (run inside a project)',
+      '  memorize install claude    (run inside a project; first-class)',
+      '  memorize install codex     (global; frozen — support not guaranteed)',
     );
   }
 
@@ -56,6 +58,16 @@ export async function runInitCommand(
   }
 
   const wiredIds = new Set(result.wired.map((w) => w.id));
+
+  // memorize is Claude-first: any wired non-Claude harness is frozen. Emit one
+  // consolidated "support not guaranteed" banner naming them.
+  const frozenLabels = result.wired
+    .filter((w) => getHarness(w.id).supportTier === 'frozen')
+    .map((w) => w.label);
+  if (frozenLabels.length > 0) {
+    lines.push(...frozenHarnessNotice(frozenLabels));
+  }
+
   if (wiredIds.has('codex')) {
     lines.push(...codexPostInstallNotice());
   }

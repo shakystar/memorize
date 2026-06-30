@@ -793,8 +793,14 @@ to) and exposes:
 Limit vs hooks: MCP tools/resources are pulled on-demand by the agent — they are
 NOT auto-injected before the first turn the way a `SessionStart` hook is.
 Deterministic pre-turn injection + automatic capture still need the hook pillar
-(`install claude` / `install codex`); MCP is the universal fallback for hosts
-without a hook system.
+(`install claude`); MCP is the universal fallback for hosts without a hook system.
+
+Support tiers: **Claude Code is the first-class, conformance-gated harness.** The
+other hook integrations (codex/opencode/gemini/pi/hermes/cursor) are **frozen** —
+kept in-tree and still installable, but no longer covered by conformance CI and
+may drift as those harnesses change upstream (community-maintained, PRs welcome).
+This generic MCP server is the durable cross-harness surface for everything that
+is not Claude.
 
 ### `memorize install claude`
 

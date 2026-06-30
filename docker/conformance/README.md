@@ -1,10 +1,19 @@
 # Harness conformance (Docker)
 
+> **FROZEN — no longer a CI gate.** memorize is now Claude Code-first. The
+> non-Claude harness integrations (codex/opencode/gemini/pi/hermes/cursor) are kept
+> in-tree and still install/run, but their support is **not guaranteed** and
+> they are **not** gated by CI any more — the `harness-conformance.yml` workflow
+> was removed. This harness is retained as a **manual** tool: a contributor
+> fixing or reviving a frozen harness should run it themselves
+> (`docker run --rm memorize-conformance <id>`) and paste the result in the PR.
+> Upstream-drift catching is now best-effort/community, not automated.
+
 Repeatable, containerised verification that memorize's integration still works
 against the **real** agent-harness CLIs. This replaces manual dogfooding for the
-parts that can be automated and is the backbone of harness-compatibility
-maintenance: when an upstream harness changes its config schema, paths, or
-plugin API, a scheduled run here turns that silent drift into a red check.
+parts that can be automated and was historically the backbone of harness-
+compatibility maintenance: when an upstream harness changes its config schema,
+paths, or plugin API, a run here turns that silent drift into a visible failure.
 
 ## Tiers
 
@@ -51,11 +60,14 @@ must already exist in `src/harness/registry.ts`.
 
 ## Tiers (when each runs)
 
-- Tier A, A', **A''** run on every PR touching harness code (model-free,
-  deterministic). A'' feeds the MAPPED tool payloads the plugin emits
-  (`Write`/`Edit`/`shell`) to the real `memorize hook` and asserts capture.
-- Tier B (live, model) runs on **schedule + manual dispatch only** — cost/flake
-  control. Auto-enables when the `ANTHROPIC_API_KEY` repo secret exists.
+These tiers no longer run automatically (the CI workflow was removed). Run them
+**manually** when touching or reviving a frozen harness:
+
+- Tier A, A', **A''** are model-free and deterministic. A'' feeds the MAPPED tool
+  payloads the plugin emits (`Write`/`Edit`/`shell`) to the real `memorize hook`
+  and asserts capture.
+- Tier B (live, model) needs a provider key; enable per harness with its
+  `<ID>_CONFORMANCE_LIVE=1` flag plus the matching key (see Run, above).
 
 ## Status — opencode (validated against opencode 1.17.11 in CI)
 
