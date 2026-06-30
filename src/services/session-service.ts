@@ -1,3 +1,5 @@
+import path from 'node:path';
+
 import {
   ACTOR_SYSTEM,
   CURRENT_SCHEMA_VERSION,
@@ -20,6 +22,8 @@ import {
   writeCwdPointer,
 } from '../storage/cwd-session-store.js';
 import { appendEvent } from '../storage/event-store.js';
+import { withFileLock } from '../storage/file-lock.js';
+import { getProjectRoot } from '../storage/path-resolver.js';
 import {
   deleteShareWatermark,
   sweepOrphanShareWatermarks,
@@ -356,23 +360,33 @@ export async function pauseSession(
     ? await readCwdPointer(cwd, options.sessionId)
     : await findCwdSession(cwd);
   if (!pointer?.projectId) return;
+  const projectId = pointer.projectId;
 
-  const at = nowIso();
-  const heartbeat: SessionHeartbeatPayload = {
-    sessionId: pointer.sessionId,
-    at,
-  };
-  await appendEvent({
-    type: 'session.paused',
-    projectId: pointer.projectId,
-    scopeType: 'session',
-    scopeId: pointer.sessionId,
-    actor: pointer.startedBy ?? ACTOR_SYSTEM,
-    payload: heartbeat,
-  });
+  await withFileLock(
+    path.join(getProjectRoot(projectId), 'locks'),
+    `session-pause-${pointer.sessionId}`,
+    async () => {
+      if (getSession(projectId, pointer.sessionId)?.status === 'paused') {
+        return;
+      }
+      const at = nowIso();
+      const heartbeat: SessionHeartbeatPayload = {
+        sessionId: pointer.sessionId,
+        at,
+      };
+      await appendEvent({
+        type: 'session.paused',
+        projectId,
+        scopeType: 'session',
+        scopeId: pointer.sessionId,
+        actor: pointer.startedBy ?? ACTOR_SYSTEM,
+        payload: heartbeat,
+      });
   // session.paused only mutates session state — no searchable entity
   // changes, so the FTS reindex is safely skipped.
-  await rebuildProjectProjection(pointer.projectId, { reindexSearch: false });
+      await rebuildProjectProjection(projectId, { reindexSearch: false });
+    },
+  );
   // Pointer intentionally preserved — that is the whole point of
   // pause vs end. resumeSession() will find it on reattach.
 }

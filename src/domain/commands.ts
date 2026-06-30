@@ -44,4 +44,5 @@ export interface CreateCheckpointInput {
   promotedDecisions?: string[];
   deferredItems?: string[];
   discardableItems?: string[];
+  sourceHookId?: string;
 }

@@ -104,6 +104,7 @@ synthetic_capture_check() {
   local spec name payload dir cmd cnt
   for spec in \
     'Write|{"tool_name":"Write","tool_input":{"file_path":"a.ts","content":"x"}}' \
+    'Write-BOM|{"tool_name":"Write","tool_input":{"file_path":"bom.ts","content":"x"}}' \
     'Shell|{"tool_name":"Shell","tool_input":{"command":"rm -rf build"}}'; do
     name="${spec%%|*}"
     payload="${spec#*|}"
@@ -115,7 +116,13 @@ synthetic_capture_check() {
       ko "synthetic capture [$name]: no memorize postToolUse command in .cursor/hooks.json (writer drift)"
       continue
     fi
-    printf '%s' "$payload" | ( cd "$dir" && eval "$cmd" >/dev/null 2>&1 )
+    # Real Cursor payloads can start with UTF-8 BOM bytes; exercise that exact
+    # stdin shape through the installed hook command, not only the parser unit.
+    if [ "$name" = "Write-BOM" ]; then
+      printf '\357\273\277%s' "$payload" | ( cd "$dir" && eval "$cmd" >/dev/null 2>&1 )
+    else
+      printf '%s' "$payload" | ( cd "$dir" && eval "$cmd" >/dev/null 2>&1 )
+    fi
     cnt="$(_pending_count "$dir")"
     if [ "${cnt:-0}" -ge 1 ]; then
       ok "synthetic capture [$name]: ${cnt} observation(s) via the written hooks.json command"
