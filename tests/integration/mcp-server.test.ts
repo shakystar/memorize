@@ -1,7 +1,7 @@
 import { mkdir, mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { spawnSync } from 'node:child_process';
+import { spawnSync, type SpawnSyncReturns } from 'node:child_process';
 
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
@@ -41,6 +41,14 @@ function bindProject(): void {
     env: childEnv(),
   });
   expect(result.status).toBe(0);
+}
+
+function showProject(): SpawnSyncReturns<string> {
+  return spawnSync('node', [tsxCliPath, cliEntryPath, 'project', 'show'], {
+    cwd: sandbox,
+    encoding: 'utf8',
+    env: childEnv(),
+  });
 }
 
 async function connectClient(): Promise<Client> {
@@ -144,5 +152,24 @@ describe('memorize mcp server', () => {
     } finally {
       await client.close();
     }
+  }, 30_000);
+
+  it('context reports not-bound without initializing the cwd', async () => {
+    // No bindProject() ??memorize_context is read-only and must not create one.
+    const client = await connectClient();
+    try {
+      const result = await client.callTool({
+        name: 'memorize_context',
+        arguments: {},
+      });
+      expect((result as { isError?: boolean }).isError).toBe(true);
+      expect(textOf(result as never)).toMatch(/not bound/);
+    } finally {
+      await client.close();
+    }
+
+    const show = showProject();
+    expect(show.status).not.toBe(0);
+    expect(show.stderr).toContain('No project bound');
   }, 30_000);
 });

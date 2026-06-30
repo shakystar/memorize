@@ -45,6 +45,13 @@ function notBoundResult(): { content: Array<{ type: 'text'; text: string }>; isE
   };
 }
 
+async function composeBoundStartupContext(cwd: string): Promise<string | undefined> {
+  const projectId = await getBoundProjectId(cwd);
+  if (!projectId) return undefined;
+  const composed = await composeStartupContext({ agent: 'claude', cwd });
+  return composed.startupContext;
+}
+
 export function createMcpServer(cwd: string): McpServer {
   const server = new McpServer({ name: 'memorize', version: getCurrentVersion() });
 
@@ -88,10 +95,11 @@ export function createMcpServer(cwd: string): McpServer {
       inputSchema: {},
     },
     async () => {
-      const composed = await composeStartupContext({ agent: 'claude', cwd });
+      const startupContext = await composeBoundStartupContext(cwd);
+      if (startupContext === undefined) return notBoundResult();
       return {
         content: [
-          { type: 'text', text: composed.startupContext || 'No project context yet.' },
+          { type: 'text', text: startupContext || 'No project context yet.' },
         ],
       };
     },
@@ -196,8 +204,15 @@ export function createMcpServer(cwd: string): McpServer {
       mimeType: 'text/markdown',
     },
     async (uri) => {
-      const composed = await composeStartupContext({ agent: 'claude', cwd });
-      return { contents: [{ uri: uri.href, text: composed.startupContext || '' }] };
+      const startupContext = await composeBoundStartupContext(cwd);
+      return {
+        contents: [
+          {
+            uri: uri.href,
+            text: startupContext ?? notBoundResult().content[0]!.text,
+          },
+        ],
+      };
     },
   );
 
@@ -208,14 +223,14 @@ export function createMcpServer(cwd: string): McpServer {
       description: 'Inject the project memory context at the start of a session.',
     },
     async () => {
-      const composed = await composeStartupContext({ agent: 'claude', cwd });
+      const startupContext = await composeBoundStartupContext(cwd);
       return {
         messages: [
           {
             role: 'user',
             content: {
               type: 'text',
-              text: composed.startupContext || 'No project context yet.',
+              text: startupContext ?? notBoundResult().content[0]!.text,
             },
           },
         ],
