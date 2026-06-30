@@ -97,6 +97,8 @@ The deeper story lives in [ARCHITECTURE.md](./docs/ARCHITECTURE.md): the two-lay
 
 Memorize is not tied to one agent. Claude Code and Codex share the same project brain, and your desktop and laptop read the same event log. There is no server, no central API, and no vendor lock-in. Everything is local-first and event-sourced.
 
+> **Support tiers.** Claude Code is the first-class, fully maintained target. The other harness integrations (Codex, opencode, Gemini CLI, pi, Hermes, Cursor) are **frozen**: kept in the tree and still installable, but no longer covered by conformance CI and not guaranteed to keep pace with upstream changes — community-maintained, fixes welcome via PR. Any MCP-capable host can also use the generic [`memorize mcp`](./AGENT_GUIDE.md) server.
+
 ## Day-to-day commands
 
 You rarely need these; your AI drives most of the interaction. The ones a human might reach for:

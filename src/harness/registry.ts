@@ -32,6 +32,17 @@ export interface HarnessDescriptor {
   id: HarnessId;
   /** Human label for summaries/notices. */
   label: string;
+  /**
+   * Product support tier.
+   *   - 'first-class': fully maintained and conformance-gated in CI; the primary
+   *     target. Currently only Claude Code.
+   *   - 'frozen': the integration code is kept in-tree and still installs/runs,
+   *     but memorize is Claude-first and no longer gates these in conformance CI.
+   *     They may drift as the harness changes upstream and are community-
+   *     maintained — fixes welcome via PR. Surfaced in install/init notices and
+   *     docs so "support not guaranteed" is a discoverable signal, not just prose.
+   */
+  supportTier: 'first-class' | 'frozen';
   /** Config dir relative to the home directory — the "this harness has run"
    *  detection signal. NOT always `.${id}`: opencode uses `.config/opencode`,
    *  not `.opencode`. */
@@ -126,6 +137,7 @@ export interface HarnessDescriptor {
 const CLAUDE: HarnessDescriptor = {
   id: 'claude',
   label: 'Claude Code',
+  supportTier: 'first-class',
   configDirRel: '.claude',
   hookEvents: ['SessionStart', 'PostCompact', 'SessionEnd', 'PostToolUse'],
   legacyHookEvents: ['Stop', 'PreCompact'],
@@ -149,6 +161,7 @@ const CLAUDE: HarnessDescriptor = {
 const CODEX: HarnessDescriptor = {
   id: 'codex',
   label: 'Codex',
+  supportTier: 'frozen',
   configDirRel: '.codex',
   hookEvents: ['SessionStart', 'PostToolUse', 'PostCompact'],
   legacyHookEvents: ['Stop'],
@@ -174,6 +187,7 @@ const CODEX: HarnessDescriptor = {
 const OPENCODE: HarnessDescriptor = {
   id: 'opencode',
   label: 'opencode',
+  supportTier: 'frozen',
   // opencode's config lives under ~/.config/opencode, NOT ~/.opencode.
   configDirRel: '.config/opencode',
   hookEvents: ['PostToolUse', 'PostCompact'],
@@ -200,6 +214,7 @@ const OPENCODE: HarnessDescriptor = {
 const GEMINI: HarnessDescriptor = {
   id: 'gemini',
   label: 'Gemini CLI',
+  supportTier: 'frozen',
   configDirRel: '.gemini',
   // NATIVE gemini event names; eventHandlerMap routes them to canonical handlers.
   hookEvents: ['SessionStart', 'AfterTool'],
@@ -239,6 +254,7 @@ const GEMINI: HarnessDescriptor = {
 const PI: HarnessDescriptor = {
   id: 'pi',
   label: 'pi',
+  supportTier: 'frozen',
   configDirRel: '.pi',
   hookEvents: ['SessionStart', 'PostToolUse', 'PostCompact'],
   legacyHookEvents: [],
@@ -281,6 +297,7 @@ const PI: HarnessDescriptor = {
 const HERMES: HarnessDescriptor = {
   id: 'hermes',
   label: 'Hermes',
+  supportTier: 'frozen',
   configDirRel: '.hermes',
   // NATIVE hermes event names; eventHandlerMap routes them to canonical handlers.
   hookEvents: ['pre_llm_call', 'post_tool_call', 'on_session_finalize'],
@@ -351,6 +368,7 @@ const HERMES: HarnessDescriptor = {
 const CURSOR: HarnessDescriptor = {
   id: 'cursor',
   label: 'Cursor',
+  supportTier: 'frozen',
   configDirRel: '.cursor',
   // NATIVE cursor event names; eventHandlerMap routes them to canonical handlers.
   hookEvents: ['sessionStart', 'postToolUse', 'preCompact', 'sessionEnd'],
