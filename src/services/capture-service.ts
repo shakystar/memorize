@@ -255,7 +255,9 @@ export function parsePostToolUsePayload(
 ): PostToolUsePayloadFields {
   let parsed: unknown;
   try {
-    parsed = raw ? JSON.parse(raw) : {};
+    // Cursor pipes hook payloads as UTF-8 WITH a BOM; JSON.parse rejects a
+    // leading U+FEFF, which would silently drop every capture. Strip it.
+    parsed = raw ? JSON.parse(raw.replace(/^\uFEFF/, '')) : {};
   } catch {
     return { toolInputText: '' };
   }

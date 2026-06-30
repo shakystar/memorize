@@ -76,7 +76,10 @@ function parseJsonObject(raw: string | undefined): Record<string, unknown> {
   if (!raw) return {};
   let parsed: unknown;
   try {
-    parsed = JSON.parse(raw);
+    // Cursor pipes hook payloads as UTF-8 WITH a BOM; JSON.parse rejects a
+    // leading U+FEFF, which would silently drop every payload (no capture,
+    // no session-id linking). Strip it before parsing.
+    parsed = JSON.parse(raw.replace(/^\uFEFF/, ''));
   } catch {
     process.stderr.write('WARN: hook stdin is not valid JSON; ignoring\n');
     return {};
@@ -144,7 +147,7 @@ function prepareHookText(
 function transcriptPathFromPayload(raw: string | undefined): string | undefined {
   if (!raw) return undefined;
   try {
-    const obj = JSON.parse(raw) as Record<string, unknown>;
+    const obj = JSON.parse(raw.replace(/^\uFEFF/, '')) as Record<string, unknown>;
     return typeof obj.transcript_path === 'string' ? obj.transcript_path : undefined;
   } catch {
     return undefined;
