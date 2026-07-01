@@ -14,6 +14,18 @@ log layout or the public CLI surface.
 > entries by hand. See
 > [CONTRIBUTING.md](.github/CONTRIBUTING.md#releasing).
 
+## [2.6.0](https://github.com/shakystar/memorize/compare/v2.5.0...v2.6.0) (2026-07-01)
+
+
+### Features
+
+* **3.0.0:** M1 local accounts + per-account personal store; W1 personal cross-device sync ([#221](https://github.com/shakystar/memorize/issues/221)) ([e53b5cc](https://github.com/shakystar/memorize/commit/e53b5cc15aadef38c7a51c2d0d9a12067bb1d891))
+* **auth:** browser device-auth login (RFC 8628), replacing BYO-token ([#231](https://github.com/shakystar/memorize/issues/231)) ([4c294a5](https://github.com/shakystar/memorize/commit/4c294a5627946a28fd9e08e3a718cd49aa87fa18))
+* **memory:** memory gc — physical reclamation of un-pushed retracted memories (3.0.0 M3-b, SoT-050) ([#228](https://github.com/shakystar/memorize/issues/228)) ([9e13860](https://github.com/shakystar/memorize/commit/9e13860f6eb5146e9957f6179ea7b4af0931b9b0))
+* **memory:** memory revert --session — consolidated revert (3.0.0 M3-c, SoT-050) ([#229](https://github.com/shakystar/memorize/issues/229)) ([0988b79](https://github.com/shakystar/memorize/commit/0988b796e392035125b07678c568037a123c288b))
+* **memory:** memory.retracted tombstone (3.0.0 M3-a, SoT-050) ([#227](https://github.com/shakystar/memorize/issues/227)) ([10959c1](https://github.com/shakystar/memorize/commit/10959c13b5b5ed7e0fa58f1e44d794d58eb289df))
+* **projection:** source-keyed (entity,writer) lane projection (3.0.0 M2) ([#222](https://github.com/shakystar/memorize/issues/222)) ([5458663](https://github.com/shakystar/memorize/commit/5458663e176099aa3af2cbe9123d64bb47a5292e))
+
 ## [2.5.0](https://github.com/shakystar/memorize/compare/v2.4.0...v2.5.0) (2026-06-30)
 
 
