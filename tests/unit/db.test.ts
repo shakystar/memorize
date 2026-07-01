@@ -35,6 +35,50 @@ afterEach(() => {
   fs.rmSync(tmpRoot, { recursive: true, force: true });
 });
 
+/**
+ * Seed the pre-v12 projection tables a real DB would already have at the
+ * fixture's pinned `user_version`. The old-shape migration fixtures below only
+ * hand-create `events` and fake `user_version`, so the v3/v4/v6/v10 tables that
+ * later migrations touch never exist. That was harmless until v12 (the
+ * `(entity, writer)` provenance migration) began ALTERing tasks/handoffs/
+ * sessions/memories/segments and rebuilding search_fts — on a real DB those all
+ * exist by then; here they must be created so the fixture is faithful. Shapes
+ * mirror the pre-v12 DDL exactly (see src/storage/db.ts migrations v3/v4/v6/v10);
+ * `IF NOT EXISTS` keeps them inert if an in-sequence CREATE also runs on upgrade.
+ */
+function seedPreV12ProjectionTables(
+  db: Database.Database,
+  opts: { withMemoriesSegments?: boolean } = {},
+): void {
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS tasks (
+      id TEXT PRIMARY KEY, status TEXT, workstream_id TEXT,
+      created_at TEXT, updated_at TEXT, data TEXT NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS handoffs (id TEXT PRIMARY KEY, data TEXT NOT NULL);
+    CREATE TABLE IF NOT EXISTS sessions (
+      id TEXT PRIMARY KEY, status TEXT, data TEXT NOT NULL
+    );
+    CREATE VIRTUAL TABLE IF NOT EXISTS search_fts USING fts5(
+      entity_id UNINDEXED, kind UNINDEXED, text, tokenize='unicode61'
+    );
+  `);
+  if (opts.withMemoriesSegments) {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS memories (
+        id TEXT PRIMARY KEY, kind TEXT, salience INTEGER, created_at TEXT,
+        invalid_at TEXT, superseded_by TEXT, last_accessed_at TEXT,
+        deduped_by TEXT, injection_count INTEGER NOT NULL DEFAULT 0,
+        data TEXT NOT NULL
+      );
+      CREATE TABLE IF NOT EXISTS segments (
+        id TEXT PRIMARY KEY, session_id TEXT, created_at TEXT NOT NULL,
+        ordinal INTEGER, source TEXT, text TEXT NOT NULL
+      );
+    `);
+  }
+}
+
 describe('db', () => {
   it('opens in WAL mode', () => {
     const db = getDb(VALID_PROJECT_ID);
@@ -190,7 +234,12 @@ describe('db v5 schema_version rebuild', () => {
     for (const row of oldShapeRows) {
       insert.run(row.id, row.sv, row.sid);
     }
-    // Pretend v1..v4 have all been applied (we only need events for this test).
+    // A real v4 db also has the v3 projection tables + v4 search_fts; recreate
+    // them so the later v12 provenance migration (which ALTERs tasks/handoffs/
+    // sessions and rebuilds search_fts) has something to act on. memories +
+    // segments are created in-sequence by v6/v10 during the upgrade from v4.
+    seedPreV12ProjectionTables(db);
+    // Pretend v1..v4 have all been applied (this test asserts the v5 rebuild).
     db.pragma('user_version = 4');
     db.close();
   }
@@ -291,7 +340,12 @@ describe('db v11 provenance columns', () => {
              'user', '{}')`,
         )
         .run();
-      seed.pragma('user_version = 10'); // pre-v11; only v11 should run on open
+      // A real v10 db has the v3/v4/v6/v10 projection tables; recreate them so
+      // the v12 provenance migration (ALTER tasks/handoffs/sessions/memories/
+      // segments + rebuild search_fts) succeeds. At v10 none are created during
+      // upgrade (only v11 + v12 run), so seed the full set here.
+      seedPreV12ProjectionTables(seed, { withMemoriesSegments: true });
+      seed.pragma('user_version = 10'); // pre-v11; v11 + v12 run on open
       seed.close();
 
       const db = openDbAt(dbFile);

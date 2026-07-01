@@ -7,7 +7,12 @@ import {
 } from './embeddings-service.js';
 import { listEmbeddings } from './embeddings-store.js';
 import { listSegmentTexts } from './segment-store.js';
-import { listValidMemories, type SearchKind } from './projection-store.js';
+import {
+  laneWhere,
+  listValidMemories,
+  type ProjectionLane,
+  type SearchKind,
+} from './projection-store.js';
 import { requireBoundProjectId } from './project-service.js';
 
 export interface SearchHit {
@@ -54,6 +59,7 @@ export function searchProject(
   projectId: string,
   query: string,
   limit: number = DEFAULT_SEARCH_LIMIT,
+  lane: ProjectionLane = 'self',
 ): SearchHit[] {
   const match = toFtsMatch(query);
   if (!match) return [];
@@ -65,7 +71,7 @@ export function searchProject(
               snippet(search_fts, 2, '[', ']', '…', 10) AS snippet,
               bm25(search_fts) AS score
          FROM search_fts
-        WHERE search_fts MATCH ?
+        WHERE search_fts MATCH ? AND ${laneWhere(lane)}
         ORDER BY bm25(search_fts)
         LIMIT ?`,
     )
@@ -213,6 +219,7 @@ export function searchByKind(
   query: string,
   kind: SearchKind,
   limit: number = DEFAULT_SEARCH_LIMIT,
+  lane: ProjectionLane = 'self',
 ): SearchHit[] {
   const match = toFtsMatch(query);
   if (!match) return [];
@@ -223,7 +230,7 @@ export function searchByKind(
               snippet(search_fts, 2, '[', ']', '…', 10) AS snippet,
               bm25(search_fts) AS score
          FROM search_fts
-        WHERE search_fts MATCH ? AND kind = ?
+        WHERE search_fts MATCH ? AND kind = ? AND ${laneWhere(lane)}
         ORDER BY bm25(search_fts)
         LIMIT ?`,
     )
