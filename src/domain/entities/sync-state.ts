@@ -24,6 +24,15 @@ export interface ProjectSyncState extends BaseEntity {
   lastSyncAt?: ISODateString;
   syncStatus: SyncStatus;
   /**
+   * Workspace membership CACHE (W-a, SoT-022) — control-plane facts, NOT truth.
+   * When `remoteProjectId` is a server-minted `wsp_`, these mirror the gateway's
+   * role + reachability so status/labeling need no round-trip; refreshed from the
+   * gateway on sync and never authoritative, never event-sourced. Absent for a
+   * plain `proj_` relay sync (their presence is what marks a workspace binding).
+   */
+  workspaceRole?: 'owner' | 'member';
+  inviteReachable?: boolean;
+  /**
    * base64 AES-256 key for client-side E2E encryption of synced event payloads
    * (#182). When present, the sync push/pull boundary encrypts each event's
    * `payload` before it leaves the machine and decrypts it on arrival; absent =

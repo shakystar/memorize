@@ -155,7 +155,10 @@ export async function rebuildProjectProjection(
   opts: RebuildProjectProjectionOptions = {},
 ): Promise<void> {
   const reindexSearch = opts.reindexSearch ?? true;
-  const state = reduceProjectState(await readEvents(projectId));
+  // Pass the store's own id as the authoritative self identity so a workspace
+  // union (multiple members' project.created) reduces without mis-anchoring self
+  // by seq order or throwing on a foreign genesis (SoT-021/022).
+  const state = reduceProjectState(await readEvents(projectId), projectId);
   if (!state.project) {
     throw new Error(`Project ${projectId} has no project.created event`);
   }
@@ -523,7 +526,10 @@ export async function getProjectStateAtRevision(
   projectId: string,
   upToEventId: string,
 ): Promise<ProjectState> {
-  return reduceProjectState(await readEventsUpTo(projectId, upToEventId));
+  return reduceProjectState(
+    await readEventsUpTo(projectId, upToEventId),
+    projectId,
+  );
 }
 
 export function getMemoryIndex(

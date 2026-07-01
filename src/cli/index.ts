@@ -24,6 +24,7 @@ import { runSetupCommand } from './commands/setup.js';
 import { runTaskCommand } from './commands/task.js';
 import { runUninstallCommand } from './commands/uninstall.js';
 import { runUpdateCommand } from './commands/update.js';
+import { runWorkspaceCommand } from './commands/workspace.js';
 import type { CliContext, CommandHandler } from './context.js';
 import { renderScaffoldUsage } from './usage.js';
 
@@ -36,6 +37,7 @@ const handlers: Record<string, CommandHandler> = {
   // (the namespaced form stays canonical, mirroring `gh auth login`).
   login: (args, ctx) => runAuthCommand(['login', ...args], ctx),
   project: runProjectCommand,
+  workspace: runWorkspaceCommand,
   projection: runProjectionCommand,
   memory: runMemoryCommand,
   'memory-index': runMemoryIndexCommand,
