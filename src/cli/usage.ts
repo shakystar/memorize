@@ -10,6 +10,7 @@ export function renderScaffoldUsage(): string {
     '  memorize search <query>      Search project memory',
     '  memorize memory list         List the project current (valid) memories',
     '  memorize memory show <id>    Print a memory full text + metadata',
+    '  memorize memory retract <id> Retract (tombstone) a memory (append-only, reversible)',
     '  memorize project show        Print bound project summary (JSON)',
     '  memorize version             Print the version of this binary',
     '',

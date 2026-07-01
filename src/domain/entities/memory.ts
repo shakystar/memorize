@@ -175,3 +175,21 @@ export interface MemorySupersededPayload {
   supersededBy: EntityId;
   reason: string;
 }
+
+/**
+ * Retraction = tombstone (SoT-050). A retraction removes a memory with NO
+ * replacement — an explicit "forget this", distinct from supersede (which
+ * closes the window because a newer memory replaces it). It closes the
+ * memory's validity window the same way, but carries no `supersededBy` and a
+ * separate `retractedAt` marker so it is (a) reversible via a later
+ * retract-the-retraction event and (b) distinguishable in audit. Provenance
+ * (`writer`) rides the DomainEvent, not this payload, so a future owner-only
+ * global retract over a workspace union can be judged by the retractor's role
+ * (SoT-040, Hub H030) without re-shaping the event.
+ */
+export interface MemoryRetractedPayload {
+  /** The memory whose validity window this event closes. */
+  retracts: EntityId;
+  /** Why it was retracted (free-form, optional). */
+  reason?: string;
+}

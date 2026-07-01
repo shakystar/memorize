@@ -3,7 +3,10 @@ import process from 'node:process';
 import { ACTOR_SYSTEM } from '../../domain/common.js';
 import { autoPush } from '../../services/auto-sync-service.js';
 import { importMemories } from '../../services/memory-import-service.js';
-import { requireBoundProjectId } from '../../services/project-service.js';
+import {
+  requireBoundProjectId,
+  retractMemory,
+} from '../../services/project-service.js';
 import {
   getMemory,
   getSession,
@@ -21,7 +24,10 @@ const SHOW_USAGE = 'Usage: memorize memory show <memoryId> [--json]';
 
 const LIST_USAGE = 'Usage: memorize memory list [--json] [--limit <N>]';
 
-const USAGE = `${IMPORT_USAGE}\n${SHOW_USAGE}\n${LIST_USAGE}`;
+const RETRACT_USAGE =
+  'Usage: memorize memory retract <memoryId> [--reason <text>]';
+
+const USAGE = `${IMPORT_USAGE}\n${SHOW_USAGE}\n${LIST_USAGE}\n${RETRACT_USAGE}`;
 
 async function readStdin(): Promise<string | undefined> {
   if (process.stdin.isTTY) {
@@ -58,7 +64,41 @@ export async function runMemoryCommand(
     await runMemoryList(args.slice(1), ctx);
     return;
   }
+  if (subcommand === 'retract') {
+    await runMemoryRetract(args.slice(1), ctx);
+    return;
+  }
   throw new Error(USAGE);
+}
+
+/**
+ * `memorize memory retract <id> [--reason <text>]` — tombstone a memory
+ * (SoT-050). Appends a `memory.retracted` event and rebuilds the projection so
+ * the memory stops surfacing in list/search/injection; nothing is deleted, so
+ * it stays auditable and reversible. Propagates the tombstone like a
+ * consolidation boundary (best-effort autoPush) so peers converge on the
+ * removal instead of reviving it on the next union.
+ */
+async function runMemoryRetract(
+  args: string[],
+  ctx: CliContext,
+): Promise<void> {
+  const flags = parseFlags(args, { single: ['reason'] });
+  const memoryId = flags.positional[0];
+  if (!memoryId) {
+    throw new Error(RETRACT_USAGE);
+  }
+  const reason = flags.single.reason;
+
+  const projectId = await requireBoundProjectId(ctx.cwd);
+  const result = await retractMemory({
+    projectId,
+    memoryId,
+    ...(reason ? { reason } : {}),
+  });
+  // Same propagation as a consolidation boundary: best-effort, never throws.
+  await autoPush(projectId);
+  console.log(JSON.stringify(result));
 }
 
 /**
@@ -190,6 +230,12 @@ function renderMemory(row: ValidMemoryRow): string {
   if (memory.invalidAt) lines.push(`invalidAt: ${memory.invalidAt}`);
   if (memory.supersededBy) lines.push(`superseded by: ${memory.supersededBy}`);
   if (memory.dedupedBy) lines.push(`deduped by: ${memory.dedupedBy}`);
+  if (memory.retractedAt) {
+    lines.push(
+      `retracted: ${memory.retractedAt}` +
+        (memory.retractedBy ? ` (by ${memory.retractedBy})` : ''),
+    );
+  }
 
   lines.push('', memory.text);
   return lines.join('\n');

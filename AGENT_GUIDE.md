@@ -346,6 +346,28 @@ project, mirroring how `search` resolves the project.
   superseded-by / deduped-by pointers), followed by the memory text.
 - Fails with `no memory found with id <id>` when the id is unknown.
 
+### `memorize memory retract <memoryId> [--reason <text>]`
+
+M3 (SoT-050): **tombstone** a consolidated memory — the "forget this"
+primitive. It appends a `memory.retracted` event and rebuilds the
+projection so the memory stops surfacing in `memory list`, `search`, and
+startup injection; nothing is deleted, so the memory stays auditable and
+the retraction is reversible. Distinct from supersede (which closes a
+memory's window because a **newer memory replaces it**): a retraction has
+no replacement.
+
+- `<memoryId>` (positional, required): the memory id, e.g. one returned
+  by `memorize search` or `memorize memory list`.
+- `--reason <text>` (optional): free-form note recorded on the tombstone.
+- Emits `{"memoryId":"…","alreadyInvalid":<bool>}` — `alreadyInvalid` is
+  true when the memory was already superseded/retracted (the tombstone is
+  still recorded; the effective validity window is unchanged).
+- The tombstone propagates like a consolidation boundary (best-effort
+  `autoPush`) so synced peers converge on the removal instead of reviving
+  it on the next union. `memory show <id>` still finds it, flagged
+  `retracted`, for audit.
+- Fails with `Memory <id> not found` when the id is unknown.
+
 ### `memorize personal import --source <label>` (+ `personal list`, `personal show`)
 
 Path A: the **global / personal** memory pipeline — a host-level,

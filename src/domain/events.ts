@@ -6,6 +6,7 @@ import type {
   Decision,
   DecisionSupersededPayload,
   Handoff,
+  MemoryRetractedPayload,
   MemorySupersededPayload,
   Observation,
   Project,
@@ -44,7 +45,11 @@ export type DomainEventType =
   // contradicted memory's validity window WITHOUT deleting anything.
   | 'observation.captured'
   | 'memory.consolidated'
-  | 'memory.superseded';
+  | 'memory.superseded'
+  // Tombstone (3.0.0 M3, SoT-050): retract a memory with no replacement. Like
+  // memory.superseded it closes the validity window instead of deleting the
+  // row, but carries no replacement and is reversible + audit-preserving.
+  | 'memory.retracted';
 
 export interface DomainEvent<TPayload = unknown> extends BaseEntity {
   type: DomainEventType;
@@ -82,4 +87,5 @@ export type DomainEventPayload =
   | ProjectSyncState
   | Observation
   | ConsolidatedMemory
-  | MemorySupersededPayload;
+  | MemorySupersededPayload
+  | MemoryRetractedPayload;

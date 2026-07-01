@@ -8,6 +8,7 @@ import type {
   DecisionSupersededPayload,
   Handoff,
   MemoryIndex,
+  MemoryRetractedPayload,
   MemorySupersededPayload,
   Observation,
   Project,
@@ -46,6 +47,19 @@ export interface MemoryRecord extends ConsolidatedMemory {
    * truth. See docs/SoT/040.
    */
   sourceProjectId?: string;
+  /**
+   * Tombstone marker (M3, SoT-050): the timestamp of the `memory.retracted`
+   * event that removed this memory. Like `dedupedBy`/`supersededBy` it also
+   * closes the validity window via `invalidAt`, so `listValidMemories`
+   * excludes it with no query change; UNLIKE supersede it carries no
+   * replacement and drops the memory from the FTS index entirely (a retract is
+   * a stronger "make it go away" than a bi-temporal supersede). The original
+   * row + event are preserved, so the retraction is reversible (a later
+   * retract-the-retraction) and fully auditable.
+   */
+  retractedAt?: string;
+  /** The writer (originating actor) who retracted it — provenance for a future owner-only global retract (SoT-040/H030). */
+  retractedBy?: string;
 }
 
 /**
@@ -382,6 +396,32 @@ export function reduceProjectState(events: DomainEvent[]): ProjectState {
             ...existing,
             invalidAt: event.createdAt,
             supersededBy: payload.supersededBy,
+          };
+        }
+        break;
+      case 'memory.retracted':
+        {
+          // Tombstone (SoT-050): close the memory's validity window like a
+          // supersede, but with NO replacement and a distinct `retractedAt`
+          // marker (reversible, audit-preserving). Lane-aware: a retract only
+          // takes effect within its OWN lane — a self-authored retract removes
+          // a self memory; a union writer's retract removes its own lane's
+          // memory. A cross-lane retract (owner-only GLOBAL retract of someone
+          // else's assertion, SoT-040) is judged by the retractor's `writer`
+          // role, which the workspace union projection applies in W3 — until
+          // then a cross-lane retract is a no-op, so this stays purely additive.
+          const payload = event.payload as MemoryRetractedPayload;
+          const existing = state.memories[payload.retracts];
+          if (!existing) break;
+          const targetLane = existing.sourceProjectId ?? SELF_LANE;
+          if (eventLane !== targetLane) break;
+          state.memories[payload.retracts] = {
+            ...existing,
+            // Keep an earlier supersede/dedup window if one already closed it;
+            // otherwise the window closes at the retraction.
+            invalidAt: existing.invalidAt ?? event.createdAt,
+            retractedAt: event.createdAt,
+            ...(event.writer ? { retractedBy: event.writer } : {}),
           };
         }
         break;

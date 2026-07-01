@@ -63,6 +63,7 @@ export {
   MIN_SALIENCE,
   type ConsolidatedMemory,
   type ConsolidatedMemoryKind,
+  type MemoryRetractedPayload,
   type MemorySupersededPayload,
   type Observation,
   type ObservationSignal,
