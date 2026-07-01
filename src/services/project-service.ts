@@ -6,9 +6,11 @@ import {
   appendEvent,
   appendEvents,
   ensureProjectDirectories,
+  getEarliestEventCreatedAt,
 } from '../storage/event-store.js';
 import {
   bindProject,
+  getPathForProject,
   readBindings,
   resolveBindingForPath,
   resolveProjectIdForPath,
@@ -25,7 +27,7 @@ import {
   listValidMemories,
   rebuildProjectProjection,
 } from './projection-store.js';
-import { ACTOR_SYSTEM } from '../domain/common.js';
+import { ACTOR_SYSTEM, CURRENT_SCHEMA_VERSION } from '../domain/common.js';
 import type { CreateProjectInput } from '../domain/commands.js';
 import {
   createDecision as createDecisionEntity,
@@ -84,6 +86,75 @@ export async function createProject(input: CreateProjectInput): Promise<Project>
   await writeJson(getSyncFile(project.id), syncState);
   await bindProject(input.rootPath, project.id);
   return project;
+}
+
+/**
+ * Backfill a missing `project.created` genesis for a store whose event log has
+ * events but no genesis — the migration / capture-without-genesis failure mode
+ * (a session hook captured observations into a fresh db before any genesis was
+ * written, so every projection read throws "no project.created event").
+ *
+ * Idempotent: a projection row means genesis already exists → no-op. An EMPTY
+ * log is intentionally left alone — nothing to recover, and seeding a bare id
+ * could mask a mis-bind; real project creation stays `createProject`'s job. The
+ * reconstructed project is dated at the store's earliest event so the genesis
+ * reads as the store's true start, not repair time (SoT-021: the local
+ * `project.created` is the always-present local identity).
+ *
+ * Returns true if it backfilled, false if it was a no-op.
+ */
+export async function ensureProjectGenesis(
+  projectId: string,
+  opts?: { rootPath?: string; title?: string },
+): Promise<boolean> {
+  if (getProjectProjection(projectId)) return false;
+  const earliest = getEarliestEventCreatedAt(projectId);
+  if (!earliest) return false;
+
+  const rootPath =
+    opts?.rootPath ?? (await getPathForProject(projectId)) ?? '';
+  const title = opts?.title ?? (rootPath ? path.basename(rootPath) : projectId);
+  const workstream = createWorkstream({
+    projectId,
+    title: 'default',
+    summary: 'Default workstream',
+  });
+  const project: Project = {
+    id: projectId,
+    schemaVersion: CURRENT_SCHEMA_VERSION,
+    createdAt: earliest,
+    updatedAt: earliest,
+    title,
+    summary: title,
+    goals: [],
+    status: 'active',
+    rootPath,
+    importedContextCount: 0,
+    activeWorkstreamIds: [workstream.id],
+    activeTaskIds: [],
+    acceptedDecisionIds: [],
+    ruleIds: [],
+  };
+
+  await ensureProjectDirectories(projectId);
+  await appendEvent({
+    type: 'project.created',
+    projectId,
+    scopeType: 'project',
+    scopeId: projectId,
+    actor: ACTOR_SYSTEM,
+    payload: project,
+  });
+  await appendEvent({
+    type: 'workstream.created',
+    projectId,
+    scopeType: 'workstream',
+    scopeId: workstream.id,
+    actor: ACTOR_SYSTEM,
+    payload: workstream,
+  });
+  await rebuildProjectProjection(projectId);
+  return true;
 }
 
 /**
