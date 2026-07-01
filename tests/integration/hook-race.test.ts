@@ -115,7 +115,7 @@ describe('SessionStart task-claim race', () => {
     // Projection agrees: two distinct session.started records, each
     // with a distinct taskId. This is the invariant the file lock is
     // there to preserve.
-    const projectsRoot = join(memorizeRoot, 'projects');
+    const projectsRoot = join(memorizeRoot, 'accounts', 'local_default', 'projects');
     const projectDirs = await readdir(projectsRoot);
     expect(projectDirs.length).toBe(1);
     process.env.MEMORIZE_ROOT = memorizeRoot;

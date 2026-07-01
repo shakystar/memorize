@@ -571,7 +571,7 @@ describe('CLS hook lifecycle (spawned, end-to-end)', () => {
       // Verify the event log from this process.
       process.env.MEMORIZE_ROOT = memorizeRoot;
       closeAll();
-      const projectDirs = await readdir(join(memorizeRoot, 'projects'));
+      const projectDirs = await readdir(join(memorizeRoot, 'accounts', 'local_default', 'projects'));
       const types = (await readEvents(projectDirs[0]!)).map((e) => e.type);
       expect(types.filter((t) => t === 'observation.captured')).toHaveLength(1);
       expect(

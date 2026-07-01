@@ -2,9 +2,9 @@ import {
   ACTOR_SYSTEM,
   CURRENT_SCHEMA_VERSION,
   assertValidId,
-  isPersonalStoreId,
   nowIso,
 } from '../domain/common.js';
+import { isPersonalStoreId } from '../domain/identity/personal-store.js';
 import type { ProjectSyncState, SyncTransportConfig } from '../domain/entities.js';
 import type {
   SyncPullResponse,

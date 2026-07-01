@@ -37,7 +37,7 @@ function legacyEvent(
 }
 
 async function seedLegacyNdjson(events: DomainEvent[]): Promise<void> {
-  const eventsDir = join(sandbox, 'projects', projectId, 'events');
+  const eventsDir = join(sandbox, 'accounts', 'local_default', 'projects', projectId, 'events');
   await mkdir(eventsDir, { recursive: true });
   // Two dated files to exercise filename-sorted, line-ordered replay.
   const half = Math.ceil(events.length / 2);
@@ -116,7 +116,7 @@ describe('migrate (NDJSON → SQLite)', () => {
     expect(() => reduceProjectState(events)).not.toThrow();
 
     // events/*.ndjson moved to events.bak/
-    const projectRoot = join(sandbox, 'projects', projectId);
+    const projectRoot = join(sandbox, 'accounts', 'local_default', 'projects', projectId);
     const eventsDir = await readdir(join(projectRoot, 'events')).catch(() => []);
     expect(eventsDir.filter((f) => f.endsWith('.ndjson'))).toEqual([]);
     const bak = await readdir(join(projectRoot, 'events.bak'));
@@ -152,7 +152,7 @@ describe('migrate (NDJSON → SQLite)', () => {
     // id UNIQUE constraint + INSERT OR IGNORE must insert 0 new rows.
     const db = getDb(projectId);
     db.prepare('DELETE FROM meta WHERE key = ?').run('migrated_from_ndjson');
-    const projectRoot = join(sandbox, 'projects', projectId);
+    const projectRoot = join(sandbox, 'accounts', 'local_default', 'projects', projectId);
     const bak = await readdir(join(projectRoot, 'events.bak'));
     await mkdir(join(projectRoot, 'events'), { recursive: true });
     for (const file of bak) {
@@ -175,7 +175,7 @@ describe('cleanupEventsBackup', () => {
     await seedLegacyNdjson(sampleEvents);
     await migrateProjectFromNdjson(projectId);
 
-    const projectRoot = join(sandbox, 'projects', projectId);
+    const projectRoot = join(sandbox, 'accounts', 'local_default', 'projects', projectId);
     // Backup exists post-migration.
     expect((await readdir(join(projectRoot, 'events.bak'))).length).toBe(2);
 
@@ -191,7 +191,7 @@ describe('cleanupEventsBackup', () => {
   it('refuses to delete the backup when the project is not yet migrated', async () => {
     // Stand up the events.bak dir WITHOUT a migrated marker (simulates a
     // half-state). cleanup must leave it untouched as the recovery net.
-    const projectRoot = join(sandbox, 'projects', projectId);
+    const projectRoot = join(sandbox, 'accounts', 'local_default', 'projects', projectId);
     await mkdir(join(projectRoot, 'events.bak'), { recursive: true });
     await writeFile(
       join(projectRoot, 'events.bak', '2026-01-01.ndjson'),
@@ -219,7 +219,7 @@ describe('export (SQLite → NDJSON round-trip)', () => {
     // Round-trip: feed the exported NDJSON into a fresh project DB via
     // migrate, then assert reduced state equality.
     const freshProjectId = 'proj_mig_test02';
-    const freshEventsDir = join(sandbox, 'projects', freshProjectId, 'events');
+    const freshEventsDir = join(sandbox, 'accounts', 'local_default', 'projects', freshProjectId, 'events');
     await mkdir(freshEventsDir, { recursive: true });
     await writeFile(
       join(freshEventsDir, '2026-01-01.ndjson'),

@@ -13,7 +13,7 @@ async function eventTypesForFirstProject(memorizeRoot: string): Promise<string[]
   const previous = process.env.MEMORIZE_ROOT;
   process.env.MEMORIZE_ROOT = memorizeRoot;
   try {
-    const projectDirs = await readdir(join(memorizeRoot, 'projects'));
+    const projectDirs = await readdir(join(memorizeRoot, 'accounts', 'local_default', 'projects'));
     const events = await readEvents(projectDirs[0]!);
     return events.map((event) => event.type);
   } finally {
@@ -28,7 +28,7 @@ async function eventTypesForFirstProject(memorizeRoot: string): Promise<string[]
 
 /** First project's id (single-project sandboxes). */
 async function firstProjectId(memorizeRoot: string): Promise<string> {
-  const projectDirs = await readdir(join(memorizeRoot, 'projects'));
+  const projectDirs = await readdir(join(memorizeRoot, 'accounts', 'local_default', 'projects'));
   return projectDirs[0]!;
 }
 
@@ -157,7 +157,7 @@ describe('claude hook lifecycle', () => {
     expect(result.status).toBe(0);
     expect(result.stdout.trim()).toBe('{}');
 
-    const projectsRoot = join(memorizeRoot, 'projects');
+    const projectsRoot = join(memorizeRoot, 'accounts', 'local_default', 'projects');
     const projectDirs = await readdir(projectsRoot);
     const handoffsDir = join(projectsRoot, projectDirs[0]!, 'handoffs');
     const handoffFiles = await readdir(handoffsDir).catch(() => []);

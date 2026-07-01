@@ -4,9 +4,10 @@ import path from 'node:path';
 import {
   ACTOR_SYSTEM,
   CURRENT_SCHEMA_VERSION,
-  PERSONAL_STORE_ID,
   nowIso,
 } from '../domain/common.js';
+import { resolveActiveAccount } from '../domain/identity/account.js';
+import { getPersonalStoreId } from '../domain/identity/personal-store.js';
 import { createConsolidatedMemory, createWorkstream } from '../domain/entities.js';
 import type { ConsolidatedMemory, Project } from '../domain/entities.js';
 import {
@@ -67,17 +68,20 @@ import {
  * project, and the missing sync state is itself part of the "never syncs"
  * guarantee. Cheap no-op once seeded.
  */
-export async function ensurePersonalStore(): Promise<void> {
-  if (getProjectProjection(PERSONAL_STORE_ID)) return;
+export async function ensurePersonalStore(
+  accountId: string = resolveActiveAccount(),
+): Promise<void> {
+  const storeId = getPersonalStoreId(accountId);
+  if (getProjectProjection(storeId)) return;
 
   const now = nowIso();
   const workstream = createWorkstream({
-    projectId: PERSONAL_STORE_ID,
+    projectId: storeId,
     title: 'default',
     summary: 'Personal memory',
   });
   const project: Project = {
-    id: PERSONAL_STORE_ID,
+    id: storeId,
     schemaVersion: CURRENT_SCHEMA_VERSION,
     createdAt: now,
     updatedAt: now,
@@ -85,7 +89,7 @@ export async function ensurePersonalStore(): Promise<void> {
     summary: 'Global personal memory (account-scoped, never synced)',
     goals: [],
     status: 'active',
-    rootPath: getPersonalRoot(),
+    rootPath: getPersonalRoot(accountId),
     importedContextCount: 0,
     activeWorkstreamIds: [workstream.id],
     activeTaskIds: [],
@@ -93,27 +97,27 @@ export async function ensurePersonalStore(): Promise<void> {
     ruleIds: [],
   };
 
-  await ensureProjectDirectories(PERSONAL_STORE_ID);
+  await ensureProjectDirectories(storeId);
   // Two separate appends (not a batch) so each payload keeps its own type —
   // appendEvents infers one shared payload type across the array, which a
   // Project + Workstream pair violates. Same reason createProject does this.
   await appendEvent({
     type: 'project.created',
-    projectId: PERSONAL_STORE_ID,
+    projectId: storeId,
     scopeType: 'project',
-    scopeId: PERSONAL_STORE_ID,
+    scopeId: storeId,
     actor: ACTOR_SYSTEM,
     payload: project,
   });
   await appendEvent({
     type: 'workstream.created',
-    projectId: PERSONAL_STORE_ID,
+    projectId: storeId,
     scopeType: 'workstream',
     scopeId: workstream.id,
     actor: ACTOR_SYSTEM,
     payload: workstream,
   });
-  await rebuildProjectProjection(PERSONAL_STORE_ID);
+  await rebuildProjectProjection(storeId);
 }
 
 /**
@@ -126,19 +130,23 @@ export async function importPersonalMemories(params: {
   actor: string;
   source: string;
   itemsJson: string;
+  accountId?: string;
 }): Promise<MemoryImportResult> {
-  await ensurePersonalStore();
+  const accountId = params.accountId ?? resolveActiveAccount();
+  await ensurePersonalStore(accountId);
   return importMemories({
-    projectId: PERSONAL_STORE_ID,
+    projectId: getPersonalStoreId(accountId),
     actor: params.actor,
     source: params.source,
     itemsJson: params.itemsJson,
   });
 }
 
-/** The valid (non-superseded) memories in the global personal store. */
-export function listPersonalMemories(): ValidMemoryRow[] {
-  return listValidMemories(PERSONAL_STORE_ID);
+/** The valid (non-superseded) memories in an account's personal store. */
+export function listPersonalMemories(
+  accountId: string = resolveActiveAccount(),
+): ValidMemoryRow[] {
+  return listValidMemories(getPersonalStoreId(accountId));
 }
 
 /**
@@ -147,8 +155,10 @@ export function listPersonalMemories(): ValidMemoryRow[] {
  * for every user who never captures personal memory (getDb would otherwise
  * materialize `~/.memorize/personal/` on first read).
  */
-export function personalStoreExists(): boolean {
-  return existsSync(getProjectDbFile(PERSONAL_STORE_ID));
+export function personalStoreExists(
+  accountId: string = resolveActiveAccount(),
+): boolean {
+  return existsSync(getProjectDbFile(getPersonalStoreId(accountId)));
 }
 
 /**
@@ -168,17 +178,20 @@ export async function consolidatePersonalMemories(params: {
   actor: string;
   sessionId?: string;
   sourceObservationIds: string[];
+  accountId?: string;
 }): Promise<number> {
   if (params.items.length === 0) return 0;
-  await ensurePersonalStore();
+  const accountId = params.accountId ?? resolveActiveAccount();
+  const storeId = getPersonalStoreId(accountId);
+  await ensurePersonalStore(accountId);
   return withFileLock(
-    path.join(getProjectRoot(PERSONAL_STORE_ID), 'locks'),
+    path.join(getProjectRoot(storeId), 'locks'),
     'consolidate',
     async () => {
       const inputs: AppendEventInput<ConsolidatedMemory>[] = params.items.map(
         (item) => {
           const memory = createConsolidatedMemory({
-            projectId: PERSONAL_STORE_ID,
+            projectId: storeId,
             kind: item.kind,
             text: item.text,
             salience: item.salience,
@@ -196,17 +209,17 @@ export async function consolidatePersonalMemories(params: {
           });
           return {
             type: 'memory.consolidated',
-            projectId: PERSONAL_STORE_ID,
+            projectId: storeId,
             scopeType: 'session',
-            scopeId: params.sessionId ?? PERSONAL_STORE_ID,
+            scopeId: params.sessionId ?? storeId,
             actor: params.actor,
             payload: memory,
           };
         },
       );
-      await appendEvents(PERSONAL_STORE_ID, inputs);
-      await rebuildProjectProjection(PERSONAL_STORE_ID, { reindexSearch: true });
-      await ensureEmbeddings(PERSONAL_STORE_ID);
+      await appendEvents(storeId, inputs);
+      await rebuildProjectProjection(storeId, { reindexSearch: true });
+      await ensureEmbeddings(storeId);
       return inputs.length;
     },
   );

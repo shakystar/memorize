@@ -1,25 +1,50 @@
 import os from 'node:os';
 import path from 'node:path';
 
-import { assertValidId, isPersonalStoreId } from '../domain/common.js';
+import { assertValidId } from '../domain/common.js';
+import { resolveActiveAccount } from '../domain/identity/account.js';
+import {
+  accountOfPersonalStore,
+  isPersonalStoreId,
+} from '../domain/identity/personal-store.js';
 
 export function getMemorizeRoot(): string {
   return process.env.MEMORIZE_ROOT ?? path.join(os.homedir(), '.memorize');
 }
 
-export function getProjectsRoot(): string {
-  return path.join(getMemorizeRoot(), 'projects');
+/**
+ * Root of the per-account store tree. Account-scoped stores (personal + projects)
+ * isolate under `accounts/<accountId>/` so multiple accounts coexist on one host
+ * without clobber (memorize SoT-020). Host-level state (credentials, profile/,
+ * update-check) stays at the memorize root, NOT under an account.
+ */
+export function getAccountsRoot(): string {
+  return path.join(getMemorizeRoot(), 'accounts');
+}
+
+export function getAccountRoot(accountId: string): string {
+  assertValidId(accountId, 'accountId');
+  const accountsRoot = getAccountsRoot();
+  return ensureWithinRoot(path.join(accountsRoot, accountId), accountsRoot);
+}
+
+export function getProjectsRoot(
+  accountId: string = resolveActiveAccount(),
+): string {
+  return path.join(getAccountRoot(accountId), 'projects');
 }
 
 /**
- * Host-level home of the global/personal memory store (Path A) — a SIBLING of
- * `projects/`, deliberately NOT under it, so the personal store never appears in
- * `listProjects()` (which reads `projects/`) and stays out of every project
- * enumeration sweep (refresh, setup, sync). One directory per account, mirroring
- * the #192 host-store pattern (`credentials`, `profile/`).
+ * Home of an account's personal memory store — a SIBLING of that account's
+ * `projects/` under `accounts/<accountId>/`, deliberately NOT under `projects/`,
+ * so the personal store never appears in `listProjects()` (which reads the
+ * account's `projects/`) and stays out of every project enumeration sweep. One
+ * personal store per account (memorize SoT-010/020). Defaults to the active account.
  */
-export function getPersonalRoot(): string {
-  return path.join(getMemorizeRoot(), 'personal');
+export function getPersonalRoot(
+  accountId: string = resolveActiveAccount(),
+): string {
+  return path.join(getAccountRoot(accountId), 'personal');
 }
 
 function ensureWithinRoot(candidate: string, root: string): string {
@@ -38,10 +63,15 @@ function ensureWithinRoot(candidate: string, root: string): string {
 
 export function getProjectRoot(projectId: string): string {
   assertValidId(projectId, 'projectId');
-  // The reserved personal store routes to its own host-level dir, outside
-  // `projects/`. Every derived path (db file, sync, topics, locks) flows through
-  // here, so this single redirect isolates the whole store with no other change.
-  if (isPersonalStoreId(projectId)) return getPersonalRoot();
+  // A personal store routes to its OWNING account's personal dir — the account is
+  // derived from the store id itself (accountOfPersonalStore), not from ambient
+  // state. Every derived path (db file, sync, topics, locks) flows through here,
+  // so this single redirect isolates the whole store with no other change.
+  if (isPersonalStoreId(projectId)) {
+    return getPersonalRoot(accountOfPersonalStore(projectId));
+  }
+  // A plain project belongs to the ACTIVE account (M1 is single-account; a
+  // project→account binding for multi-account resolution is a W1 concern).
   const projectsRoot = getProjectsRoot();
   return ensureWithinRoot(path.join(projectsRoot, projectId), projectsRoot);
 }

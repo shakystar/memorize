@@ -131,7 +131,12 @@ describe('db unwritable-data-dir diagnostics (#116)', () => {
   it.skipIf(cannotDenyDirWrite)(
     'surfaces the actionable hint when the data dir is not writable',
     () => {
-      const projectsRoot = path.join(tmpRoot, 'projects');
+      const projectsRoot = path.join(
+        tmpRoot,
+        'accounts',
+        'local_default',
+        'projects',
+      );
       fs.mkdirSync(projectsRoot, { recursive: true });
       fs.chmodSync(projectsRoot, 0o500); // r-x: cannot create the project dir
       try {

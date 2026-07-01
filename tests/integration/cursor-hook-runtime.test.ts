@@ -76,7 +76,7 @@ async function readFirstProjectEvents() {
   process.env.MEMORIZE_ROOT = memorizeRoot;
   closeAll();
   try {
-    const projectIds = await readdir(join(memorizeRoot, 'projects'));
+    const projectIds = await readdir(join(memorizeRoot, 'accounts', 'local_default', 'projects'));
     const projectId = projectIds[0]!;
     return { projectId, events: await readEvents(projectId) };
   } finally {

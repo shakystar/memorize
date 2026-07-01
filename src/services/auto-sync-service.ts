@@ -1,6 +1,6 @@
 import { createFileSyncTransport } from '../adapters/sync-transport-file.js';
 import { createHttpSyncTransport } from '../adapters/sync-transport-http.js';
-import { isPersonalStoreId } from '../domain/common.js';
+import { isPersonalStoreId } from '../domain/identity/personal-store.js';
 import type { ProjectSyncState } from '../domain/entities.js';
 import type { SyncTransport } from '../domain/sync-transport.js';
 import { resolveSyncToken } from '../storage/credentials-store.js';

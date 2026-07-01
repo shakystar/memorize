@@ -176,7 +176,7 @@ describe('search (FTS5)', () => {
         riskNotes: [],
       } as never,
     });
-    const eventsDir = join(sandbox, 'projects', projectId, 'events');
+    const eventsDir = join(sandbox, 'accounts', 'local_default', 'projects', projectId, 'events');
     await mkdir(eventsDir, { recursive: true });
     await writeFile(
       join(eventsDir, '2026-02-02.ndjson'),

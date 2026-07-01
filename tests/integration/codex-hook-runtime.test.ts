@@ -111,7 +111,7 @@ describe('codex hook runtime', () => {
     expect(result.status).toBe(0);
     expect(String(result.stdout).trim()).toBe('{}');
 
-    const projectsRoot = join(memorizeRoot, 'projects');
+    const projectsRoot = join(memorizeRoot, 'accounts', 'local_default', 'projects');
     const { readdir } = await import('node:fs/promises');
     const projectDirs = await readdir(projectsRoot);
     const handoffsDir = join(projectsRoot, projectDirs[0]!, 'handoffs');

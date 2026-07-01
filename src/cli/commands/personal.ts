@@ -1,6 +1,8 @@
 import process from 'node:process';
 
-import { ACTOR_SYSTEM, PERSONAL_STORE_ID } from '../../domain/common.js';
+import { ACTOR_SYSTEM } from '../../domain/common.js';
+import { resolveActiveAccount } from '../../domain/identity/account.js';
+import { getPersonalStoreId } from '../../domain/identity/personal-store.js';
 import {
   importPersonalMemories,
   listPersonalMemories,
@@ -124,7 +126,7 @@ function runPersonalShow(args: string[]): void {
     throw new Error(SHOW_USAGE);
   }
 
-  const row = getMemory(PERSONAL_STORE_ID, memoryId);
+  const row = getMemory(getPersonalStoreId(resolveActiveAccount()), memoryId);
   if (!row) {
     throw new Error(`personal show: no memory found with id ${memoryId}.`);
   }
