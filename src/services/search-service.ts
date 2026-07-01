@@ -155,14 +155,21 @@ export async function semanticSearch(
   const textById = new Map(
     listValidMemories(projectId).map((row) => [row.memory.id, row.memory.text]),
   );
+  // Score only VALID memories. Embeddings survive projection rebuilds and are
+  // not pruned when a memory is invalidated (byte reclamation is a GC concern),
+  // so the corpus still holds vectors for superseded / deduped / retracted
+  // memories — they must not surface here. Filtering to `textById` (the valid
+  // set) drops them uniformly BEFORE the limit slice, so retrieval matches the
+  // FTS/injection paths, which already exclude invalidated memories (SoT-050).
   return [...scores.entries()]
+    .filter(([entityId]) => textById.has(entityId))
     .sort((a, b) => b[1] - a[1])
     .slice(0, limit)
     .map(([entityId, score]) => ({
       entityId,
       kind: 'memory' as SearchKind,
       score,
-      snippet: snippetFromText(textById.get(entityId) ?? ''),
+      snippet: snippetFromText(textById.get(entityId)!),
     }));
 }
 

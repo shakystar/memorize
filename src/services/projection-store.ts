@@ -448,8 +448,12 @@ export async function rebuildProjectProjection(
       // findable; retrieval-time ranking is what filters to valid-only. Dedup
       // losers are NOT indexed: unlike a contradiction, a cross-machine
       // duplicate has no distinct "then" to recover, and keeping it out of FTS
-      // means searchProject converges to the single winner too.
-      if (!memory.dedupedBy) {
+      // means searchProject converges to the single winner too. Retracted
+      // memories are likewise dropped from FTS (M3, SoT-050): a retraction is a
+      // deliberate "make it go away", stronger than a bi-temporal supersede, so
+      // even raw searchProject (which has no valid-only filter) must not surface
+      // it. The row + event survive for audit and reversibility.
+      if (!memory.dedupedBy && !memory.retractedAt) {
         indexEntity(
           memory.id,
           'memory',

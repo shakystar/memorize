@@ -18,6 +18,7 @@ import type { BindingMatch } from '../storage/bindings-store.js';
 import { isEnoent, readJson, writeJson } from '../storage/fs-utils.js';
 import {
   getDecision,
+  getMemory,
   getProjectProjection,
   getWorkstream,
   listDecisions,
@@ -33,6 +34,7 @@ import {
 import type {
   Decision,
   DecisionSupersededPayload,
+  MemoryRetractedPayload,
   Project,
   ProjectSyncState,
   Workstream,
@@ -205,6 +207,55 @@ export async function supersedeDecision(input: {
   ]);
   await rebuildProjectProjection(input.projectId);
   return { decision: accepted, supersededId: input.supersedesId };
+}
+
+/**
+ * Retract a consolidated memory (M3, SoT-050). Appends a `memory.retracted`
+ * tombstone — it never deletes the memory row or the events it was distilled
+ * from. The projection rebuild closes the memory's validity window
+ * (`invalidAt`) and drops it from search, so it stops surfacing in
+ * list/search/injection, while the original row + event survive for audit and
+ * reversibility. Idempotent: retracting an already-invalid memory (superseded
+ * or already-retracted) still records the tombstone (`alreadyInvalid=true`)
+ * without changing the effective validity window. The consolidation dedup
+ * guard keys on ALL memory rows including retracted ones, so the retracted
+ * memory keeps shielding its source observations — a retract is not re-derived
+ * on the next boundary.
+ */
+export async function retractMemory(input: {
+  projectId: string;
+  memoryId: string;
+  reason?: string;
+  actor?: string;
+}): Promise<{ memoryId: string; alreadyInvalid: boolean }> {
+  const actor = input.actor ?? ACTOR_SYSTEM;
+  const row = getMemory(input.projectId, input.memoryId);
+  if (!row) {
+    throw new Error(
+      `Memory ${input.memoryId} not found in project ${input.projectId}.`,
+    );
+  }
+  const alreadyInvalid = Boolean(row.memory.invalidAt);
+
+  const payload: MemoryRetractedPayload = {
+    retracts: input.memoryId,
+    ...(input.reason ? { reason: input.reason } : {}),
+  };
+  // Scoped like memory.consolidated/superseded (scopeType 'session', scopeId
+  // falling back to the project when there is no live session); the memory
+  // reducer keys off payload.retracts, so scope is provenance only. The event's
+  // `writer`/`sourceProjectId` default to the local actor/store in appendEvent,
+  // which is what a future owner-only global retract reads to judge role.
+  await appendEvent<DomainEventPayload>({
+    type: 'memory.retracted',
+    projectId: input.projectId,
+    scopeType: 'session',
+    scopeId: input.projectId,
+    actor,
+    payload,
+  });
+  await rebuildProjectProjection(input.projectId);
+  return { memoryId: input.memoryId, alreadyInvalid };
 }
 
 export async function getBoundProjectId(
