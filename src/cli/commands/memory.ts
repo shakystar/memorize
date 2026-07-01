@@ -7,6 +7,7 @@ import { importMemories } from '../../services/memory-import-service.js';
 import {
   requireBoundProjectId,
   retractMemory,
+  revertSession,
 } from '../../services/project-service.js';
 import {
   getMemory,
@@ -30,7 +31,10 @@ const RETRACT_USAGE =
 
 const GC_USAGE = 'Usage: memorize memory gc [--dry-run] [--json]';
 
-const USAGE = `${IMPORT_USAGE}\n${SHOW_USAGE}\n${LIST_USAGE}\n${RETRACT_USAGE}\n${GC_USAGE}`;
+const REVERT_USAGE =
+  'Usage: memorize memory revert --session <id> [--reason <text>] [--dry-run] [--json]';
+
+const USAGE = `${IMPORT_USAGE}\n${SHOW_USAGE}\n${LIST_USAGE}\n${RETRACT_USAGE}\n${GC_USAGE}\n${REVERT_USAGE}`;
 
 async function readStdin(): Promise<string | undefined> {
   if (process.stdin.isTTY) {
@@ -75,7 +79,50 @@ export async function runMemoryCommand(
     await runMemoryGc(args.slice(1), ctx);
     return;
   }
+  if (subcommand === 'revert') {
+    await runMemoryRevert(args.slice(1), ctx);
+    return;
+  }
   throw new Error(USAGE);
+}
+
+/**
+ * `memorize memory revert --session <id> [--reason <text>] [--dry-run] [--json]`
+ * — consolidated revert (M3-c, SoT-050). Batch-retracts every still-valid
+ * memory a contaminated session produced, so the projection re-derives a clean
+ * view without them. Append-only + reversible (it reuses the `memory.retracted`
+ * tombstone); nothing is deleted. `--dry-run` lists what would be reverted.
+ */
+async function runMemoryRevert(args: string[], ctx: CliContext): Promise<void> {
+  const flags = parseFlags(args, {
+    single: ['session', 'reason'],
+    boolean: ['dry-run', 'json'],
+  });
+  const sessionId = flags.single.session;
+  if (!sessionId) {
+    throw new Error(REVERT_USAGE);
+  }
+
+  const projectId = await requireBoundProjectId(ctx.cwd);
+  const result = await revertSession({
+    projectId,
+    sessionId,
+    ...(flags.single.reason ? { reason: flags.single.reason } : {}),
+    dryRun: flags.boolean['dry-run'] ?? false,
+  });
+  // Propagate the tombstones like a consolidation boundary so peers converge.
+  if (!result.dryRun && result.reverted.length > 0) {
+    await autoPush(projectId);
+  }
+
+  if (flags.boolean.json) {
+    console.log(JSON.stringify(result));
+    return;
+  }
+  const verb = result.dryRun ? 'Would revert' : 'Reverted';
+  console.log(
+    `${verb} ${result.reverted.length} memory(ies) from session ${sessionId}.`,
+  );
 }
 
 /**

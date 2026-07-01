@@ -389,6 +389,30 @@ memories that are **already retracted AND entirely local-only**
 - Emits `{"reclaimedMemories":[…],"reclaimedEvents":N,"reclaimedObservations":N,"skippedShared":N,"dryRun":<bool>}`.
 - No `autoPush`: deleting un-pushed events has nothing to propagate.
 
+### `memorize memory revert --session <id> [--reason <text>] [--dry-run] [--json]`
+
+M3-c (SoT-050): **consolidated revert** — undo a contaminated session's
+memories in one shot. It batch-retracts every still-valid memory tagged
+with `sessionId` (reusing the `memory.retracted` tombstone) and rebuilds,
+so the projection re-derives a clean view WITHOUT them. This is the
+append-only form of "rewind + re-derive from a clean event set": nothing
+is deleted, the revert is reversible, and the retracted rows keep
+shielding their source observations so a later boundary does not revive
+them.
+
+- `--session <id>` (required): the session whose memories to revert. Ids
+  come from `memorize session activity` or a memory's `session:` field in
+  `memory show`.
+- **Self-lane only.** A workspace-union memory belongs to another writer;
+  reverting someone else's contribution is the owner-only global retract
+  (SoT-040), deferred to W3.
+- `--reason <text>` (optional): note recorded on each tombstone (default
+  `session <id> reverted`).
+- `--dry-run` lists what WOULD be reverted without appending anything.
+- Emits `{"sessionId":"…","reverted":[…],"dryRun":<bool>}`. A session with
+  no still-valid memories is a no-op (`reverted: []`). The tombstones
+  `autoPush` so synced peers converge on the revert.
+
 ### `memorize personal import --source <label>` (+ `personal list`, `personal show`)
 
 Path A: the **global / personal** memory pipeline — a host-level,

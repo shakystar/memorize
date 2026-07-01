@@ -22,6 +22,7 @@ import {
   getProjectProjection,
   getWorkstream,
   listDecisions,
+  listValidMemories,
   rebuildProjectProjection,
 } from './projection-store.js';
 import { ACTOR_SYSTEM } from '../domain/common.js';
@@ -256,6 +257,56 @@ export async function retractMemory(input: {
   });
   await rebuildProjectProjection(input.projectId);
   return { memoryId: input.memoryId, alreadyInvalid };
+}
+
+/**
+ * Revert the consolidated memories a single session produced (M3-c, SoT-050).
+ * Contamination revert is "rewind + re-derive from a clean event set": this
+ * batch-retracts every still-valid, self-lane memory tagged with `sessionId`
+ * (reusing the M3-a `memory.retracted` tombstone) and rebuilds, so the
+ * projection re-derives WITHOUT those memories. Deterministic (pure projection
+ * replay over the now-clean set), append-only, and reversible — nothing is
+ * deleted, and the retracted rows keep shielding their source observations so a
+ * later consolidation boundary does not revive them.
+ *
+ * Self-lane only: a foreign-lane (workspace-union) memory belongs to another
+ * writer, and reverting someone else's contribution is the owner-only GLOBAL
+ * retract (SoT-040), deferred to W3. `dryRun` lists what would be reverted
+ * without appending anything. A session with no still-valid memories is a no-op
+ * (`reverted: []`).
+ */
+export async function revertSession(input: {
+  projectId: string;
+  sessionId: string;
+  reason?: string;
+  dryRun?: boolean;
+  actor?: string;
+}): Promise<{ sessionId: string; reverted: string[]; dryRun: boolean }> {
+  const actor = input.actor ?? ACTOR_SYSTEM;
+  const dryRun = input.dryRun ?? false;
+  const targets = listValidMemories(input.projectId)
+    .map((row) => row.memory)
+    .filter((memory) => memory.sessionId === input.sessionId);
+  const reverted = targets.map((memory) => memory.id);
+
+  if (dryRun || reverted.length === 0) {
+    return { sessionId: input.sessionId, reverted, dryRun };
+  }
+
+  const reason = input.reason ?? `session ${input.sessionId} reverted`;
+  await appendEvents<DomainEventPayload>(
+    input.projectId,
+    targets.map((memory) => ({
+      type: 'memory.retracted',
+      projectId: input.projectId,
+      scopeType: 'session',
+      scopeId: input.projectId,
+      actor,
+      payload: { retracts: memory.id, reason } as MemoryRetractedPayload,
+    })),
+  );
+  await rebuildProjectProjection(input.projectId);
+  return { sessionId: input.sessionId, reverted, dryRun: false };
 }
 
 export async function getBoundProjectId(
