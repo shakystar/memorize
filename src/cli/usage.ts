@@ -12,6 +12,7 @@ export function renderScaffoldUsage(): string {
     '  memorize memory show <id>    Print a memory full text + metadata',
     '  memorize memory retract <id> Retract (tombstone) a memory (append-only, reversible)',
     '  memorize memory gc           Physically reclaim un-pushed retracted memories (--dry-run)',
+    '  memorize memory revert --session <id>  Revert (retract) a session’s memories (--dry-run)',
     '  memorize project show        Print bound project summary (JSON)',
     '  memorize version             Print the version of this binary',
     '',
