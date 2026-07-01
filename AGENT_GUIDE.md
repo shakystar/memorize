@@ -368,6 +368,27 @@ no replacement.
   `retracted`, for audit.
 - Fails with `Memory <id> not found` when the id is unknown.
 
+### `memorize memory gc [--dry-run] [--json]`
+
+M3-b (SoT-050): **physically reclaim** the bytes of retracted memories.
+`retract` only tombstones (hides) a memory; the row + events stay on
+disk. `gc` is the separate, opt-in sweep that hard-deletes the events of
+memories that are **already retracted AND entirely local-only**
+(un-pushed) — safe because no peer has those events, exactly like
+`git reset --hard` on an un-pushed commit.
+
+- Reclaims a memory only when its `memory.consolidated` **and** every one
+  of its source `observation.captured` events are un-pushed. It deletes
+  those events plus the source observations no surviving memory still
+  references, so nothing is left for the next consolidation boundary to
+  re-derive the memory from (revival-free).
+- **Shared** (already-pushed) retracted memories are left as tombstones —
+  deleting a row a peer still holds would let it re-sync back. Reclaiming
+  those needs a propagation/retention policy and is deferred.
+- `--dry-run` reports what WOULD be reclaimed without mutating anything.
+- Emits `{"reclaimedMemories":[…],"reclaimedEvents":N,"reclaimedObservations":N,"skippedShared":N,"dryRun":<bool>}`.
+- No `autoPush`: deleting un-pushed events has nothing to propagate.
+
 ### `memorize personal import --source <label>` (+ `personal list`, `personal show`)
 
 Path A: the **global / personal** memory pipeline — a host-level,

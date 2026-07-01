@@ -76,6 +76,18 @@ export function upsertEmbedding(
     });
 }
 
+/**
+ * Physically remove one entity's embedding row (M3-b gc). Embeddings are a
+ * derived, out-of-band index NOT rebuilt by rebuildProjectProjection, so when
+ * a memory's events are hard-deleted its stale vector must be pruned explicitly
+ * or it lingers (and would keep scoring in semantic search). No-op if absent.
+ */
+export function deleteEmbedding(projectId: string, entityId: string): void {
+  getDb(projectId)
+    .prepare('DELETE FROM embeddings WHERE entity_id = ?')
+    .run(entityId);
+}
+
 /** All stored embeddings (optionally filtered by kind), vectors parsed. */
 export function listEmbeddings(
   projectId: string,
