@@ -13,7 +13,12 @@ import type {
   Task,
   Workstream,
 } from '../domain/entities.js';
-import { buildMemoryIndex, reduceProjectState } from '../projections/projector.js';
+import {
+  buildMemoryIndex,
+  parseLaneKey,
+  reduceProjectState,
+  SELF_LANE,
+} from '../projections/projector.js';
 import type { MemoryRecord, ProjectState } from '../projections/projector.js';
 import { getDb } from '../storage/db.js';
 import { listSegments } from './segment-store.js';
@@ -54,6 +59,34 @@ function searchText(parts: ReadonlyArray<string | undefined>): string {
     .map((part) => part?.trim())
     .filter((part): part is string => Boolean(part))
     .join('\n');
+}
+
+/**
+ * The `source_project_id` column value for a composite state-map key (M2). Self
+ * rows store NULL (matching the events-table convention that NULL = self), so a
+ * single-writer store's projection tables are byte-identical to pre-M2; a
+ * foreign-lane row stores its origin store id for the private-vs-union selector.
+ */
+function laneColumn(compositeKey: string): string | null {
+  const { lane } = parseLaneKey(compositeKey);
+  return lane === SELF_LANE ? null : lane;
+}
+
+/** Read-side lane scope for {@link laneWhere}. */
+export type ProjectionLane = 'self' | 'union';
+
+/**
+ * The single private-vs-union lane predicate (M2, SoT-040). Every projection
+ * read that must not fold a foreign writer's row into local truth builds its
+ * WHERE through this ONE helper instead of branching inline. `self` (the
+ * default, and the only lane with data pre-W3) keeps just this store's own rows
+ * (`source_project_id IS NULL`); `union` admits every writer's rows so the
+ * caller can group by lane and render them as a labelled shared channel. The
+ * result is a constant SQL boolean over a real column — no bound params, no
+ * user input, safe to concatenate.
+ */
+export function laneWhere(lane: ProjectionLane = 'self'): string {
+  return lane === 'self' ? 'source_project_id IS NULL' : '1 = 1';
 }
 
 const SINGLETON_TABLES = ['projects', 'memory_index'] as const;
@@ -214,10 +247,17 @@ export async function rebuildProjectProjection(
       db.prepare('DELETE FROM search_fts').run();
     }
     const insertSearch = db.prepare(
-      'INSERT INTO search_fts (entity_id, kind, text) VALUES (@entityId, @kind, @text)',
+      'INSERT INTO search_fts (entity_id, kind, source_project_id, text) ' +
+        'VALUES (@entityId, @kind, @sourceProjectId, @text)',
     );
-    const indexEntity = (entityId: string, kind: SearchKind, text: string) => {
-      if (reindexSearch && text) insertSearch.run({ entityId, kind, text });
+    const indexEntity = (
+      entityId: string,
+      kind: SearchKind,
+      text: string,
+      sourceProjectId: string | null = null,
+    ) => {
+      if (reindexSearch && text)
+        insertSearch.run({ entityId, kind, sourceProjectId, text });
     };
 
     db.prepare('INSERT INTO projects (id, data) VALUES (?, ?)').run(
@@ -241,16 +281,18 @@ export async function rebuildProjectProjection(
     }
 
     const insertTask = db.prepare(
-      `INSERT INTO tasks (id, status, workstream_id, created_at, updated_at, data)
-       VALUES (@id, @status, @workstreamId, @createdAt, @updatedAt, @data)`,
+      `INSERT INTO tasks (id, status, workstream_id, created_at, updated_at, source_project_id, data)
+       VALUES (@id, @status, @workstreamId, @createdAt, @updatedAt, @sourceProjectId, @data)`,
     );
-    for (const task of Object.values(state.tasks)) {
+    for (const [key, task] of Object.entries(state.tasks)) {
+      const sourceProjectId = laneColumn(key);
       insertTask.run({
         id: task.id,
         status: task.status ?? null,
         workstreamId: task.workstreamId ?? null,
         createdAt: task.createdAt ?? null,
         updatedAt: task.updatedAt ?? null,
+        sourceProjectId,
         data: JSON.stringify(task),
       });
       indexEntity(
@@ -263,14 +305,20 @@ export async function rebuildProjectProjection(
           ...(task.acceptanceCriteria ?? []),
           ...(task.openQuestions ?? []),
         ]),
+        sourceProjectId,
       );
     }
 
     const insertHandoff = db.prepare(
-      'INSERT INTO handoffs (id, data) VALUES (@id, @data)',
+      'INSERT INTO handoffs (id, source_project_id, data) VALUES (@id, @sourceProjectId, @data)',
     );
-    for (const handoff of Object.values(state.handoffs)) {
-      insertHandoff.run({ id: handoff.id, data: JSON.stringify(handoff) });
+    for (const [key, handoff] of Object.entries(state.handoffs)) {
+      const sourceProjectId = laneColumn(key);
+      insertHandoff.run({
+        id: handoff.id,
+        sourceProjectId,
+        data: JSON.stringify(handoff),
+      });
       indexEntity(
         handoff.id,
         'handoff',
@@ -282,6 +330,7 @@ export async function rebuildProjectProjection(
           ...(handoff.warnings ?? []),
           ...(handoff.unresolvedQuestions ?? []),
         ]),
+        sourceProjectId,
       );
     }
 
@@ -344,12 +393,14 @@ export async function rebuildProjectProjection(
     }
 
     const insertSession = db.prepare(
-      'INSERT INTO sessions (id, status, data) VALUES (@id, @status, @data)',
+      'INSERT INTO sessions (id, status, source_project_id, data) ' +
+        'VALUES (@id, @status, @sourceProjectId, @data)',
     );
-    for (const session of Object.values(state.sessions)) {
+    for (const [key, session] of Object.entries(state.sessions)) {
       insertSession.run({
         id: session.id,
         status: session.status ?? null,
+        sourceProjectId: laneColumn(key),
         data: JSON.stringify(session),
       });
     }
@@ -371,13 +422,15 @@ export async function rebuildProjectProjection(
     const insertMemory = db.prepare(
       `INSERT INTO memories
          (id, kind, salience, created_at, invalid_at, superseded_by,
-          deduped_by, last_accessed_at, injection_count, data)
+          deduped_by, last_accessed_at, injection_count, source_project_id, data)
        VALUES
          (@id, @kind, @salience, @createdAt, @invalidAt, @supersededBy,
-          @dedupedBy, @lastAccessedAt, @injectionCount, @data)`,
+          @dedupedBy, @lastAccessedAt, @injectionCount, @sourceProjectId, @data)`,
     );
     for (const memory of Object.values(state.memories)) {
       const accessState = accessStateById.get(memory.id);
+      // Memories are id-keyed (unique ids); the lane rides on the record itself.
+      const sourceProjectId = memory.sourceProjectId ?? null;
       insertMemory.run({
         id: memory.id,
         kind: memory.kind,
@@ -388,6 +441,7 @@ export async function rebuildProjectProjection(
         dedupedBy: memory.dedupedBy ?? null,
         lastAccessedAt: accessState?.lastAccessedAt ?? null,
         injectionCount: accessState?.injectionCount ?? 0,
+        sourceProjectId,
         data: JSON.stringify(memory),
       });
       // Superseded memories stay indexed — "what was true then" remains
@@ -396,7 +450,12 @@ export async function rebuildProjectProjection(
       // duplicate has no distinct "then" to recover, and keeping it out of FTS
       // means searchProject converges to the single winner too.
       if (!memory.dedupedBy) {
-        indexEntity(memory.id, 'memory', searchText([memory.text]));
+        indexEntity(
+          memory.id,
+          'memory',
+          searchText([memory.text]),
+          sourceProjectId,
+        );
       }
     }
 
@@ -409,7 +468,7 @@ export async function rebuildProjectProjection(
     // from the segments table on every reindex (same pattern as topicSearchRows
     // reading external .md content). Empty table => zero rows => byte-identical.
     for (const seg of listSegments(projectId)) {
-      indexEntity(seg.id, 'segment', seg.text);
+      indexEntity(seg.id, 'segment', seg.text, seg.sourceProjectId ?? null);
     }
   });
   writeAll();
@@ -497,8 +556,11 @@ export interface ListTasksFilters {
 export function listTasks(
   projectId: string,
   filters: ListTasksFilters = {},
+  lane: ProjectionLane = 'self',
 ): Task[] {
-  const clauses: string[] = [];
+  // laneWhere is always present, so the WHERE is unconditional; self-lane
+  // (default) keeps a single-writer store's list byte-identical to pre-M2.
+  const clauses: string[] = [laneWhere(lane)];
   const params: unknown[] = [];
   if (filters.status) {
     clauses.push('status = ?');
@@ -508,7 +570,7 @@ export function listTasks(
     clauses.push('workstream_id = ?');
     params.push(filters.workstreamId);
   }
-  const where = clauses.length ? ` WHERE ${clauses.join(' AND ')}` : '';
+  const where = ` WHERE ${clauses.join(' AND ')}`;
   const rows = db(projectId)
     .prepare(`SELECT data FROM tasks${where} ORDER BY created_at ASC`)
     .all(...params) as Array<{ data: string }>;
@@ -600,9 +662,12 @@ export function listOpenConflicts(projectId: string): Conflict[] {
   return parseAll<Conflict>(rows);
 }
 
-export function listSessions(projectId: string): Session[] {
+export function listSessions(
+  projectId: string,
+  lane: ProjectionLane = 'self',
+): Session[] {
   const rows = db(projectId)
-    .prepare('SELECT data FROM sessions')
+    .prepare(`SELECT data FROM sessions WHERE ${laneWhere(lane)}`)
     .all() as Array<{ data: string }>;
   return parseAll<Session>(rows);
 }
@@ -647,11 +712,20 @@ export function getMemory(
   };
 }
 
-/** Memories whose validity window is still open, i.e. not superseded. */
-export function listValidMemories(projectId: string): ValidMemoryRow[] {
+/**
+ * Memories whose validity window is still open, i.e. not superseded. Self-lane
+ * by default (the local project's own memories, injected as local truth); a
+ * `union` read surfaces every writer's memories for the labelled shared channel
+ * (W3), which must NOT be folded into local truth (SoT-010/040).
+ */
+export function listValidMemories(
+  projectId: string,
+  lane: ProjectionLane = 'self',
+): ValidMemoryRow[] {
   const rows = db(projectId)
     .prepare(
-      'SELECT data, last_accessed_at FROM memories WHERE invalid_at IS NULL',
+      `SELECT data, last_accessed_at FROM memories ` +
+        `WHERE invalid_at IS NULL AND ${laneWhere(lane)}`,
     )
     .all() as Array<{ data: string; last_accessed_at: string | null }>;
   return rows.map((row) => ({

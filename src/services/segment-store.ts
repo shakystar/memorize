@@ -18,6 +18,13 @@ export interface SegmentRow {
   ordinal: number;
   source?: string;
   text: string;
+  /**
+   * Origin store lane (M2 `(entity, writer)` projection). Undefined = self.
+   * Locally-captured segments are always self; a non-self value would arrive
+   * only via a workspace union (W3). Kept out of FTS folding via the mirrored
+   * `search_fts.source_project_id`. See docs/SoT/040.
+   */
+  sourceProjectId?: string;
 }
 
 interface RawRow {
@@ -26,6 +33,7 @@ interface RawRow {
   created_at: string;
   ordinal: number | null;
   source: string | null;
+  source_project_id: string | null;
   text: string;
 }
 
@@ -36,6 +44,7 @@ function parseRow(r: RawRow): SegmentRow {
     createdAt: r.created_at,
     ordinal: r.ordinal ?? 0,
     ...(r.source ? { source: r.source } : {}),
+    ...(r.source_project_id ? { sourceProjectId: r.source_project_id } : {}),
     text: r.text,
   };
 }
@@ -45,8 +54,8 @@ export function insertSegments(projectId: string, rows: SegmentRow[]): void {
   if (rows.length === 0) return;
   const db = getDb(projectId);
   const stmt = db.prepare(
-    `INSERT OR REPLACE INTO segments (id, session_id, created_at, ordinal, source, text)
-     VALUES (@id, @sessionId, @createdAt, @ordinal, @source, @text)`,
+    `INSERT OR REPLACE INTO segments (id, session_id, created_at, ordinal, source, source_project_id, text)
+     VALUES (@id, @sessionId, @createdAt, @ordinal, @source, @sourceProjectId, @text)`,
   );
   const tx = db.transaction((batch: SegmentRow[]) => {
     for (const s of batch) {
@@ -56,6 +65,7 @@ export function insertSegments(projectId: string, rows: SegmentRow[]): void {
         createdAt: s.createdAt,
         ordinal: s.ordinal,
         source: s.source ?? null,
+        sourceProjectId: s.sourceProjectId ?? null,
         text: s.text,
       });
     }
@@ -67,7 +77,7 @@ export function insertSegments(projectId: string, rows: SegmentRow[]): void {
 export function listSegments(projectId: string): SegmentRow[] {
   const rows = getDb(projectId)
     .prepare(
-      'SELECT id, session_id, created_at, ordinal, source, text FROM segments ORDER BY created_at DESC, ordinal ASC',
+      'SELECT id, session_id, created_at, ordinal, source, source_project_id, text FROM segments ORDER BY created_at DESC, ordinal ASC',
     )
     .all() as RawRow[];
   return rows.map(parseRow);

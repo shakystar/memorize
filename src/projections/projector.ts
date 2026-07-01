@@ -38,6 +38,66 @@ export interface MemoryRecord extends ConsolidatedMemory {
    * `invalidAt` so `listValidMemories` excludes it with no query change.
    */
   dedupedBy?: string;
+  /**
+   * Origin store lane (M2 `(entity, writer)` projection). Undefined = self
+   * (this store). Set from the consolidating event's `sourceProjectId` when it
+   * came from a foreign origin store (a workspace union), so union reads can
+   * group/filter shared memories by writer instead of folding them into local
+   * truth. See docs/SoT/040.
+   */
+  sourceProjectId?: string;
+}
+
+/**
+ * Provenance lane for the `(entity, writer)` projection (M2). Every event a
+ * store appends itself shares ONE lane — {@link SELF_LANE} — so a single-writer
+ * store keys exactly as it did pre-M2 (bare id). Events carried in by a
+ * workspace union keep their originating store id as the lane, so "current X"
+ * derivations and union reads can group by writer and never fold a foreign row
+ * into local truth. The lane is `source_project_id` (the origin store), not the
+ * actor: the same account across devices syncs into one store → one lane, so a
+ * user's current task follows them across devices; only a different store (a
+ * teammate, or a different folder/db) is a distinct lane. See docs/SoT/040.
+ */
+export const SELF_LANE = 'self';
+
+/**
+ * Joins lane + id in a composite state-map key. Entity ids and project ids are
+ * never NUL-bearing, so the split back into (lane, id) is unambiguous.
+ */
+const LANE_SEP = String.fromCharCode(0);
+
+/**
+ * Composite state-map key. The self lane keeps the BARE id, so a single-writer
+ * projection stays byte-identical to the pre-M2 one (every existing reader that
+ * looks up `state.tasks[taskId]` still resolves). Foreign lanes get a prefix.
+ */
+function laneKey(lane: string, id: string): string {
+  return lane === SELF_LANE ? id : `${lane}${LANE_SEP}${id}`;
+}
+
+/** Inverse of {@link laneKey}: recover the lane + id from a composite key. */
+export function parseLaneKey(key: string): { lane: string; id: string } {
+  const sep = key.indexOf(LANE_SEP);
+  return sep === -1
+    ? { lane: SELF_LANE, id: key }
+    : { lane: key.slice(0, sep), id: key.slice(sep + 1) };
+}
+
+/** True for a self-lane key (no foreign prefix) — used to self-scope derivations. */
+function isSelfKey(key: string): boolean {
+  return !key.includes(LANE_SEP);
+}
+
+/**
+ * The lane an event belongs to, relative to this store's own identity. A NULL
+ * `sourceProjectId` (legacy/pre-3.0.0 events) and the store's own id both map
+ * to {@link SELF_LANE}; any other origin store is a foreign lane.
+ */
+function laneOf(event: DomainEvent, selfProjectId: string | undefined): string {
+  const source = event.sourceProjectId;
+  if (source == null || source === selfProjectId) return SELF_LANE;
+  return source;
 }
 
 export interface ProjectState {
@@ -75,9 +135,13 @@ function dedupeMemoriesBySource(memories: Record<string, MemoryRecord>): void {
     if (memory.invalidAt) continue;
     const ids = memory.sourceObservationIds ?? [];
     if (ids.length === 0) continue;
-    // '\n' separator cannot appear in observation ids or `kind`, so the three
-    // key parts can never collide across positions.
-    const key = `${[...ids].sort().join(',')}\n${memory.kind}\n${memory.text.trim().toLowerCase()}`;
+    // Dedup is lane-scoped (M2): P3-a collapses SAME-store replica duplicates
+    // (same lane, cross-device sync), NOT independent assertions from different
+    // union writers — a foreign lane must never invalidate a self memory
+    // (SoT-040). '\n' cannot appear in a lane id, observation id, or `kind`, so
+    // the key parts can never collide across positions.
+    const lane = memory.sourceProjectId ?? SELF_LANE;
+    const key = `${lane}\n${[...ids].sort().join(',')}\n${memory.kind}\n${memory.text.trim().toLowerCase()}`;
     const bucket = groups.get(key);
     if (bucket) bucket.push(memory);
     else groups.set(key, [memory]);
@@ -119,7 +183,20 @@ export function reduceProjectState(events: DomainEvent[]): ProjectState {
     memories: {},
   };
 
+  // This store's own identity. Every event whose `sourceProjectId` is NULL
+  // (legacy) or equal to this belongs to SELF_LANE; anything else is a foreign
+  // origin store carried in by a workspace union. The #30 one-identity
+  // invariant guarantees exactly one project.created, so a prescan is safe.
+  let selfProjectId: string | undefined;
   for (const event of events) {
+    if (event.type === 'project.created') {
+      selfProjectId = (event.payload as Project).id;
+      break;
+    }
+  }
+
+  for (const event of events) {
+    const eventLane = laneOf(event, selfProjectId);
     switch (event.type) {
       case 'project.created': {
         // True-replica invariant (#30): a project's event log holds exactly
@@ -152,13 +229,14 @@ export function reduceProjectState(events: DomainEvent[]): ProjectState {
         state.workstreams[event.scopeId] = event.payload as Workstream;
         break;
       case 'task.created':
-        state.tasks[event.scopeId] = event.payload as Task;
+        state.tasks[laneKey(eventLane, event.scopeId)] = event.payload as Task;
         break;
       case 'task.updated':
         {
-          const existingTask = state.tasks[event.scopeId];
+          const key = laneKey(eventLane, event.scopeId);
+          const existingTask = state.tasks[key];
           if (!existingTask) break;
-          state.tasks[event.scopeId] = applyTaskUpdate(
+          state.tasks[key] = applyTaskUpdate(
             existingTask,
             event.payload as Partial<Task>,
             event.createdAt,
@@ -168,7 +246,7 @@ export function reduceProjectState(events: DomainEvent[]): ProjectState {
       case 'handoff.created':
         {
           const handoff = event.payload as Handoff;
-          state.handoffs[handoff.id] = handoff;
+          state.handoffs[laneKey(eventLane, handoff.id)] = handoff;
         }
         break;
       case 'checkpoint.created':
@@ -207,15 +285,16 @@ export function reduceProjectState(events: DomainEvent[]): ProjectState {
       case 'session.started':
         {
           const session = event.payload as Session;
-          state.sessions[session.id] = session;
+          state.sessions[laneKey(eventLane, session.id)] = session;
         }
         break;
       case 'session.completed':
       case 'session.abandoned':
         {
-          const existing = state.sessions[event.scopeId];
+          const key = laneKey(eventLane, event.scopeId);
+          const existing = state.sessions[key];
           if (!existing) break;
-          state.sessions[event.scopeId] = {
+          state.sessions[key] = {
             ...existing,
             status: event.type === 'session.completed' ? 'completed' : 'abandoned',
             endedAt: event.createdAt,
@@ -231,9 +310,10 @@ export function reduceProjectState(events: DomainEvent[]): ProjectState {
           // stays so a later `claude --resume` / `codex resume` can
           // reattach via agentSessionId match. Reap sweeps still
           // catch this status if it goes stale without a resume.
-          const existing = state.sessions[event.scopeId];
+          const key = laneKey(eventLane, event.scopeId);
+          const existing = state.sessions[key];
           if (!existing) break;
-          state.sessions[event.scopeId] = {
+          state.sessions[key] = {
             ...existing,
             status: 'paused',
             lastSeenAt: event.createdAt,
@@ -247,9 +327,10 @@ export function reduceProjectState(events: DomainEvent[]): ProjectState {
           // same UUID, codex resume). Flip back to 'active' if we had
           // marked it 'paused' on the prior SessionEnd, and bump
           // activity so the picker sees it as fresh again.
-          const existing = state.sessions[event.scopeId];
+          const key = laneKey(eventLane, event.scopeId);
+          const existing = state.sessions[key];
           if (!existing) break;
-          state.sessions[event.scopeId] = {
+          state.sessions[key] = {
             ...existing,
             status: 'active',
             lastSeenAt: event.createdAt,
@@ -260,9 +341,10 @@ export function reduceProjectState(events: DomainEvent[]): ProjectState {
       case 'session.heartbeat':
         {
           const payload = event.payload as SessionHeartbeatPayload;
-          const existing = state.sessions[payload.sessionId];
+          const key = laneKey(eventLane, payload.sessionId);
+          const existing = state.sessions[key];
           if (!existing) break;
-          state.sessions[payload.sessionId] = {
+          state.sessions[key] = {
             ...existing,
             lastSeenAt: payload.at,
             updatedAt: payload.at,
@@ -278,7 +360,14 @@ export function reduceProjectState(events: DomainEvent[]): ProjectState {
       case 'memory.consolidated':
         {
           const memory = event.payload as ConsolidatedMemory;
-          state.memories[memory.id] = memory;
+          // Memories are id-keyed (ids are globally unique), but a foreign
+          // memory carries its origin lane so union reads can group/filter it
+          // without folding it into local truth. Self memories stay untagged
+          // → byte-identical to the pre-M2 record.
+          state.memories[memory.id] =
+            eventLane === SELF_LANE
+              ? memory
+              : { ...memory, sourceProjectId: eventLane };
         }
         break;
       case 'memory.superseded':
@@ -315,9 +404,17 @@ export function reduceProjectState(events: DomainEvent[]): ProjectState {
       activeWorkstreamIds: Object.values(state.workstreams)
         .filter((workstream) => workstream.status !== 'closed')
         .map((workstream) => workstream.id),
-      activeTaskIds: Object.values(state.tasks)
-        .filter((task) => task.status !== 'done' && task.status !== 'cancelled')
-        .map((task) => task.id),
+      // Self-scoped: a foreign writer's tasks (workspace union) must never be
+      // foldable into THIS store's "current task" (SoT-040). isSelfKey drops
+      // foreign-lane entries; single-writer stores are unaffected.
+      activeTaskIds: Object.entries(state.tasks)
+        .filter(
+          ([key, task]) =>
+            isSelfKey(key) &&
+            task.status !== 'done' &&
+            task.status !== 'cancelled',
+        )
+        .map(([, task]) => task.id),
       acceptedDecisionIds: Object.values(state.decisions)
         .filter((decision) => decision.status === 'accepted')
         .map((decision) => decision.id),
@@ -366,8 +463,17 @@ export function buildMemoryIndex(state: ProjectState): MemoryIndex {
         summary: workstream.summary,
         status: workstream.status,
       })),
-    topTasks: Object.values(state.tasks)
-      .filter((task) => task.status !== 'done' && task.status !== 'cancelled')
+    // Self-scoped like activeTaskIds: the injected startup index shows THIS
+    // store's tasks; a union member's tasks reach the agent through the shared
+    // channel (W3), never the local top-tasks fold (SoT-040).
+    topTasks: Object.entries(state.tasks)
+      .filter(
+        ([key, task]) =>
+          isSelfKey(key) &&
+          task.status !== 'done' &&
+          task.status !== 'cancelled',
+      )
+      .map(([, task]) => task)
       .sort(byUpdatedAtDesc)
       .slice(0, MAX_TOP_TASKS)
       .map((task) => ({

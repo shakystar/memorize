@@ -264,6 +264,39 @@ const MIGRATIONS: ReadonlyArray<(db: Database.Database) => void> = [
       ALTER TABLE events ADD COLUMN source_project_id TEXT;
     `);
   },
+  // v12 — projection provenance lane (3.0.0 M2, `(entity, writer)` projection).
+  // A NULLABLE `source_project_id` on each projection table that must not fold
+  // a foreign writer's row into local truth (SoT-040). NULL = self (this
+  // store); a non-NULL value is the origin store of an event carried in by a
+  // workspace union. The entity tables take a plain additive ALTER (O(1),
+  // existing rows read back NULL = self). search_fts is a virtual table whose
+  // columns can't be ALTERed, so it is rebuilt with the extra UNINDEXED column,
+  // copying every existing row with a NULL lane — no empty-index window (the
+  // hot telemetry rebuild path uses reindexSearch:false, so a lazy repopulate
+  // is NOT guaranteed; carrying rows across keeps search intact on upgrade).
+  // Consumed by the single private-vs-union selector; single-writer stores are
+  // byte-identical because every local row is NULL-lane.
+  (db) => {
+    db.exec(`
+      ALTER TABLE tasks    ADD COLUMN source_project_id TEXT;
+      ALTER TABLE handoffs ADD COLUMN source_project_id TEXT;
+      ALTER TABLE sessions ADD COLUMN source_project_id TEXT;
+      ALTER TABLE memories ADD COLUMN source_project_id TEXT;
+      ALTER TABLE segments ADD COLUMN source_project_id TEXT;
+
+      CREATE VIRTUAL TABLE search_fts_new USING fts5(
+        entity_id UNINDEXED,
+        kind UNINDEXED,
+        text,
+        source_project_id UNINDEXED,
+        tokenize='unicode61'
+      );
+      INSERT INTO search_fts_new (entity_id, kind, text, source_project_id)
+        SELECT entity_id, kind, text, NULL FROM search_fts;
+      DROP TABLE search_fts;
+      ALTER TABLE search_fts_new RENAME TO search_fts;
+    `);
+  },
 ];
 
 function runMigrations(db: Database.Database): void {
