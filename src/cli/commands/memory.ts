@@ -2,6 +2,7 @@ import process from 'node:process';
 
 import { ACTOR_SYSTEM } from '../../domain/common.js';
 import { autoPush } from '../../services/auto-sync-service.js';
+import { gcUnpushedRetracted } from '../../services/gc-service.js';
 import { importMemories } from '../../services/memory-import-service.js';
 import {
   requireBoundProjectId,
@@ -27,7 +28,9 @@ const LIST_USAGE = 'Usage: memorize memory list [--json] [--limit <N>]';
 const RETRACT_USAGE =
   'Usage: memorize memory retract <memoryId> [--reason <text>]';
 
-const USAGE = `${IMPORT_USAGE}\n${SHOW_USAGE}\n${LIST_USAGE}\n${RETRACT_USAGE}`;
+const GC_USAGE = 'Usage: memorize memory gc [--dry-run] [--json]';
+
+const USAGE = `${IMPORT_USAGE}\n${SHOW_USAGE}\n${LIST_USAGE}\n${RETRACT_USAGE}\n${GC_USAGE}`;
 
 async function readStdin(): Promise<string | undefined> {
   if (process.stdin.isTTY) {
@@ -68,7 +71,39 @@ export async function runMemoryCommand(
     await runMemoryRetract(args.slice(1), ctx);
     return;
   }
+  if (subcommand === 'gc') {
+    await runMemoryGc(args.slice(1), ctx);
+    return;
+  }
   throw new Error(USAGE);
+}
+
+/**
+ * `memorize memory gc [--dry-run] [--json]` — physically reclaim (M3-b) the
+ * bytes of retracted memories whose whole derivation unit is LOCAL-ONLY
+ * (un-pushed). Retract (M3-a) only tombstones/hides; this hard-deletes the
+ * un-shared, already-retracted events — safe because nobody else has them
+ * (SoT-050, `git reset --hard` on an un-pushed commit). Shared retracted
+ * memories are left as tombstones (deferred: needs a retention policy).
+ * `--dry-run` reports what WOULD be reclaimed without mutating anything.
+ */
+async function runMemoryGc(args: string[], ctx: CliContext): Promise<void> {
+  const flags = parseFlags(args, { boolean: ['dry-run', 'json'] });
+  const projectId = await requireBoundProjectId(ctx.cwd);
+  const result = await gcUnpushedRetracted(projectId, {
+    dryRun: flags.boolean['dry-run'] ?? false,
+  });
+
+  if (flags.boolean.json) {
+    console.log(JSON.stringify(result));
+    return;
+  }
+  const verb = result.dryRun ? 'Would reclaim' : 'Reclaimed';
+  console.log(
+    `${verb} ${result.reclaimedMemories.length} memory(ies) ` +
+      `(${result.reclaimedEvents} events, ${result.reclaimedObservations} observations). ` +
+      `Left ${result.skippedShared} shared/retained tombstone(s).`,
+  );
 }
 
 /**

@@ -694,6 +694,20 @@ function writeWatermark(projectId: string, eventId: string): void {
     .run(WATERMARK_META_KEY, eventId);
 }
 
+/**
+ * Read the consolidation watermark event id (M3-b gc needs it to repair the
+ * cursor when a physically-reclaimed observation IS the watermark — otherwise
+ * `readEventsSince` would fall back to "everything" and re-consolidate the whole
+ * log). Exported thin accessors so gc-service does not duplicate the meta key.
+ */
+export function getConsolidateWatermark(projectId: string): string | undefined {
+  return readWatermark(projectId);
+}
+
+export function setConsolidateWatermark(projectId: string, eventId: string): void {
+  writeWatermark(projectId, eventId);
+}
+
 // Per-transcript byte watermark (#99 cat-2 fix): how far into each transcript
 // the extractor has already been shown conversational content. Keyed by
 // transcript basename so it survives the transcript being shared across several
