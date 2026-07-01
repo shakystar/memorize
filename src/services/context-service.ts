@@ -66,6 +66,7 @@ import {
   personalStoreExists,
 } from './personal-store-service.js';
 import {
+  ensureProjectGenesis,
   readDefaultWorkstreamForProject,
   readProject,
 } from './project-service.js';
@@ -118,6 +119,12 @@ export async function loadStartContext(params: {
   taskId?: string;
   selfSessionId?: string;
 }): Promise<StartupContextPayload> {
+  // Self-heal: a store whose event log has events but no `project.created`
+  // genesis (migration / capture-without-genesis) makes readProject throw
+  // "not found" and blocks startup. Backfill the genesis at SessionStart so the
+  // store's accumulated observations/memories become readable (SoT-021: the
+  // local project.created is the always-present local identity).
+  await ensureProjectGenesis(params.projectId);
   const project = await readProject(params.projectId);
   if (!project) {
     throw new Error(`Project ${params.projectId} not found`);
