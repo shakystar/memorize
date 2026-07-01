@@ -1,3 +1,5 @@
+import os from 'node:os';
+
 import { probeHubAuth } from '../../adapters/sync-transport-http.js';
 import {
   deleteToken,
@@ -8,11 +10,13 @@ import {
 } from '../../storage/credentials-store.js';
 import { getCredentialsFile } from '../../storage/path-resolver.js';
 import type { CliContext } from '../context.js';
+import { deviceLogin } from '../device-login.js';
 import { parseFlags } from '../parse-flags.js';
 
 const LOGIN_USAGE =
   'Usage: memorize auth login --remote-url <url> [--token <t>] [--no-validate] ' +
-  '(or pipe the token on stdin)';
+  '[--no-browser] [--label <l>] (no --token on a terminal starts browser login; ' +
+  'or pipe the token on stdin)';
 const STATUS_USAGE = 'Usage: memorize auth status [--remote-url <url>]';
 const LOGOUT_USAGE = 'Usage: memorize auth logout --remote-url <url>';
 const USAGE = `${LOGIN_USAGE}\n${STATUS_USAGE}\n${LOGOUT_USAGE}`;
@@ -40,8 +44,8 @@ export async function runAuthCommand(
 
   if (subcommand === 'login') {
     const flags = parseFlags(args.slice(1), {
-      single: ['remote-url', 'token'],
-      boolean: ['no-validate'],
+      single: ['remote-url', 'token', 'label'],
+      boolean: ['no-validate', 'no-browser'],
     });
     const remoteUrl = flags.single['remote-url'];
     if (!remoteUrl) throw new Error(LOGIN_USAGE);
@@ -49,9 +53,27 @@ export async function runAuthCommand(
     // of shell history: `printf %s "$PAT" | memorize auth login --remote-url …`).
     const token = (flags.single.token ?? (await readStdin()) ?? '').trim();
     if (!token) {
-      throw new Error(
-        `No token provided. Pass --token <t> or pipe it on stdin. ${LOGIN_USAGE}`,
+      // No key supplied. On a terminal, start the browser device-authorization
+      // flow (gh-auth-login style): the Hub mints the key after the user
+      // approves in a browser, and deviceLogin stores it host-scoped 0600 —
+      // same destination as the BYO path below. Off a TTY (piped/CI with an
+      // empty stdin) there is nothing to store and no way to prompt, so keep
+      // the original fail-fast.
+      if (!process.stdin.isTTY) {
+        throw new Error(
+          `No token provided. Pass --token <t> or pipe it on stdin, or run ` +
+            `interactively for browser login. ${LOGIN_USAGE}`,
+        );
+      }
+      const host = normalizeHost(remoteUrl);
+      await deviceLogin(remoteUrl, {
+        label: flags.single.label ?? os.hostname(),
+        noBrowser: flags.boolean['no-browser'] ?? false,
+      });
+      console.log(
+        `\nLogged in to ${host}. Token stored (0600) at ${getCredentialsFile()}.`,
       );
+      return;
     }
     const host = normalizeHost(remoteUrl);
     // Fail-fast validation (#192): probe the Hub before persisting so a typo'd or

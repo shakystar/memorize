@@ -544,9 +544,12 @@ never co-stored.
 
 | Action | Purpose |
 |---|---|
-| `login --remote-url <url> [--token <t>] [--no-validate]` | Store a bearer token for the URL's host. Without `--token`, the token is read from stdin (keeps it out of shell history) |
+| `login --remote-url <url> [--token <t>] [--no-validate] [--no-browser] [--label <l>]` | Authenticate for the URL's host. On an interactive terminal with no `--token`, opens a **browser device-authorization** flow (see below); with `--token` (or the token piped on stdin, keeping it out of shell history) it stores that key directly — the bring-your-own-token / CI path. `--no-browser` skips the auto-open; `--label` names the minted key |
 | `status [--remote-url <url>]` | With a URL, report whether a token is stored for that host; without, list all hosts that have one (never the tokens) |
 | `logout --remote-url <url>` | Remove the stored token for the URL's host |
+
+`memorize login` is an optional convenience **alias** for `memorize auth login`
+(the namespaced form stays canonical, mirroring `gh auth login`).
 
 `login` **validates** the token against the Hub before saving (a cheap
 authenticated `GET {host}/healthz`) so a typo'd or expired key fails fast
@@ -554,6 +557,17 @@ here rather than as a deferred auto-sync failure later. Only a definitive
 `401`/`403` aborts (nothing is stored); an unreachable or non-conformant Hub
 degrades to "stored anyway" with a warning, so offline/CI provisioning still
 works. Pass `--no-validate` to skip the network probe entirely.
+
+**Browser login (device authorization).** Without `--token` on an interactive
+terminal, `login` (and its alias `memorize login`) runs the RFC 8628 device
+grant against the Hub instead of asking for a pasted key: it requests a code
+(`POST /v1/device/code`), prints a short `user_code` + verification URL (and
+opens the browser unless `--no-browser`), then polls `POST /v1/device/token` —
+waiting through `authorization_pending`, backing off on `slow_down` — until you
+approve in a browser already signed in to your Hub account and the Hub returns
+the freshly-minted `mzk_` key. The key is then stored host-scoped `0600`,
+exactly like the `--token` path. The wire contract is memorize_hub
+`docs/protocol/device-auth.md`.
 
 Resolution order for the bearer token (most→least specific): explicit
 `--token` → per-project persisted token (legacy state only) → this host store
