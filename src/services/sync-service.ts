@@ -2,9 +2,9 @@ import {
   ACTOR_SYSTEM,
   CURRENT_SCHEMA_VERSION,
   assertValidId,
-  isPersonalStoreId,
   nowIso,
 } from '../domain/common.js';
+import { isPersonalStoreId } from '../domain/identity/personal-store.js';
 import type { ProjectSyncState, SyncTransportConfig } from '../domain/entities.js';
 import type {
   SyncPullResponse,
@@ -104,8 +104,9 @@ export async function updateSyncState(
 
 export async function buildPushPayload(
   projectId: string,
+  opts: { allowPersonal?: boolean } = {},
 ): Promise<SyncPushRequest> {
-  assertNotPersonalStore(projectId);
+  if (!opts.allowPersonal) assertNotPersonalStore(projectId);
   const state = await readStateOrThrow(projectId);
   // Seq-watermark slice: events with seq greater than the lastPushed row,
   // in seq order. Still excludes local sync bookkeeping events.
@@ -157,11 +158,20 @@ export async function applyPullResponse(
 export async function pushProject(
   projectId: string,
   transport: SyncTransport,
+  opts: { allowPersonal?: boolean } = {},
 ): Promise<SyncPushResponse> {
-  assertNotPersonalStore(projectId);
+  if (!opts.allowPersonal) assertNotPersonalStore(projectId);
   let state = await readStateOrThrow(projectId);
   // First push self-binds the remote (true-replica origin). One-time write.
+  // A personal store never self-binds to its local id — its remote is a
+  // server-minted psm_ that must be resolved and bound BEFORE this call.
   if (!state.remoteProjectId) {
+    if (opts.allowPersonal) {
+      throw new Error(
+        `Personal store ${projectId} has no bound remote store id; resolve its ` +
+          `psm_ (GET /v1/account/personal-store) and bind it before pushing.`,
+      );
+    }
     state = await updateSyncState(projectId, {
       remoteProjectId: projectId,
       syncEnabled: true,
@@ -172,7 +182,7 @@ export async function pushProject(
   // at an auto-sync boundary with nothing new) writes ZERO sync.state.updated
   // events when already idle — avoids per-boundary log churn now that this
   // runs automatically.
-  const payload = await buildPushPayload(projectId);
+  const payload = await buildPushPayload(projectId, opts);
   if (payload.events.length === 0) {
     if (state.syncStatus !== 'idle') {
       await updateSyncState(projectId, { syncStatus: 'idle' });
@@ -208,8 +218,9 @@ export async function pushProject(
 export async function pullProject(
   projectId: string,
   transport: SyncTransport,
+  opts: { allowPersonal?: boolean } = {},
 ): Promise<SyncPullResult> {
-  assertNotPersonalStore(projectId);
+  if (!opts.allowPersonal) assertNotPersonalStore(projectId);
   const state = await readStateOrThrow(projectId);
   if (!state.remoteProjectId) {
     throw new Error(

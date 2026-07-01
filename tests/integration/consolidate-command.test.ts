@@ -71,7 +71,7 @@ describe('memorize consolidate (CLI command — #46 Part A)', () => {
 
     process.env.MEMORIZE_ROOT = memorizeRoot;
     closeAll();
-    const projectDirs = await readdir(join(memorizeRoot, 'projects'));
+    const projectDirs = await readdir(join(memorizeRoot, 'accounts', 'local_default', 'projects'));
     const types = (await readEvents(projectDirs[0]!)).map((e) => e.type);
     expect(
       types.filter((t) => t === 'memory.consolidated').length,
@@ -104,7 +104,7 @@ describe('memorize consolidate (CLI command — #46 Part A)', () => {
 
     process.env.MEMORIZE_ROOT = memorizeRoot;
     closeAll();
-    const projectDirs = await readdir(join(memorizeRoot, 'projects'));
+    const projectDirs = await readdir(join(memorizeRoot, 'accounts', 'local_default', 'projects'));
     const attempt = readLastConsolidateAttempt(projectDirs[0]!);
     expect(attempt?.boundary).toBe('post-compact');
     expect(attempt?.outcome).toBe('ok');
@@ -185,7 +185,7 @@ describe('memorize consolidate (CLI command — #46 Part A)', () => {
     // run above, not a new one.
     process.env.MEMORIZE_ROOT = memorizeRoot;
     closeAll();
-    const projectDirs = await readdir(join(memorizeRoot, 'projects'));
+    const projectDirs = await readdir(join(memorizeRoot, 'accounts', 'local_default', 'projects'));
     const attempt = readLastConsolidateAttempt(projectDirs[0]!);
     expect(attempt?.outcome).toBe('ok');
     closeAll();

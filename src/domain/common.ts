@@ -5,22 +5,19 @@ export const ACTOR_USER = 'user';
 export const ACTOR_NEXT_AGENT = 'next-agent';
 
 /**
- * Reserved store id for the global/personal memory pipeline (Path A). Personal
+ * Reserved personal-store id for the DEFAULT (pre-login) local account. Personal
  * memory is a permanent, account-level axis ABOVE the project axis — it is not a
- * project and not a `scopeType` value. It reuses the per-store event-log +
- * projection + consolidation machinery under a fixed id, but lives in its OWN
- * host-level directory (`~/.memorize/personal/`, see getPersonalRoot) so it is
- * invisible to project enumeration (listProjects) and structurally excluded from
- * sync/teams (see assertNotPersonalStore in sync-service). The id matches
- * ID_PATTERN so it flows through assertValidId unchanged; no minted `proj_…` id
- * can collide with it.
+ * project and not a `scopeType` value. Each account has its own personal store
+ * (see `domain/identity/personal-store.ts` for the per-account id family and the
+ * structural `isPersonalStoreId`); this legacy id is the default account's member
+ * of that family, kept fixed so existing on-disk data needs no re-keying. It
+ * reuses the per-store event-log + projection + consolidation machinery, lives in
+ * its account's `accounts/<id>/personal/` directory (see getPersonalRoot) so it
+ * is invisible to project enumeration (listProjects) and structurally excluded
+ * from cross-account sync (assertNotPersonalStore). The id matches ID_PATTERN so
+ * it flows through assertValidId unchanged; no minted `proj_…` id can collide.
  */
 export const PERSONAL_STORE_ID = 'personal_self';
-
-/** True iff `id` is the reserved global/personal memory store id. */
-export function isPersonalStoreId(id: unknown): boolean {
-  return id === PERSONAL_STORE_ID;
-}
 
 export type EntityId = string;
 export type ISODateString = string;

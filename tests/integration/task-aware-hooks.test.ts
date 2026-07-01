@@ -13,7 +13,7 @@ async function eventTypesForFirstProject(memorizeRoot: string): Promise<string[]
   const previous = process.env.MEMORIZE_ROOT;
   process.env.MEMORIZE_ROOT = memorizeRoot;
   try {
-    const projectDirs = await readdir(join(memorizeRoot, 'projects'));
+    const projectDirs = await readdir(join(memorizeRoot, 'accounts', 'local_default', 'projects'));
     const events = await readEvents(projectDirs[0]!);
     return events.map((event) => event.type);
   } finally {
@@ -88,7 +88,7 @@ describe('task-aware hook semantics', () => {
     });
     expect(result.status).toBe(0);
 
-    const projectDirs = await readdir(join(memorizeRoot, 'projects'));
+    const projectDirs = await readdir(join(memorizeRoot, 'accounts', 'local_default', 'projects'));
     process.env.MEMORIZE_ROOT = memorizeRoot;
     closeAll();
     const tasks = listTasks(projectDirs[0]!);

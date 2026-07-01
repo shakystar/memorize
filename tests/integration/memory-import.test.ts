@@ -214,7 +214,7 @@ describe('memorize memory import (CLI)', () => {
 
     process.env.MEMORIZE_ROOT = memorizeRoot;
     closeAll();
-    const projectDirs = await readdir(join(memorizeRoot, 'projects'));
+    const projectDirs = await readdir(join(memorizeRoot, 'accounts', 'local_default', 'projects'));
     const events = await readEvents(projectDirs[0]!);
     const imported = events.filter((e) => e.type === 'memory.consolidated');
     expect(imported).toHaveLength(1);

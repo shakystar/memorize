@@ -79,7 +79,7 @@ describe('migrate / export / doctor over SQLite', () => {
         payload: { id: 'rule_1', title: 'Legacy rule', source: 'imported' } as never,
       },
     ];
-    const eventsDir = join(memorizeRoot, 'projects', projectId, 'events');
+    const eventsDir = join(memorizeRoot, 'accounts', 'local_default', 'projects', projectId, 'events');
     await mkdir(eventsDir, { recursive: true });
     await writeFile(
       join(eventsDir, '2026-01-01.ndjson'),
@@ -96,7 +96,7 @@ describe('migrate / export / doctor over SQLite', () => {
 
     // events.bak created.
     const bak = await readdir(
-      join(memorizeRoot, 'projects', projectId, 'events.bak'),
+      join(memorizeRoot, 'accounts', 'local_default', 'projects', projectId, 'events.bak'),
     );
     expect(bak).toContain('2026-01-01.ndjson');
 
@@ -142,7 +142,7 @@ describe('migrate / export / doctor over SQLite', () => {
         } as never,
       },
     ];
-    const eventsDir = join(memorizeRoot, 'projects', projectId, 'events');
+    const eventsDir = join(memorizeRoot, 'accounts', 'local_default', 'projects', projectId, 'events');
     await mkdir(eventsDir, { recursive: true });
     await writeFile(
       join(eventsDir, '2026-01-01.ndjson'),

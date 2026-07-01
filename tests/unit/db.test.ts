@@ -131,7 +131,12 @@ describe('db unwritable-data-dir diagnostics (#116)', () => {
   it.skipIf(cannotDenyDirWrite)(
     'surfaces the actionable hint when the data dir is not writable',
     () => {
-      const projectsRoot = path.join(tmpRoot, 'projects');
+      const projectsRoot = path.join(
+        tmpRoot,
+        'accounts',
+        'local_default',
+        'projects',
+      );
       fs.mkdirSync(projectsRoot, { recursive: true });
       fs.chmodSync(projectsRoot, 0o500); // r-x: cannot create the project dir
       try {
@@ -229,6 +234,79 @@ describe('db v5 schema_version rebuild', () => {
         const names = indexes.map((i) => i.name);
         expect(names).toContain('idx_events_type');
         expect(names).toContain('idx_events_scope');
+      } finally {
+        db.close();
+      }
+    } finally {
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+});
+
+// v11 — per-event provenance. Additive NULLABLE columns: a fresh db has them;
+// an old-shape (pre-v11) db gains them on upgrade with existing rows NULL.
+describe('db v11 provenance columns', () => {
+  function eventColumns(db: Database.Database) {
+    return db.prepare('PRAGMA table_info(events)').all() as Array<{
+      name: string;
+      notnull: number;
+      dflt_value: unknown;
+    }>;
+  }
+
+  it('a fresh db has nullable writer + source_project_id on events', () => {
+    const db = getDb(VALID_PROJECT_ID);
+    expect(db.pragma('user_version', { simple: true })).toBeGreaterThanOrEqual(11);
+    const cols = eventColumns(db);
+    const writer = cols.find((c) => c.name === 'writer');
+    const source = cols.find((c) => c.name === 'source_project_id');
+    expect(writer).toBeDefined();
+    expect(source).toBeDefined();
+    // Nullable + no default → O(1) ALTER and legacy rows read NULL.
+    expect(writer?.notnull).toBe(0);
+    expect(source?.notnull).toBe(0);
+    expect(writer?.dflt_value ?? null).toBeNull();
+  });
+
+  it('an old-shape db gains the columns on upgrade with existing rows NULL', () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'memorize-v11-'));
+    const dbFile = path.join(tmp, 'memorize.db');
+    try {
+      // Pre-v11 events table (no provenance columns), one row, one version behind.
+      const seed = new Database(dbFile);
+      seed.exec(`
+        CREATE TABLE events (
+          seq INTEGER PRIMARY KEY, id TEXT NOT NULL UNIQUE, schema_version TEXT NOT NULL,
+          created_at TEXT NOT NULL, updated_at TEXT NOT NULL, type TEXT NOT NULL,
+          project_id TEXT NOT NULL, scope_type TEXT NOT NULL, scope_id TEXT NOT NULL,
+          actor TEXT NOT NULL, payload TEXT NOT NULL
+        );
+      `);
+      seed
+        .prepare(
+          `INSERT INTO events (id, schema_version, created_at, updated_at, type,
+             project_id, scope_type, scope_id, actor, payload)
+           VALUES ('evt_legacy', '0.1.0', '2026-01-01T00:00:00.000Z',
+             '2026-01-01T00:00:00.000Z', 'task.created', 'proj_x', 'task', 's1',
+             'user', '{}')`,
+        )
+        .run();
+      seed.pragma('user_version = 10'); // pre-v11; only v11 should run on open
+      seed.close();
+
+      const db = openDbAt(dbFile);
+      try {
+        expect(db.pragma('user_version', { simple: true })).toBeGreaterThanOrEqual(11);
+        const names = eventColumns(db).map((c) => c.name);
+        expect(names).toContain('writer');
+        expect(names).toContain('source_project_id');
+        const row = db
+          .prepare(
+            "SELECT writer, source_project_id FROM events WHERE id = 'evt_legacy'",
+          )
+          .get() as { writer: string | null; source_project_id: string | null };
+        expect(row.writer).toBeNull();
+        expect(row.source_project_id).toBeNull();
       } finally {
         db.close();
       }

@@ -1,6 +1,9 @@
 import process from 'node:process';
 
-import { ACTOR_SYSTEM, PERSONAL_STORE_ID } from '../../domain/common.js';
+import { ACTOR_SYSTEM } from '../../domain/common.js';
+import { resolveActiveAccount } from '../../domain/identity/account.js';
+import { getPersonalStoreId } from '../../domain/identity/personal-store.js';
+import { syncPersonalStore } from '../../services/personal-sync-service.js';
 import {
   importPersonalMemories,
   listPersonalMemories,
@@ -17,7 +20,9 @@ const LIST_USAGE = 'Usage: memorize personal list [--json] [--limit <N>]';
 
 const SHOW_USAGE = 'Usage: memorize personal show <memoryId> [--json]';
 
-const USAGE = `${IMPORT_USAGE}\n${LIST_USAGE}\n${SHOW_USAGE}`;
+const SYNC_USAGE = 'Usage: memorize personal sync --remote-url <hub-url>';
+
+const USAGE = `${IMPORT_USAGE}\n${LIST_USAGE}\n${SHOW_USAGE}\n${SYNC_USAGE}`;
 
 async function readStdin(): Promise<string | undefined> {
   if (process.stdin.isTTY) {
@@ -37,8 +42,10 @@ async function readStdin(): Promise<string | undefined> {
  * automatic — the consolidation extractor classifies personal items and routes
  * them here (see personal-store-service). This `import` subcommand is the
  * SECONDARY, explicit path for pushing in pre-existing external notes. The
- * store never leaves the host over sync, and is bound to no cwd, so — unlike
- * `memory …` — these commands need no bound project.
+ * store syncs ONLY to the same account's own devices (SoT-010 own-devices axis,
+ * `personal sync` — via the account's server-minted psm_), never across accounts,
+ * and is bound to no cwd, so — unlike `memory …` — these commands need no bound
+ * project.
  */
 export async function runPersonalCommand(
   args: string[],
@@ -57,7 +64,21 @@ export async function runPersonalCommand(
     runPersonalShow(args.slice(1));
     return;
   }
+  if (subcommand === 'sync') {
+    await runPersonalSync(args.slice(1));
+    return;
+  }
   throw new Error(USAGE);
+}
+
+async function runPersonalSync(args: string[]): Promise<void> {
+  const flags = parseFlags(args, { single: ['remote-url'] });
+  const remoteUrl = flags.single['remote-url'];
+  if (!remoteUrl) {
+    throw new Error(SYNC_USAGE);
+  }
+  const result = await syncPersonalStore({ remoteUrl });
+  console.log(JSON.stringify(result));
 }
 
 async function runPersonalImport(
@@ -124,7 +145,7 @@ function runPersonalShow(args: string[]): void {
     throw new Error(SHOW_USAGE);
   }
 
-  const row = getMemory(PERSONAL_STORE_ID, memoryId);
+  const row = getMemory(getPersonalStoreId(resolveActiveAccount()), memoryId);
   if (!row) {
     throw new Error(`personal show: no memory found with id ${memoryId}.`);
   }

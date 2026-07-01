@@ -133,10 +133,12 @@ export async function migrateProjectFromNdjson(
   const insert = db.prepare(
     `INSERT OR IGNORE INTO events
        (id, schema_version, created_at, updated_at, type,
-        project_id, scope_type, scope_id, actor, payload)
+        project_id, scope_type, scope_id, actor,
+        writer, source_project_id, payload)
      VALUES
        (@id, @schemaVersion, @createdAt, @updatedAt, @type,
-        @projectId, @scopeType, @scopeId, @actor, @payload)`,
+        @projectId, @scopeType, @scopeId, @actor,
+        @writer, @sourceProjectId, @payload)`,
   );
 
   const insertAll = db.transaction((events: DomainEvent[]): number => {
@@ -152,6 +154,8 @@ export async function migrateProjectFromNdjson(
         scopeType: event.scopeType,
         scopeId: event.scopeId,
         actor: event.actor,
+        writer: event.writer ?? null,
+        sourceProjectId: event.sourceProjectId ?? null,
         payload: JSON.stringify(event.payload),
       });
       inserted += info.changes;

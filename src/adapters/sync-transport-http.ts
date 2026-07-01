@@ -131,3 +131,38 @@ export function createHttpSyncTransport(
     },
   };
 }
+
+/**
+ * Resolve the calling account's personal-store id from the Hub
+ * (`GET /v1/account/personal-store`; Hub SoT H050 / docs/protocol/personal-store.md),
+ * server-provisioning one on first call. The returned `storeId` is a server-minted
+ * `psm_…` — an OPAQUE routing id in the Hub namespace (`[A-Za-z0-9_-]`, uppercase
+ * allowed), NOT a local `proj_`/`personal_…` id, so it MUST NOT be validated
+ * against the client's lowercase ID_PATTERN. It travels only as the events-route
+ * path component and as `remoteProjectId` in sync state. Requires an UNSCOPED key.
+ */
+export async function resolvePersonalStore(
+  baseUrl: string,
+  token: string,
+  options: { fetchImpl?: typeof fetch } = {},
+): Promise<{ storeId: string; eventsUrl: string }> {
+  const doFetch = options.fetchImpl ?? fetch;
+  const base = baseUrl.replace(/\/+$/, '');
+  const response = await doFetch(`${base}/v1/account/personal-store`, {
+    method: 'GET',
+    headers: { authorization: `Bearer ${token}` },
+  });
+  if (!response.ok) {
+    let body = '';
+    try {
+      body = await response.text();
+    } catch {
+      // Status alone is enough to report.
+    }
+    throw new Error(
+      `Personal-store discovery failed (${response.status} ${response.statusText})` +
+        (body ? `: ${body.slice(0, 200)}` : ''),
+    );
+  }
+  return (await response.json()) as { storeId: string; eventsUrl: string };
+}

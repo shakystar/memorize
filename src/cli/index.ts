@@ -1,6 +1,7 @@
 import process from 'node:process';
 
 import { bumpHeartbeat } from '../services/session-service.js';
+import { migrateToAccountLayout } from '../storage/account-migration.js';
 import { runAuthCommand } from './commands/auth.js';
 import { runConflictCommand } from './commands/conflict.js';
 import { runConsolidateCommand } from './commands/consolidate.js';
@@ -118,6 +119,11 @@ async function main(): Promise<void> {
     console.log(renderScaffoldUsage());
     return;
   }
+
+  // One-time, idempotent move of any pre-account on-disk layout under the default
+  // account (M1). Runs before the handler touches any store path. No-op once done
+  // or on a fresh install.
+  migrateToAccountLayout();
 
   await handler(args, ctx);
 

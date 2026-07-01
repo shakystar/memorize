@@ -38,11 +38,11 @@ describe('listProjects', () => {
 
   it('skips stray non-project entries in the projects dir', async () => {
     await createProject({ title: 'a', rootPath: join(sandbox, 'a') });
-    await mkdir(join(sandbox, 'root', 'projects', 'not-a-project!dir'), {
+    await mkdir(join(sandbox, 'root', 'accounts', 'local_default', 'projects', 'not-a-project!dir'), {
       recursive: true,
     });
     await writeFile(
-      join(sandbox, 'root', 'projects', 'stray.txt'),
+      join(sandbox, 'root', 'accounts', 'local_default', 'projects', 'stray.txt'),
       'junk',
       'utf8',
     );
