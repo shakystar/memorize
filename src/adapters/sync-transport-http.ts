@@ -80,6 +80,129 @@ export async function probeHubAuth(
   }
 }
 
+/**
+ * Browser device-authorization grant (RFC 8628 shaped) — the client half of
+ * `docs/protocol/device-auth.md` in memorize_hub. Replaces bring-your-own-token
+ * login: instead of pasting a key, the CLI starts a grant here, the human
+ * approves it in a browser signed in to their account, and the Hub mints an
+ * `mzk_` key the CLI polls for. These two endpoints are UNAUTHENTICATED — the CLI
+ * has no key yet; the `device_code` is itself the bearer of the pending grant.
+ */
+export interface DeviceCodeResponse {
+  /** Opaque client-held secret; the poll bearer. */
+  deviceCode: string;
+  /** Short human-transcribable code shown in the terminal and confirmed in-browser. */
+  userCode: string;
+  /** Where the human goes to approve. */
+  verificationUri: string;
+  /** Same, with `user_code` pre-filled (what we open in a browser). */
+  verificationUriComplete: string;
+  /** Grant TTL in seconds — the overall poll deadline. */
+  expiresIn: number;
+  /** Minimum seconds between polls. */
+  interval: number;
+}
+
+/** Start a device grant. `POST /v1/device/code` (no auth). Throws on a non-2xx. */
+export async function requestDeviceCode(
+  baseUrl: string,
+  options: { label?: string; fetchImpl?: typeof fetch } = {},
+): Promise<DeviceCodeResponse> {
+  const doFetch = options.fetchImpl ?? fetch;
+  const base = baseUrl.replace(/\/+$/, '');
+  const response = await doFetch(`${base}/v1/device/code`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(options.label ? { label: options.label } : {}),
+  });
+  if (!response.ok) {
+    throw new Error(
+      `Could not start browser login at ${base} (${response.status}).`,
+    );
+  }
+  const body = (await response.json()) as {
+    device_code?: string;
+    user_code?: string;
+    verification_uri?: string;
+    verification_uri_complete?: string;
+    expires_in?: number;
+    interval?: number;
+  };
+  if (!body.device_code || !body.user_code || !body.verification_uri) {
+    throw new Error(`Malformed device-code response from ${base}.`);
+  }
+  return {
+    deviceCode: body.device_code,
+    userCode: body.user_code,
+    verificationUri: body.verification_uri,
+    verificationUriComplete:
+      body.verification_uri_complete ?? body.verification_uri,
+    expiresIn: body.expires_in ?? 600,
+    interval: body.interval ?? 5,
+  };
+}
+
+/**
+ * One poll of `POST /v1/device/token` (no auth). Per the contract the not-yet-done
+ * cases come back as `400 { error: … }`, so — unlike the sync transport — this
+ * MUST NOT throw-on-non-2xx: it reads the RFC-8628 error string out of the 400
+ * body and maps it to a status the caller's loop can act on. Only an unexpected
+ * status/shape throws.
+ */
+export type DeviceTokenPoll =
+  | { status: 'authorization_pending' }
+  | { status: 'slow_down' }
+  | { status: 'expired_token' }
+  | { status: 'access_denied' }
+  | { status: 'approved'; token: string; tokenId?: string; label?: string };
+
+export async function pollDeviceTokenOnce(
+  baseUrl: string,
+  deviceCode: string,
+  options: { fetchImpl?: typeof fetch } = {},
+): Promise<DeviceTokenPoll> {
+  const doFetch = options.fetchImpl ?? fetch;
+  const base = baseUrl.replace(/\/+$/, '');
+  const response = await doFetch(`${base}/v1/device/token`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ device_code: deviceCode }),
+  });
+  if (response.ok) {
+    const body = (await response.json()) as {
+      token?: string;
+      tokenId?: string;
+      label?: string;
+    };
+    if (!body.token) {
+      throw new Error(`Approved device poll returned no token from ${base}.`);
+    }
+    return {
+      status: 'approved',
+      token: body.token,
+      ...(body.tokenId ? { tokenId: body.tokenId } : {}),
+      ...(body.label ? { label: body.label } : {}),
+    };
+  }
+  if (response.status === 400) {
+    const body = (await response.json().catch(() => ({}))) as {
+      error?: string;
+    };
+    switch (body.error) {
+      case 'authorization_pending':
+      case 'slow_down':
+      case 'expired_token':
+      case 'access_denied':
+        return { status: body.error };
+      default:
+        throw new Error(
+          `Browser login was rejected: ${body.error ?? 'unknown error'}.`,
+        );
+    }
+  }
+  throw new Error(`Browser login poll failed (${response.status}).`);
+}
+
 export function createHttpSyncTransport(
   baseUrl: string,
   options: HttpSyncTransportOptions = {},

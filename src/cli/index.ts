@@ -32,6 +32,9 @@ export { renderScaffoldUsage } from './usage.js';
 const handlers: Record<string, CommandHandler> = {
   init: runInitCommand,
   auth: runAuthCommand,
+  // `memorize login` — optional convenience alias for `memorize auth login`
+  // (the namespaced form stays canonical, mirroring `gh auth login`).
+  login: (args, ctx) => runAuthCommand(['login', ...args], ctx),
   project: runProjectCommand,
   projection: runProjectionCommand,
   memory: runMemoryCommand,
@@ -76,8 +79,9 @@ const SESSION_MANAGING_COMMANDS = new Set([
   // session, so it must not bump session liveness.
   'mcp',
   // `auth` manages host credentials and may run outside any bound project; a
-  // heartbeat from it would falsely signal agent liveness.
+  // heartbeat from it would falsely signal agent liveness. `login` is its alias.
   'auth',
+  'login',
   // `personal` operates on the global account-level store, not a cwd project; a
   // heartbeat would falsely signal liveness on whatever project the cwd binds.
   'personal',
