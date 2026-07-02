@@ -109,10 +109,14 @@ export function renderClaudeStartupContext(
     const task = payload.task;
     const taskLines = [
       `Task: ${task.title}`,
-      `Goal: ${task.goal}`,
       `Status: ${task.status}`,
       `Priority: ${task.priority}`,
     ];
+    // Legacy tasks carry title-copied goal/description defaults; hide both
+    // the empty and the copied-from-title cases.
+    if (task.goal && task.goal !== task.title) {
+      taskLines.push(`Goal: ${task.goal}`);
+    }
     if (task.description && task.description !== task.title) {
       taskLines.push(`Description: ${task.description}`);
     }

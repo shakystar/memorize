@@ -18,7 +18,13 @@ import {
   createHandoff as createHandoffEntity,
   createTask as createTaskEntity,
 } from '../domain/entities.js';
-import type { Checkpoint, Handoff, Task } from '../domain/entities.js';
+import type {
+  Checkpoint,
+  Handoff,
+  Task,
+  TaskAppendableField,
+  TaskItemAppendedPayload,
+} from '../domain/entities.js';
 import { assertTaskStatusTransition } from '../domain/state-machines.js';
 import {
   assertArrayLength,
@@ -51,12 +57,26 @@ function guardStringList(
   );
 }
 
+// A blank list item is "filled-looking empty" data — the same pathology as
+// the old title-copied description/goal defaults. Reject loudly instead of
+// letting `--question ""` append an empty row the Hub would render.
+function assertNoBlankItems(
+  values: string[] | undefined,
+  field: string,
+): void {
+  if (!values) return;
+  if (values.some((value) => value.trim() === '')) {
+    throw new MemorizeError(`${field} items must be non-empty.`);
+  }
+}
+
 export async function createTask(input: CreateTaskInput): Promise<Task> {
   const markers: InjectionMarker[] = [];
   guardField(input.title, 'task.title', markers);
   guardField(input.description, 'task.description', markers);
   guardField(input.goal, 'task.goal', markers);
   guardStringList(input.acceptanceCriteria, 'task.acceptanceCriteria', markers);
+  assertNoBlankItems(input.acceptanceCriteria, 'task.acceptanceCriteria');
   warnInjectionMarkers(markers);
 
   const task = createTaskEntity(input);
@@ -96,6 +116,58 @@ export async function updateTask(
     payload: patch,
   });
   await rebuildProjectProjection(projectId);
+}
+
+export interface AppendTaskItemsInput {
+  projectId: string;
+  taskId: string;
+  items: Partial<Record<TaskAppendableField, string[]>>;
+  actor?: string;
+}
+
+/**
+ * Append items to a task's list fields (acceptanceCriteria / openQuestions /
+ * riskNotes) as one `task.item-appended` event PER ITEM, batched atomically.
+ * Item-level events keep the log a G-Set (SoT-030): two sessions appending
+ * concurrently union cleanly instead of clobbering each other's arrays.
+ */
+export async function appendTaskItems(
+  input: AppendTaskItemsInput,
+): Promise<void> {
+  const markers: InjectionMarker[] = [];
+  for (const [field, values] of Object.entries(input.items)) {
+    guardStringList(values, `task.${field}`, markers);
+    assertNoBlankItems(values, `task.${field}`);
+  }
+  warnInjectionMarkers(markers);
+
+  const existing = await getTask(input.projectId, input.taskId);
+  if (!existing) {
+    throw new MemorizeError(
+      `Task ${input.taskId} not found in project ${input.projectId}`,
+    );
+  }
+  const events: Parameters<typeof appendEvents>[1] = [];
+  for (const [field, values] of Object.entries(input.items)) {
+    for (const text of values ?? []) {
+      events.push({
+        type: 'task.item-appended',
+        projectId: input.projectId,
+        scopeType: 'task',
+        scopeId: input.taskId,
+        actor: input.actor ?? ACTOR_SYSTEM,
+        payload: {
+          field: field as TaskAppendableField,
+          text,
+        } satisfies TaskItemAppendedPayload,
+      });
+    }
+  }
+  if (events.length === 0) {
+    throw new MemorizeError('appendTaskItems requires at least one item.');
+  }
+  await appendEvents(input.projectId, events);
+  await rebuildProjectProjection(input.projectId);
 }
 
 export async function createHandoff(input: CreateHandoffInput): Promise<Handoff> {

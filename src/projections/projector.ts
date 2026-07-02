@@ -1,5 +1,6 @@
 import { CURRENT_SCHEMA_VERSION, nowIso } from '../domain/common.js';
 import type { DomainEvent } from '../domain/events.js';
+import { TASK_APPENDABLE_FIELDS } from '../domain/entities.js';
 import type {
   Checkpoint,
   Conflict,
@@ -16,6 +17,7 @@ import type {
   Session,
   SessionHeartbeatPayload,
   Task,
+  TaskItemAppendedPayload,
   Workstream,
 } from '../domain/entities.js';
 
@@ -287,6 +289,23 @@ export function reduceProjectState(
             event.payload as Partial<Task>,
             event.createdAt,
           );
+        }
+        break;
+      case 'task.item-appended':
+        {
+          const key = laneKey(eventLane, event.scopeId);
+          const existingTask = state.tasks[key];
+          if (!existingTask) break;
+          const payload = event.payload as TaskItemAppendedPayload;
+          // Closed allowlist: a synced event from another writer must not be
+          // able to append into an arbitrary Task property.
+          if (!TASK_APPENDABLE_FIELDS.includes(payload.field)) break;
+          if (typeof payload.text !== 'string') break;
+          state.tasks[key] = {
+            ...existingTask,
+            [payload.field]: [...existingTask[payload.field], payload.text],
+            updatedAt: event.createdAt,
+          };
         }
         break;
       case 'handoff.created':

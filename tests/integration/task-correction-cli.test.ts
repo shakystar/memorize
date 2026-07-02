@@ -84,11 +84,132 @@ describe('memorize task update (append-only correction)', () => {
     expect(after.length).toBe(before.length + 1);
   });
 
-  it('rejects update with no --title and no --note', async () => {
+  it('rejects update with no flags at all', async () => {
     const { taskId } = await seedTask();
     const result = runCli(['task', 'update', taskId]);
     expect(result.status).toBe(1);
-    expect(result.stderr).toMatch(/--title|--note/i);
+    expect(result.stderr).toMatch(/--title|--note|--question|--risk|--ac/i);
+  });
+
+  it('appends one task.item-appended event per --question/--risk/--ac item', async () => {
+    const { projectId, taskId } = await seedTask();
+    const before = await readEvents(projectId);
+
+    const result = runCli([
+      'task',
+      'update',
+      taskId,
+      '--question',
+      'Which lane wins on conflict?',
+      '--question',
+      'Is the Hub filter server-side?',
+      '--risk',
+      'Blocked on upstream API key',
+      '--ac',
+      'Panel renders questions',
+    ]);
+    expect(result.status).toBe(0);
+
+    const task = await readTask(projectId, taskId);
+    expect(task?.openQuestions).toEqual([
+      'Which lane wins on conflict?',
+      'Is the Hub filter server-side?',
+    ]);
+    expect(task?.riskNotes).toEqual(['Blocked on upstream API key']);
+    expect(task?.acceptanceCriteria).toEqual(['Panel renders questions']);
+
+    const after = await readEvents(projectId);
+    // One event per item, no task.updated (no --title/--note given).
+    expect(after.filter((e) => e.type === 'task.item-appended').length).toBe(4);
+    expect(after.filter((e) => e.type === 'task.updated').length).toBe(0);
+    expect(after.length).toBe(before.length + 4);
+  });
+
+  it('rejects blank items instead of appending filled-looking empty rows', async () => {
+    const { projectId, taskId } = await seedTask();
+    const result = runCli(['task', 'update', taskId, '--question', '  ']);
+    expect(result.status).toBe(1);
+    expect(result.stderr).toMatch(/task\.openQuestions items must be non-empty/i);
+
+    const task = await readTask(projectId, taskId);
+    expect(task?.openQuestions).toEqual([]);
+  });
+
+  it('appends items across two updates without clobbering earlier ones', async () => {
+    const { projectId, taskId } = await seedTask();
+    expect(
+      runCli(['task', 'update', taskId, '--risk', 'first risk']).status,
+    ).toBe(0);
+    expect(
+      runCli(['task', 'update', taskId, '--risk', 'second risk']).status,
+    ).toBe(0);
+
+    const task = await readTask(projectId, taskId);
+    expect(task?.riskNotes).toEqual(['first risk', 'second risk']);
+  });
+});
+
+describe('memorize task create (field flags)', () => {
+  it('creates a task with goal/priority/AC and leaves description/goal empty when omitted', async () => {
+    const { projectId } = await seedTask();
+
+    const rich = runCli([
+      'task',
+      'create',
+      'Rich task',
+      '--goal',
+      'Prove the flags fill the projection',
+      '--priority',
+      'high',
+      '--ac',
+      'goal lands in projection',
+      '--ac',
+      'priority is non-default',
+    ]);
+    expect(rich.status).toBe(0);
+    const richId = rich.stdout.match(/Created task (\S+)/)?.[1];
+    expect(richId).toBeTruthy();
+    const richTask = await readTask(projectId, richId ?? '');
+    expect(richTask?.goal).toBe('Prove the flags fill the projection');
+    expect(richTask?.priority).toBe('high');
+    expect(richTask?.acceptanceCriteria).toEqual([
+      'goal lands in projection',
+      'priority is non-default',
+    ]);
+
+    const bare = runCli(['task', 'create', 'Bare task']);
+    expect(bare.status).toBe(0);
+    const bareId = bare.stdout.match(/Created task (\S+)/)?.[1];
+    const bareTask = await readTask(projectId, bareId ?? '');
+    // No title fallback: empty means empty, not a copy of the title.
+    expect(bareTask?.description).toBe('');
+    expect(bareTask?.goal).toBe('');
+  });
+
+  it('rejects unknown flags instead of joining them into the title', async () => {
+    const { projectId } = await seedTask();
+    const result = runCli([
+      'task',
+      'create',
+      'Fix the thing',
+      '--proirity',
+      'high',
+    ]);
+    expect(result.status).toBe(1);
+    expect(result.stderr).toMatch(/unknown flag --proirity/i);
+
+    const events = await readEvents(projectId);
+    const titles = events
+      .filter((e) => e.type === 'task.created')
+      .map((e) => (e.payload as { title: string }).title);
+    expect(titles).not.toContain('Fix the thing --proirity high');
+  });
+
+  it('rejects an out-of-range --priority', async () => {
+    await seedTask();
+    const result = runCli(['task', 'create', 'Bad priority', '--priority', 'urgent']);
+    expect(result.status).toBe(1);
+    expect(result.stderr).toMatch(/--priority must be one of low\|medium\|high/i);
   });
 });
 

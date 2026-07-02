@@ -41,8 +41,30 @@ describe('domain constructors', () => {
 
     expect(task.status).toBe('todo');
     expect(task.priority).toBe('medium');
-    expect(task.goal).toBe('Create startup payload');
+    // No title fallback: absent goal/description stay empty instead of
+    // masquerading as filled (Hub/renderers treat '' as absent).
+    expect(task.goal).toBe('');
+    expect(task.description).toBe('');
     expect(task.acceptanceCriteria).toEqual([]);
+  });
+
+  it('passes explicit task fields through, including acceptance criteria', () => {
+    const task = createTask({
+      projectId: 'proj_1',
+      title: 'Create startup payload',
+      description: 'Wire the renderer',
+      goal: 'Agents see full task context',
+      priority: 'high',
+      acceptanceCriteria: ['payload includes AC', 'payload includes goal'],
+    });
+
+    expect(task.description).toBe('Wire the renderer');
+    expect(task.goal).toBe('Agents see full task context');
+    expect(task.priority).toBe('high');
+    expect(task.acceptanceCriteria).toEqual([
+      'payload includes AC',
+      'payload includes goal',
+    ]);
   });
 
   it('creates related entities with expected ownership fields', () => {
