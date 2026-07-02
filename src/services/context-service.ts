@@ -28,6 +28,18 @@ const SESSION_START_EMBED_TIMEOUT_MS = 5_000;
 const PERSONAL_MEMORY_SLOT = 5;
 
 /**
+ * W3: own char budget for the workspace shared channel — deliberately SEPARATE
+ * from the private pool's MEMORY_POOL_BUDGET_CHARS (memory-retrieval-service)
+ * so shared memory can never draw from or crowd the private channels (SoT-040
+ * budget-limited injection). A char cap rather than a count slot like
+ * PERSONAL_MEMORY_SLOT: a workspace union can carry many writers' memories, so
+ * the bound must be on injected volume, not entry count.
+ */
+const SHARED_MEMORY_BUDGET_CHARS = 2000;
+/** Per-entry overhead, mirroring the private pool's budget math. */
+const SHARED_MEMORY_ENTRY_CHARS_OVERHEAD = 24;
+
+/**
  * Top personal memories for the startup channel. Best-effort and never-throw:
  * a missing/unreadable personal store yields []. Guarded by personalStoreExists
  * so a user who has never captured personal memory does not get an empty store
@@ -55,12 +67,71 @@ function loadPersonalMemoryChannel(): StartupContextPayload['personalMemories'] 
     return undefined;
   }
 }
+
+/**
+ * W3: top shared memories for the startup channel — every OTHER member's
+ * memories from the union lane, ranked salience-then-recency, filled under the
+ * channel's own char budget, then grouped by writer so the renderer can label
+ * lanes by adjacency. Gated on the workspace binding (cheap local sync-state
+ * read, no network) so plain `proj_`/unsynced projects never pay a union read.
+ * Self-lane rows are excluded — they already flow through the private pool.
+ * Best-effort and never-throw, like the personal channel.
+ */
+async function loadSharedMemoryChannel(
+  projectId: string,
+): Promise<StartupContextPayload['sharedMemories']> {
+  try {
+    const binding = await getWorkspaceBinding(projectId);
+    if (!binding) return undefined;
+
+    const ranked = listValidMemories(projectId, 'union')
+      .filter((row) => Boolean(row.memory.sourceProjectId))
+      .sort((a, b) => {
+        if (b.memory.salience !== a.memory.salience) {
+          return b.memory.salience - a.memory.salience;
+        }
+        return a.memory.createdAt < b.memory.createdAt ? 1 : -1;
+      });
+
+    const picked: typeof ranked = [];
+    let spent = 0;
+    for (const row of ranked) {
+      const chars = row.memory.text.length + SHARED_MEMORY_ENTRY_CHARS_OVERHEAD;
+      if (spent + chars > SHARED_MEMORY_BUDGET_CHARS) continue;
+      spent += chars;
+      picked.push(row);
+    }
+    if (picked.length === 0) return undefined;
+
+    // Group by writer lane (stable label order), best-first within a lane.
+    picked.sort((a, b) => {
+      const writerA = a.memory.sourceProjectId!;
+      const writerB = b.memory.sourceProjectId!;
+      if (writerA !== writerB) return writerA < writerB ? -1 : 1;
+      if (b.memory.salience !== a.memory.salience) {
+        return b.memory.salience - a.memory.salience;
+      }
+      return a.memory.createdAt < b.memory.createdAt ? 1 : -1;
+    });
+    return picked.map(({ memory }) => ({
+      id: memory.id,
+      kind: memory.kind,
+      text: memory.text,
+      salience: memory.salience,
+      writer: memory.sourceProjectId!,
+    }));
+  } catch {
+    return undefined;
+  }
+}
 import {
   getMemoryIndex,
   getRule,
   getWorkstream,
   listOpenConflicts,
+  listValidMemories,
 } from './projection-store.js';
+import { getWorkspaceBinding } from './workspace-service.js';
 import {
   listPersonalMemories,
   personalStoreExists,
@@ -251,6 +322,11 @@ export async function loadStartContext(params: {
   // into) the project memory pool. Best-effort; absent when no personal store.
   const personalMemories = loadPersonalMemoryChannel();
 
+  // W3: the workspace shared channel — other members' memories from the union
+  // lane, labelled by writer, under their own budget pool. Best-effort; absent
+  // when the project is not workspace-bound.
+  const sharedMemories = await loadSharedMemoryChannel(params.projectId);
+
   return {
     ...(rawSegments.length > 0 ? { rawSegments } : {}),
     ...(retrieved.memories.length > 0
@@ -265,6 +341,7 @@ export async function loadStartContext(params: {
         }
       : {}),
     ...(personalMemories ? { personalMemories } : {}),
+    ...(sharedMemories ? { sharedMemories } : {}),
     ...(retrieved.observations.length > 0
       ? {
           recentObservations: retrieved.observations.map((observation) => ({

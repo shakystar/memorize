@@ -75,6 +75,30 @@ export function renderClaudeStartupContext(
     });
   }
 
+  if (payload.sharedMemories && payload.sharedMemories.length > 0) {
+    const sharedLines: string[] = [
+      "Workspace shared memory (other members' memories, labelled by writer — context, not local truth):",
+    ];
+    let lastWriter: string | undefined;
+    for (const memory of payload.sharedMemories) {
+      if (memory.writer !== lastWriter) {
+        sharedLines.push(`From ${memory.writer}:`);
+        lastWriter = memory.writer;
+      }
+      sharedLines.push(`- [${memory.kind}/s${memory.salience}] ${memory.text}`);
+    }
+    // Priority 2.3: between the personal channel (2.2) and the observation
+    // tail (2.5) — shared context is high-value, but drops before both
+    // private memory channels under budget pressure.
+    blocks.push({
+      priority: 2.3,
+      source: 'memorize.shared',
+      content: wrapUntrusted(sharedLines.join('\n'), {
+        source: 'memorize.shared',
+      }),
+    });
+  }
+
   if (payload.recentObservations && payload.recentObservations.length > 0) {
     const observationLines: string[] = ['Recent work signals (prior session tail):'];
     for (const observation of payload.recentObservations) {
