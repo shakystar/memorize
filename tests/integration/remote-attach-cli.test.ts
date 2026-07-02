@@ -5,7 +5,11 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { runProjectCommand } from '../../src/cli/commands/project.js';
-import { createProject, readSyncState } from '../../src/services/project-service.js';
+import {
+  createProject,
+  getBoundProjectId,
+  readSyncState,
+} from '../../src/services/project-service.js';
 import {
   getProjectProjection,
   listTasks,
@@ -118,6 +122,42 @@ describe('memorize remote / clone <hub-url> — git-style onboarding (Hub URL co
     // Clone persisted the transport too — B is auto-sync eligible with no flags.
     const stateB = await readSyncState(projectA.id);
     expect(stateB?.syncTransport).toEqual({ type: 'http', url: relay.baseUrl });
+  });
+
+  it('clone <hub-url> binds a mixed-case wsp_ store without rekeying local proj_', async () => {
+    const workspaceId = 'wsp_HezYZX_BsFbB';
+    const homeA = join(sandbox, 'home-a');
+    const homeB = join(sandbox, 'home-b');
+    const cwdA = join(sandbox, 'a');
+    const cwdB = join(sandbox, 'b');
+    await mkdir(cwdA, { recursive: true });
+    await mkdir(cwdB, { recursive: true });
+
+    useMachine(homeA);
+    const projectA = await createProject({ title: 'Origin', rootPath: cwdA });
+    await createTask({ projectId: projectA.id, title: 'Task from A', actor: 'user' });
+    await runProjectCommand(['remote', `${relay.baseUrl}/clone/${workspaceId}`], {
+      cwd: cwdA,
+    });
+    expect(relay.events(workspaceId).some((e) => e.type === 'task.created')).toBe(true);
+
+    useMachine(homeB);
+    await runProjectCommand(['clone', `${relay.baseUrl}/clone/${workspaceId}`], {
+      cwd: cwdB,
+    });
+
+    const projectIdB = await getBoundProjectId(cwdB);
+    expect(projectIdB).toBeDefined();
+    expect(projectIdB).not.toBe(workspaceId);
+    expect(projectIdB).not.toBe(projectA.id);
+
+    const stateB = await readSyncState(projectIdB!);
+    expect(stateB?.remoteProjectId).toBe(workspaceId);
+    expect(stateB?.syncTransport).toEqual({ type: 'http', url: relay.baseUrl });
+    expect(getProjectProjection(projectIdB!)?.id).toBe(projectIdB);
+    expect(
+      listTasks(projectIdB!, {}, 'union').some((t) => t.title === 'Task from A'),
+    ).toBe(true);
   });
 
   it('clone rejects a URL that does not end in a store id', async () => {

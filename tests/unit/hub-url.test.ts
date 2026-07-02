@@ -10,6 +10,13 @@ describe('parseHubUrl — Hub pretty-URL contract', () => {
     });
   });
 
+  it('preserves Hub-minted mixed-case workspace ids', () => {
+    expect(parseHubUrl('https://hub.example/clone/wsp_HezYZX_BsFbB')).toEqual({
+      remoteUrl: 'https://hub.example',
+      remoteProjectId: 'wsp_HezYZX_BsFbB',
+    });
+  });
+
   it('ignores intermediate path segments — the Hub owns its route shape', () => {
     for (const path of [
       '/clone/proj_mq6skfo5_i5ds793o',
