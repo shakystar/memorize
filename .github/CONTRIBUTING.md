@@ -75,6 +75,17 @@ How a release happens:
 Release timing stays a deliberate human act (merging the Release PR);
 only the mechanics are automated.
 
+**Dev-channel snapshots (`publish-dev`).** For pre-release lines under
+active development (e.g. the 3.0.0 milestones), a snapshot can be
+published without touching the stable channel: manually dispatch the
+Release workflow (`gh workflow run release.yml -f base=3.0.0`). The
+`publish-dev` job stamps `<base>-dev.<run_number>` in the runner only —
+no commit, tag, CHANGELOG entry, or release-please state — and publishes
+to the npm **`dev` dist-tag**, so `npm i @shakystar/memorize` (`latest`)
+is unaffected while `npm i @shakystar/memorize@dev` gets the snapshot.
+The job lives inside `release.yml` because npm Trusted Publishing binds
+the package to that single workflow path.
+
 **CI on the Release PR (optional, `RELEASE_PLEASE_TOKEN`).** A PR opened by
 the built-in `GITHUB_TOKEN` does not trigger other workflows, so the Release
 PR runs no CI by default. `main` is currently unprotected, so this is benign

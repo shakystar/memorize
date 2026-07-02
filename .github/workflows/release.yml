@@ -9,11 +9,20 @@ name: Release
 on:
   push:
     branches: [main]
+  # Manual dev-channel snapshot (publish-dev below). Touches no
+  # release-please state — safe to dispatch at any time.
+  workflow_dispatch:
+    inputs:
+      base:
+        description: 'Version line the snapshot belongs to (X.Y.Z, no prerelease part)'
+        required: false
+        default: '3.0.0'
 
 permissions: {}
 
 jobs:
   release-please:
+    if: ${{ github.event_name == 'push' }}
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -56,3 +65,35 @@ jobs:
       # OIDC trusted publishing requires npm >= 11.5.1.
       - run: npm install -g npm@latest
       - run: npm publish --provenance --access public
+
+  # Dev-channel snapshot: manually dispatched, publishes
+  # <base>-dev.<run_number> to the npm `dev` dist-tag (`latest` untouched).
+  # Lives in THIS file because npm Trusted Publishing binds the package to a
+  # single workflow path (release.yml) — a separate workflow could not
+  # publish. The version exists only in the runner: the repo's package.json
+  # stays unchanged (ci.yml version-guard forbids manual bumps) and no tag,
+  # CHANGELOG entry, or release-please state is created, so the stable
+  # channel is unaffected. run_number is monotonic per workflow, so snapshot
+  # versions never collide.
+  publish-dev:
+    if: ${{ github.event_name == 'workflow_dispatch' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write # npm OIDC trusted publishing
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          registry-url: https://registry.npmjs.org
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm build
+      - run: pnpm pack:check
+      - name: Stamp snapshot version (runner-only, never committed)
+        run: npm version "${{ inputs.base }}-dev.${{ github.run_number }}" --no-git-tag-version
+      # OIDC trusted publishing requires npm >= 11.5.1.
+      - run: npm install -g npm@latest
+      - run: npm publish --provenance --access public --tag dev
