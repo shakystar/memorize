@@ -29,6 +29,27 @@ import {
   isEncryptedEnvelope,
 } from './encryption-service.js';
 import { rebuildProjectProjection } from './projection-store.js';
+import { createProject } from './project-service.js';
+
+const WORKSPACE_REMOTE_ID_PATTERN = /^wsp_[A-Za-z0-9_-]+$/;
+
+function isWorkspaceRemoteId(id: string): boolean {
+  return id.startsWith('wsp_');
+}
+
+function assertValidWorkspaceRemoteId(id: string): void {
+  if (!WORKSPACE_REMOTE_ID_PATTERN.test(id)) {
+    throw new Error(
+      `Invalid remoteProjectId: ${JSON.stringify(id)} (must be a wsp_ remote store id)`,
+    );
+  }
+}
+
+function titleFromClonePath(cwd: string): string {
+  const normalized = cwd.replace(/[\\/]+$/, '');
+  const last = normalized.split(/[\\/]/).filter(Boolean).at(-1);
+  return last || 'workspace clone';
+}
 
 /**
  * Hard privacy boundary (Path A, decision §4-#4): the global/personal store
@@ -281,23 +302,21 @@ export async function pullProject(
 }
 
 export interface CloneResult {
-  /** The adopted (remote) projectId — same on every machine. */
+  /** The local projectId bound to the cwd. Legacy proj_ clones adopt the remote id. */
   projectId: string;
   /** Events pulled from the remote during the clone. */
   pulled: number;
 }
 
 /**
- * Clone-on-bind (#30, true replica): join a remote project from a FRESH cwd by
- * ADOPTING the remote projectId — never minting a local one. The replica's
- * `projectId === remoteProjectId`; on a different machine it lives under a
- * different MEMORIZE_ROOT (git analog: same SHAs, different working copy).
+ * Clone-on-bind has two eras:
  *
- * Because the cwd is fresh, there is no local data to migrate and exactly ONE
- * `project.created` (the remote's, at seq 1) ever lands in the store — no
- * identity clobber. This is the fix for the root cause of #30: today B mints
- * its own id (`createProject`) BEFORE binding, so two identities collide in one
- * DB. Clone adopts the id up front instead.
+ * - Legacy `proj_` remotes keep the #30 true-replica behavior: a fresh cwd
+ *   adopts the remote projectId so both machines share one local identity.
+ * - Hub workspace `wsp_` remotes follow SoT-021/022: the server-minted id is the
+ *   remote routing key layered over a local `proj_`, never a replacement for it.
+ *   A fresh cwd therefore mints a local project and binds its sync state to the
+ *   opaque `wsp_` before the initial pull.
  */
 export async function cloneProject(
   cwd: string,
@@ -310,13 +329,52 @@ export async function cloneProject(
   // follow-up; this seam lets the function clone an encrypted project today.
   encryptionKey?: string,
 ): Promise<CloneResult> {
-  assertValidId(remoteProjectId, 'remoteProjectId');
-  assertNotPersonalStore(remoteProjectId);
-
   // Fresh-cwd guard. Bound to the SAME id → idempotent re-pull below. Bound to
   // a DIFFERENT id → refuse: that is a diverged-history merge (#30 follow-up),
   // not a clone. Converting today's SILENT clobber into a loud failure.
   const existing = await resolveProjectIdForPath(cwd);
+
+  if (isWorkspaceRemoteId(remoteProjectId)) {
+    assertValidWorkspaceRemoteId(remoteProjectId);
+
+    let localProjectId = existing;
+    if (localProjectId) {
+      const current = await readJson<ProjectSyncState>(getSyncFile(localProjectId));
+      if (current?.remoteProjectId !== remoteProjectId) {
+        throw new Error(
+          `Directory is already bound to project ${localProjectId}. Clone requires a ` +
+            `fresh directory; re-binding existing local history to a remote ` +
+            `(diverged-history merge) is not yet supported (#30 follow-up).`,
+        );
+      }
+      if (transportConfig || encryptionKey) {
+        await updateSyncState(localProjectId, {
+          ...(transportConfig ? { syncTransport: transportConfig } : {}),
+          ...(encryptionKey ? { encryptionKey } : {}),
+          syncEnabled: true,
+        });
+      }
+    } else {
+      const project = await createProject({
+        title: titleFromClonePath(cwd),
+        rootPath: cwd,
+      });
+      localProjectId = project.id;
+      await updateSyncState(localProjectId, {
+        remoteProjectId,
+        syncEnabled: true,
+        ...(transportConfig ? { syncTransport: transportConfig } : {}),
+        ...(encryptionKey ? { encryptionKey } : {}),
+      });
+    }
+
+    const result = await pullProject(localProjectId, transport);
+    return { projectId: localProjectId, pulled: result.inserted };
+  }
+
+  assertValidId(remoteProjectId, 'remoteProjectId');
+  assertNotPersonalStore(remoteProjectId);
+
   if (existing && existing !== remoteProjectId) {
     throw new Error(
       `Directory is already bound to project ${existing}. Clone requires a ` +
