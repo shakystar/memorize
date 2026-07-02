@@ -23,6 +23,7 @@ import { resolveTransport } from '../../services/auto-sync-service.js';
 import { inspectProject } from '../../services/repair-service.js';
 import { computeRepoIdentity } from '../../services/repo-identity.js';
 import { setupProject } from '../../services/setup-service.js';
+import { tryRefreshWorkspaceBinding } from '../../services/workspace-service.js';
 import {
   cloneProject,
   getQueueSnapshot,
@@ -462,6 +463,9 @@ export async function runProjectCommand(
           `Pulled ${result.total} events (${result.inserted} new, ${dupes} duplicates skipped). lastRemoteEventId=${result.lastRemoteEventId ?? 'none'}`,
         );
       }
+      // W-c: a manual sync is a boundary too — re-read the workspace
+      // role/reachability cache (best-effort; no-op unless workspace-bound).
+      await tryRefreshWorkspaceBinding(projectId);
       return;
     }
 

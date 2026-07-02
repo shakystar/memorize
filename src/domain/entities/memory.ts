@@ -183,13 +183,26 @@ export interface MemorySupersededPayload {
  * memory's validity window the same way, but carries no `supersededBy` and a
  * separate `retractedAt` marker so it is (a) reversible via a later
  * retract-the-retraction event and (b) distinguishable in audit. Provenance
- * (`writer`) rides the DomainEvent, not this payload, so a future owner-only
- * global retract over a workspace union can be judged by the retractor's role
- * (SoT-040, Hub H030) without re-shaping the event.
+ * (`writer`/`sourceProjectId`) rides the DomainEvent, not this payload.
  */
 export interface MemoryRetractedPayload {
   /** The memory whose validity window this event closes. */
   retracts: EntityId;
   /** Why it was retracted (free-form, optional). */
   reason?: string;
+  /**
+   * The retractor's workspace role AT AUTHORING TIME (W-c, SoT-050/022, Hub
+   * H030). Stamped by the client only for a cross-lane (GLOBAL) retract, after
+   * verifying its role against the Hub control-plane; absent on a plain
+   * self-lane retract. The projection honours a cross-lane retract iff this is
+   * `'owner'`. The role must ride the EVENT, not be looked up at projection
+   * time: (a) the reducer stays a pure function of the log, so every replica
+   * converges regardless of when its role cache last refreshed and a later
+   * demotion never retroactively flips history, and (b) a roster lookup is
+   * impossible anyway — the roster is accountId-keyed and events carry only
+   * `writer`/`sourceProjectId` (the gateway never sees either, H010). Like all
+   * union bytes it is a trusted-membership claim, not a cryptographic proof
+   * (H030's accepted trade-off).
+   */
+  writerRole?: 'owner' | 'member';
 }

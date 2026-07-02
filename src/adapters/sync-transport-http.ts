@@ -481,3 +481,55 @@ export async function joinWorkspaceRemote(
     role: WorkspaceRole;
   };
 }
+
+/**
+ * Owner changes a member's role (W-c) — promote `member` -> `owner` (also how
+ * ownership is transferred), or demote. Demoting the sole remaining owner is a
+ * Hub-side `409` (last-owner invariant). `PATCH /v1/workspaces/:id/members/:accountId`.
+ */
+export async function setWorkspaceMemberRole(
+  baseUrl: string,
+  token: string,
+  workspaceId: string,
+  accountId: string,
+  role: WorkspaceRole,
+  options: { fetchImpl?: typeof fetch } = {},
+): Promise<{ accountId: string; role: WorkspaceRole }> {
+  const doFetch = options.fetchImpl ?? fetch;
+  const base = baseUrl.replace(/\/+$/, '');
+  const response = await doFetch(
+    `${base}/v1/workspaces/${encodeURIComponent(workspaceId)}/members/${encodeURIComponent(accountId)}`,
+    {
+      method: 'PATCH',
+      headers: {
+        'content-type': 'application/json',
+        authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify({ role }),
+    },
+  );
+  if (!response.ok) return throwControlPlaneError(response, 'role change');
+  return (await response.json()) as { accountId: string; role: WorkspaceRole };
+}
+
+/**
+ * Remove a member (owner removing anyone, or any member removing themselves —
+ * self-leave). Removing the sole remaining owner while other members exist is a
+ * Hub-side `409`. Removal revokes future access; already-pulled bytes are not
+ * recallable (SoT-040/050). `DELETE /v1/workspaces/:id/members/:accountId` -> `204`.
+ */
+export async function removeWorkspaceMember(
+  baseUrl: string,
+  token: string,
+  workspaceId: string,
+  accountId: string,
+  options: { fetchImpl?: typeof fetch } = {},
+): Promise<void> {
+  const doFetch = options.fetchImpl ?? fetch;
+  const base = baseUrl.replace(/\/+$/, '');
+  const response = await doFetch(
+    `${base}/v1/workspaces/${encodeURIComponent(workspaceId)}/members/${encodeURIComponent(accountId)}`,
+    { method: 'DELETE', headers: { authorization: `Bearer ${token}` } },
+  );
+  if (!response.ok) return throwControlPlaneError(response, 'member removal');
+}

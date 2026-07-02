@@ -438,15 +438,17 @@ export function reduceProjectState(
           // marker (reversible, audit-preserving). Lane-aware: a retract only
           // takes effect within its OWN lane — a self-authored retract removes
           // a self memory; a union writer's retract removes its own lane's
-          // memory. A cross-lane retract (owner-only GLOBAL retract of someone
-          // else's assertion, SoT-040) is judged by the retractor's `writer`
-          // role, which the workspace union projection applies in W3 — until
-          // then a cross-lane retract is a no-op, so this stays purely additive.
+          // memory. A cross-lane retract is the owner-only GLOBAL retract
+          // (W-c, SoT-040/050, Hub H030): the gateway never parses payloads,
+          // so the rule is judged HERE, from the role the event itself carries
+          // (`writerRole`, stamped by the authoring client after a live
+          // control-plane check — see MemoryRetractedPayload for why the role
+          // must ride the event instead of being looked up at projection time).
           const payload = event.payload as MemoryRetractedPayload;
           const existing = state.memories[payload.retracts];
           if (!existing) break;
           const targetLane = existing.sourceProjectId ?? SELF_LANE;
-          if (eventLane !== targetLane) break;
+          if (eventLane !== targetLane && payload.writerRole !== 'owner') break;
           state.memories[payload.retracts] = {
             ...existing,
             // Keep an earlier supersede/dedup window if one already closed it;
