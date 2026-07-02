@@ -26,6 +26,7 @@ import { runUninstallCommand } from './commands/uninstall.js';
 import { runUpdateCommand } from './commands/update.js';
 import { runWorkspaceCommand } from './commands/workspace.js';
 import type { CliContext, CommandHandler } from './context.js';
+import { assertNotWindowsInteropLeak } from './interop-guard.js';
 import { renderScaffoldUsage } from './usage.js';
 
 export { renderScaffoldUsage } from './usage.js';
@@ -95,6 +96,10 @@ const SESSION_MANAGING_COMMANDS = new Set([
 ]);
 
 async function main(): Promise<void> {
+  // Before anything else - even `version` - refuse to run a Windows install
+  // under Linux node (WSL PATH leak): past the guard it fails as a silent hang.
+  assertNotWindowsInteropLeak();
+
   const [, , command, ...args] = process.argv;
   const ctx: CliContext = { cwd: process.cwd() };
 

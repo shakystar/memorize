@@ -37,6 +37,7 @@ import {
 import type { CliContext } from '../context.js';
 import { isHttpUrl, parseHubUrl } from '../hub-url.js';
 import { parseFlags } from '../parse-flags.js';
+import { renderPushResult } from '../sync-messages.js';
 import { renderScaffoldUsage } from '../usage.js';
 
 /**
@@ -531,8 +532,11 @@ export async function runProjectCommand(
       }
       if (flags.boolean.push) {
         const response = await pushProject(projectId, transport);
+        // Post-push state: an empty push still reports the real watermark, so
+        // the (common) nothing-pending case reads as healthy, not as `none`.
+        const postPushState = await readSyncState(projectId);
         console.log(
-          `Pushed ${response.accepted.length} events. lastAcceptedEventId=${response.lastAcceptedEventId ?? 'none'}`,
+          renderPushResult(response, postPushState?.lastPushedEventId),
         );
       }
       if (flags.boolean.pull) {

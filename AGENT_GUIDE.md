@@ -732,6 +732,18 @@ the freshly-minted `mzk_` key. The key is then stored host-scoped `0600`,
 exactly like the `--token` path. The wire contract is memorize_hub
 `docs/protocol/device-auth.md`.
 
+**WSL PATH interop pitfall.** WSL can inherit Windows PATH entries. If a
+Windows global npm shim wins, Linux `node` may execute the memorize install
+under `/mnt/c/...`; that crosses native modules (`better-sqlite3`) across OS
+boundaries and can hang before printing an error. Install a Linux copy and make
+sure it wins on PATH:
+
+```sh
+npm i -g @shakystar/memorize
+hash -r
+which memorize # must not print a /mnt/... path
+```
+
 Resolution order for the bearer token (most→least specific): explicit
 `--token` → per-project persisted token (legacy state only) → this host store
 → the `MEMORIZE_SYNC_TOKEN` env escape hatch. **Anti-sprawl:** an explicit
