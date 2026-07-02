@@ -6,6 +6,8 @@ import { spawnSync } from 'node:child_process';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { CURRENT_SCHEMA_VERSION } from '../../src/domain/common.js';
+import { createConsolidatedMemory } from '../../src/domain/entities.js';
+import type { MemoryRetractedPayload } from '../../src/domain/entities.js';
 import { importMemories } from '../../src/services/memory-import-service.js';
 import { retractMemory } from '../../src/services/project-service.js';
 import {
@@ -14,8 +16,10 @@ import {
   rebuildProjectProjection,
 } from '../../src/services/projection-store.js';
 import { searchProject } from '../../src/services/search-service.js';
+import { bindWorkspace } from '../../src/services/workspace-service.js';
+import { setToken } from '../../src/storage/credentials-store.js';
 import { closeAll } from '../../src/storage/db.js';
-import { appendEvent } from '../../src/storage/event-store.js';
+import { appendEvent, readEventsSince } from '../../src/storage/event-store.js';
 
 const projectId = 'proj_retract_int1';
 const ts = '2026-07-01T00:00:00.000Z';
@@ -125,6 +129,134 @@ describe('retractMemory (service, SoT-050 tombstone)', () => {
     await expect(
       retractMemory({ projectId, memoryId: 'mem_does_not_exist' }),
     ).rejects.toThrow(/not found/i);
+  });
+});
+
+describe('retractMemory — owner-only GLOBAL retract (W-c, SoT-050/H030)', () => {
+  const remoteUrl = 'https://hub.test';
+  const wsp = 'wsp_GlobalRetract';
+
+  /** Land a foreign writer's memory in the local store (as a union pull would). */
+  async function seedForeignMemory(): Promise<string> {
+    const memory = createConsolidatedMemory({
+      projectId: 'proj_peer',
+      kind: 'decision',
+      text: 'Foreign assertion: the cache uses zorbitron eviction',
+      salience: 7,
+      sourceObservationIds: ['obs_peer_1'],
+    });
+    await appendEvent({
+      type: 'memory.consolidated',
+      projectId,
+      scopeType: 'session',
+      scopeId: projectId,
+      actor: 'claude',
+      writer: 'peer-claude',
+      sourceProjectId: 'proj_peer',
+      payload: memory as never,
+    });
+    await rebuildProjectProjection(projectId);
+    return memory.id;
+  }
+
+  function fetchAccountWorkspaces(role: 'owner' | 'member'): typeof fetch {
+    return (async (url: unknown) => {
+      const target = String(url);
+      if (!target.includes('/v1/account/workspaces')) {
+        throw new Error(`Unexpected fetch ${target}`);
+      }
+      return {
+        ok: true,
+        status: 200,
+        statusText: '',
+        json: async () => ({
+          workspaces: [{ workspaceId: wsp, role, inviteReachable: true }],
+        }),
+        text: async () => '',
+      };
+    }) as unknown as typeof fetch;
+  }
+
+  async function bindWithRole(role: 'owner' | 'member'): Promise<void> {
+    await setToken(remoteUrl, 'tok');
+    await bindWorkspace(projectId, {
+      remoteUrl,
+      fetchImpl: (async () => ({
+        ok: true,
+        status: 201,
+        statusText: '',
+        json: async () => ({
+          workspaceId: wsp,
+          eventsUrl: `/v1/projects/${wsp}/events`,
+          role,
+          inviteReachable: true,
+        }),
+        text: async () => '',
+      })) as unknown as typeof fetch,
+    });
+  }
+
+  it('refuses a foreign-lane target when the project is not workspace-bound', async () => {
+    await seedProject();
+    const id = await seedForeignMemory();
+    await expect(retractMemory({ projectId, memoryId: id })).rejects.toThrow(
+      /not workspace-bound/,
+    );
+  });
+
+  it('refuses when the live control-plane role is member', async () => {
+    await seedProject();
+    const id = await seedForeignMemory();
+    await bindWithRole('member');
+    await expect(
+      retractMemory({
+        projectId,
+        memoryId: id,
+        fetchImpl: fetchAccountWorkspaces('member'),
+      }),
+    ).rejects.toThrow(/Only a workspace owner/);
+  });
+
+  it('owner: stamps writerRole on the tombstone and the projection removes the foreign memory', async () => {
+    await seedProject();
+    const id = await seedForeignMemory();
+    await bindWithRole('owner');
+
+    // Visible in the union read before the global retract.
+    expect(
+      listValidMemories(projectId, 'union').map((r) => r.memory.id),
+    ).toContain(id);
+
+    const result = await retractMemory({
+      projectId,
+      memoryId: id,
+      reason: 'contaminated',
+      fetchImpl: fetchAccountWorkspaces('owner'),
+    });
+    expect(result).toEqual({ memoryId: id, alreadyInvalid: false, global: true });
+
+    // The event carries the role stamp every replica judges by.
+    const retractEvent = (await readEventsSince(projectId, undefined)).find(
+      (e) => e.type === 'memory.retracted',
+    );
+    expect((retractEvent?.payload as MemoryRetractedPayload).writerRole).toBe(
+      'owner',
+    );
+
+    // Tombstoned across the union read; row survives for audit.
+    expect(
+      listValidMemories(projectId, 'union').map((r) => r.memory.id),
+    ).not.toContain(id);
+    const row = getMemory(projectId, id);
+    expect(row?.memory.retractedAt).toBeTruthy();
+    expect(row?.memory.sourceProjectId).toBe('proj_peer');
+  });
+
+  it('a self-lane retract still needs no workspace binding (unchanged M3 path)', async () => {
+    await seedProject();
+    const id = await seedOneMemory();
+    const result = await retractMemory({ projectId, memoryId: id });
+    expect(result).toEqual({ memoryId: id, alreadyInvalid: false });
   });
 });
 

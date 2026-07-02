@@ -188,3 +188,79 @@ describe('projector — memory.retracted lane guard (SoT-040/H030)', () => {
     expect(row.retractedBy).toBe('bob');
   });
 });
+
+describe('projector — owner-only GLOBAL retract (W-c, SoT-040/050, H030)', () => {
+  it('an owner-stamped cross-lane retract removes a foreign-lane memory (my self retract of a teammate assertion)', () => {
+    const memory = mem();
+    const state = reduceProjectState([
+      evt({
+        id: 'evt_m1',
+        type: 'memory.consolidated',
+        sourceProjectId: 'proj_foreign',
+        payload: memory,
+      }),
+      // Self-lane event (no sourceProjectId): the local owner retracting the
+      // foreign writer's memory, role stamped at authoring.
+      evt({
+        id: 'evt_r1',
+        type: 'memory.retracted',
+        createdAt: tsLater,
+        writer: 'alice',
+        payload: { retracts: memory.id, writerRole: 'owner' },
+      }),
+    ]);
+    const row = state.memories[memory.id]!;
+    expect(row.invalidAt).toBe(tsLater);
+    expect(row.retractedAt).toBe(tsLater);
+    expect(row.retractedBy).toBe('alice');
+  });
+
+  it("an owner-stamped foreign-lane retract removes MY self memory (the owner's retract replayed on the target's replica)", () => {
+    const memory = mem();
+    const state = reduceProjectState([
+      evt({ id: 'evt_m1', type: 'memory.consolidated', payload: memory }),
+      evt({
+        id: 'evt_r1',
+        type: 'memory.retracted',
+        createdAt: tsLater,
+        writer: 'owner-alice',
+        sourceProjectId: 'proj_owner',
+        payload: { retracts: memory.id, writerRole: 'owner' },
+      }),
+    ]);
+    const row = state.memories[memory.id]!;
+    expect(row.invalidAt).toBe(tsLater);
+    expect(row.retractedAt).toBe(tsLater);
+    expect(row.retractedBy).toBe('owner-alice');
+  });
+
+  it('a member-stamped cross-lane retract stays a no-op', () => {
+    const memory = mem();
+    const state = reduceProjectState([
+      evt({ id: 'evt_m1', type: 'memory.consolidated', payload: memory }),
+      evt({
+        id: 'evt_r1',
+        type: 'memory.retracted',
+        createdAt: tsLater,
+        sourceProjectId: 'proj_member',
+        payload: { retracts: memory.id, writerRole: 'member' },
+      }),
+    ]);
+    expect(state.memories[memory.id]!.invalidAt).toBeUndefined();
+    expect(state.memories[memory.id]!.retractedAt).toBeUndefined();
+  });
+
+  it('the stamp changes nothing for a same-lane retract (still applies)', () => {
+    const memory = mem();
+    const state = reduceProjectState([
+      evt({ id: 'evt_m1', type: 'memory.consolidated', payload: memory }),
+      evt({
+        id: 'evt_r1',
+        type: 'memory.retracted',
+        createdAt: tsLater,
+        payload: { retracts: memory.id, writerRole: 'owner' },
+      }),
+    ]);
+    expect(state.memories[memory.id]!.retractedAt).toBe(tsLater);
+  });
+});

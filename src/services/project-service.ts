@@ -44,6 +44,7 @@ import type {
 } from '../domain/entities.js';
 import type { DomainEventPayload } from '../domain/events.js';
 import { getProjectsRoot, getSyncFile } from '../storage/path-resolver.js';
+import { requireOwnerForGlobalRetract } from './workspace-service.js';
 
 export async function createProject(input: CreateProjectInput): Promise<Project> {
   const project = createProjectEntity(input);
@@ -293,13 +294,20 @@ export async function supersedeDecision(input: {
  * guard keys on ALL memory rows including retracted ones, so the retracted
  * memory keeps shielding its source observations — a retract is not re-derived
  * on the next boundary.
+ *
+ * A FOREIGN-lane target (another workspace writer's memory) makes this the
+ * owner-only GLOBAL retract (W-c, SoT-050 boundary, Hub H030): the caller's
+ * role is verified against the Hub control-plane and stamped on the payload
+ * (`writerRole`), which is what every replica's projection judges the
+ * cross-lane retract by — the gateway never parses the event.
  */
 export async function retractMemory(input: {
   projectId: string;
   memoryId: string;
   reason?: string;
   actor?: string;
-}): Promise<{ memoryId: string; alreadyInvalid: boolean }> {
+  fetchImpl?: typeof fetch;
+}): Promise<{ memoryId: string; alreadyInvalid: boolean; global?: boolean }> {
   const actor = input.actor ?? ACTOR_SYSTEM;
   const row = getMemory(input.projectId, input.memoryId);
   if (!row) {
@@ -308,16 +316,24 @@ export async function retractMemory(input: {
     );
   }
   const alreadyInvalid = Boolean(row.memory.invalidAt);
+  // A foreign-lane target = global retract → gate on the live owner role.
+  const isGlobal = Boolean(row.memory.sourceProjectId);
+  if (isGlobal) {
+    await requireOwnerForGlobalRetract(
+      input.projectId,
+      input.fetchImpl ? { fetchImpl: input.fetchImpl } : {},
+    );
+  }
 
   const payload: MemoryRetractedPayload = {
     retracts: input.memoryId,
     ...(input.reason ? { reason: input.reason } : {}),
+    ...(isGlobal ? { writerRole: 'owner' as const } : {}),
   };
   // Scoped like memory.consolidated/superseded (scopeType 'session', scopeId
   // falling back to the project when there is no live session); the memory
   // reducer keys off payload.retracts, so scope is provenance only. The event's
-  // `writer`/`sourceProjectId` default to the local actor/store in appendEvent,
-  // which is what a future owner-only global retract reads to judge role.
+  // `writer`/`sourceProjectId` default to the local actor/store in appendEvent.
   await appendEvent<DomainEventPayload>({
     type: 'memory.retracted',
     projectId: input.projectId,
@@ -327,7 +343,11 @@ export async function retractMemory(input: {
     payload,
   });
   await rebuildProjectProjection(input.projectId);
-  return { memoryId: input.memoryId, alreadyInvalid };
+  return {
+    memoryId: input.memoryId,
+    alreadyInvalid,
+    ...(isGlobal ? { global: true } : {}),
+  };
 }
 
 /**

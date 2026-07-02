@@ -6,6 +6,7 @@ import type { SyncTransport } from '../domain/sync-transport.js';
 import { resolveSyncToken } from '../storage/credentials-store.js';
 import { readSyncState } from './project-service.js';
 import { pullProject, pushProject } from './sync-service.js';
+import { tryRefreshWorkspaceBinding } from './workspace-service.js';
 
 /**
  * P3-b — background auto-sync. Agents never call sync; boundary hooks invoke
@@ -84,6 +85,11 @@ export async function autoPull(projectId: string): Promise<AutoSyncResult> {
     const transport = await resolveTransport(state);
     if (!transport) return { ran: false, reason: 'not-configured' };
     const result = await pullProject(projectId, transport);
+    // W-c: the session-start pull is the natural boundary to re-read the
+    // control-plane role/reachability cache (SoT-022: cache, never authority).
+    // Best-effort — a refresh failure never fails the pull. No-op for a
+    // non-workspace (plain proj_/file) sync.
+    await tryRefreshWorkspaceBinding(projectId);
     return { ran: true, pulled: result.inserted };
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);

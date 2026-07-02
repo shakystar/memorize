@@ -362,6 +362,17 @@ no replacement.
 - Emits `{"memoryId":"…","alreadyInvalid":<bool>}` — `alreadyInvalid` is
   true when the memory was already superseded/retracted (the tombstone is
   still recorded; the effective validity window is unchanged).
+- **Global (cross-writer) retract — owner only (W-c, SoT-050, Hub H030).**
+  Retracting a workspace-union memory that another writer authored
+  requires the `owner` role: the CLI verifies your role against the Hub
+  control-plane (falling back to the cached role with a warning when the
+  Hub is unreachable) and stamps it on the tombstone (`writerRole`).
+  Every member's projection honours a cross-lane retract only when the
+  event carries `writerRole:"owner"` — the judgment rides the event
+  bytes, not a projection-time roster lookup, so replicas converge
+  deterministically and a later demotion never rewrites history. A
+  member retracting their OWN memories needs no role. Emits an extra
+  `"global":true` in the result for a cross-writer retract.
 - The tombstone propagates like a consolidation boundary (best-effort
   `autoPush`) so synced peers converge on the removal instead of reviving
   it on the next union. `memory show <id>` still finds it, flagged
@@ -452,7 +463,7 @@ consolidation under a reserved id, living in `~/.memorize/personal/`
   project memory pool — so the personal/project boundary is visible in
   context, not just in storage.
 
-### `memorize workspace create --remote-url <hub-url> [--name <name>]` (+ `workspace status`, `workspace invite`, `workspace join`)
+### `memorize workspace create --remote-url <hub-url> [--name <name>]` (+ `workspace status`, `workspace invite`, `workspace join`, `workspace members`, `workspace promote|demote|remove`)
 
 Bind the bound project to a **workspace** — a shared, multi-account project
 surface. `workspace create` mints a server-minted workspace store id (`wsp_…`)
@@ -483,7 +494,23 @@ only once someone is invited (a later slice).
   invite for the calling account and binds the bound project to the joined
   workspace as `member`. A project already bound to a workspace refuses to join
   a different one.
-- Role management (promote/demote/remove) is a separate follow-up slice.
+- `workspace members [--json]` (W-c) prints the control-plane roster — each
+  member's role, verified email (the display handle that maps a union lane's
+  provenance back to a person), and join date. Readable by any member.
+- `workspace promote|demote <accountId-or-email>` (W-c, owner only) changes a
+  member's role over the Hub PATCH endpoint. Promote is also how ownership is
+  transferred; demoting the sole remaining owner is refused Hub-side (409).
+  The target may be named by `acc_…` id or email (resolved via the roster).
+- `workspace remove <accountId-or-email>` (W-c) removes a member — an owner
+  may remove anyone; any member may remove themselves (self-leave). Removal
+  revokes future access only: already-pulled bytes are not recallable, and the
+  member's past events remain in the shared log as provenance-labelled history.
+- The cached `role`/reachability refresh from the gateway at every sync
+  boundary (session-start auto-pull and manual `project sync`) — the cache is
+  never authority (SoT-022).
+- Role enforcement on shared memory: any member may retract their OWN
+  memories; retracting **another writer's** memory is the owner-only global
+  retract (see `memory retract`).
 
 ### `memorize init [--nested]`
 
