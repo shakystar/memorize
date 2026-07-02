@@ -463,7 +463,7 @@ consolidation under a reserved id, living in `~/.memorize/personal/`
   project memory pool — so the personal/project boundary is visible in
   context, not just in storage.
 
-### `memorize workspace create --remote-url <hub-url> [--name <name>]` (+ `workspace status`, `workspace invite`, `workspace join`, `workspace members`, `workspace promote|demote|remove`)
+### `memorize workspace create --remote-url <hub-url> [--name <name>]` (+ `memorize workspace status`, `memorize workspace invite`, `memorize workspace join`, `memorize workspace members`, `memorize workspace promote|demote|remove`)
 
 Bind the bound project to a **workspace** — a shared, multi-account project
 surface. `workspace create` mints a server-minted workspace store id (`wsp_…`)
