@@ -35,6 +35,7 @@ import {
   updateSyncState,
 } from '../../services/sync-service.js';
 import type { CliContext } from '../context.js';
+import { isHttpUrl, parseHubUrl } from '../hub-url.js';
 import { parseFlags } from '../parse-flags.js';
 import { renderScaffoldUsage } from '../usage.js';
 
@@ -170,15 +171,25 @@ export async function runProjectCommand(
   if (subcommand === 'clone') {
     // True-replica join (#30): adopt the remote projectId in a FRESH dir so the
     // same project has one identity on every machine (git-clone analog).
-    const remoteProjectId = args[1];
+    let remoteProjectId = args[1];
+    let flagArgs = args.slice(2);
+    // Git-style positional: `memorize clone https://hub/<anything>/<id>`
+    // carries the remote and the id in one copy-pasteable arg (Hub URL
+    // contract) — expand it to the canonical `<id> --remote-url <origin>`.
+    if (remoteProjectId && isHttpUrl(remoteProjectId)) {
+      const hub = parseHubUrl(remoteProjectId);
+      remoteProjectId = hub.remoteProjectId;
+      flagArgs = ['--remote-url', hub.remoteUrl, ...flagArgs];
+    }
     if (!remoteProjectId) {
       throw new Error(
-        'Usage: memorize project clone <remoteProjectId> ' +
+        'Usage: memorize clone <hub-url-ending-in-id> | ' +
+          'memorize project clone <remoteProjectId> ' +
           '(--remote-path <path> | --remote-url <url> [--token <t>]) ' +
           '[--encryption-key <b64>]',
       );
     }
-    const flags = parseFlags(args.slice(2), {
+    const flags = parseFlags(flagArgs, {
       single: ['remote-path', 'remote-url', 'token', 'encryption-key'],
     });
     // Persist the location so later boundaries auto-sync with no flag (P3-b).
@@ -207,6 +218,55 @@ export async function runProjectCommand(
         : `Bound to remote project ${result.projectId}; no events yet. ` +
             'Run `memorize project sync --pull --remote-path <path>` after the source pushes.' +
             encNote,
+    );
+    return;
+  }
+
+  if (subcommand === 'remote') {
+    // Git-remote analog for an EXISTING bound project: persist the Hub
+    // location + remote id, then run the first push/pull right here so
+    // `remote` leaves the project synced the same way `clone` does — after
+    // this, boundary auto-sync (P3-b) takes over and onboarding never shows a
+    // manual sync command.
+    const projectId = await requireBoundProjectId(cwd);
+    const target = args[1];
+    if (!target) {
+      // `git remote -v` analog: no arg prints the attached remote, if any.
+      const state = await readSyncState(projectId);
+      if (state?.syncTransport?.type === 'http') {
+        console.log(
+          `${state.remoteProjectId ?? projectId}\t${state.syncTransport.url}`,
+        );
+        return;
+      }
+      throw new Error(
+        'Usage: memorize remote <hub-url-ending-in-id> [--token <t>] ' +
+          '(no remote is attached yet)',
+      );
+    }
+    const flags = parseFlags(args.slice(2), { single: ['token'] });
+    const hub = parseHubUrl(target);
+    const { transport, config } = await resolveTransportFlags({
+      'remote-url': hub.remoteUrl,
+      ...(flags.single.token ? { token: flags.single.token } : {}),
+    });
+    await updateSyncState(projectId, {
+      remoteProjectId: hub.remoteProjectId,
+      syncEnabled: true,
+      syncTransport: config,
+    });
+    // Same convergence a manual `project sync` performs (W-b reconcile before
+    // the wire, W-c role/reachability refresh after).
+    await tryReconcileWorkspaceBinding(projectId);
+    const pushed = await pushProject(projectId, transport);
+    const pulled = await pullProject(projectId, transport);
+    await tryRefreshWorkspaceBinding(projectId);
+    const dupes = pulled.total - pulled.inserted;
+    console.log(
+      `Attached remote ${hub.remoteProjectId} (${hub.remoteUrl}).\n` +
+        `First sync: pushed ${pushed.accepted.length} events, pulled ` +
+        `${pulled.total} (${pulled.inserted} new, ${dupes} duplicates ` +
+        `skipped). Session boundaries auto-sync from here on.`,
     );
     return;
   }

@@ -648,6 +648,27 @@ Pulls existing events on clone; if the source has not pushed yet it binds
 and tells you to run `project sync --pull` once it has. Same experimental
 caveats as `project sync`.
 
+**URL positional (Hub onboarding):** `memorize clone <hub-url>` is a
+top-level alias of `project clone` that accepts the copy-paste URL the Hub
+renders, e.g. `memorize clone https://hub.example/clone/wsp_abc123`. The
+URL's **origin** becomes `--remote-url` and its **last path segment** is
+the store id (`wsp_…`/`proj_…`); intermediate segments (`/clone`, …) are
+display sugar and ignored, so the Hub may change its pretty paths without
+breaking the client. Both spellings accept both forms.
+
+### `memorize remote [<hub-url>] [--token <t>]` (experimental)
+
+Git-remote analog for a project that **already exists locally** (the
+other onboarding branch — `clone` is for a fresh directory). Alias of
+`memorize project remote`. Parses `<hub-url>` with the same
+origin-plus-last-segment rule as `clone`, persists the transport +
+`remoteProjectId` into the sync state, then runs the **first push/pull
+immediately** (including the W-b binding reconcile and W-c role-cache
+refresh a manual sync performs), so no manual sync step follows it —
+session boundaries auto-sync from there (P3-b). With no argument it
+prints the attached remote id + URL, `git remote -v` style. Requires a
+host credential (`memorize login <hub-url>`) or `--token`.
+
 ### `memorize project encryption (enable [--key <b64>] [--force] | show | disable)` (experimental)
 
 Provisions the per-project **E2E payload key** (#182) on the origin
