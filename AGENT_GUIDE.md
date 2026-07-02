@@ -463,7 +463,7 @@ consolidation under a reserved id, living in `~/.memorize/personal/`
   project memory pool — so the personal/project boundary is visible in
   context, not just in storage.
 
-### `memorize workspace create --remote-url <hub-url> [--name <name>]` (+ `workspace status`, `workspace invite`, `workspace join`, `workspace members`, `workspace promote|demote|remove`)
+### `memorize workspace create --remote-url <hub-url> [--name <name>]` (+ `memorize workspace status`, `memorize workspace invite`, `memorize workspace join`, `memorize workspace members`, `memorize workspace promote|demote|remove`)
 
 Bind the bound project to a **workspace** — a shared, multi-account project
 surface. `workspace create` mints a server-minted workspace store id (`wsp_…`)
@@ -647,6 +647,27 @@ no flags (P3-b).
 Pulls existing events on clone; if the source has not pushed yet it binds
 and tells you to run `project sync --pull` once it has. Same experimental
 caveats as `project sync`.
+
+**URL positional (Hub onboarding):** `memorize clone <hub-url>` is a
+top-level alias of `project clone` that accepts the copy-paste URL the Hub
+renders, e.g. `memorize clone https://hub.example/clone/wsp_abc123`. The
+URL's **origin** becomes `--remote-url` and its **last path segment** is
+the store id (`wsp_…`/`proj_…`); intermediate segments (`/clone`, …) are
+display sugar and ignored, so the Hub may change its pretty paths without
+breaking the client. Both spellings accept both forms.
+
+### `memorize remote [<hub-url>] [--token <t>]` (experimental)
+
+Git-remote analog for a project that **already exists locally** (the
+other onboarding branch — `clone` is for a fresh directory). Alias of
+`memorize project remote`. Parses `<hub-url>` with the same
+origin-plus-last-segment rule as `clone`, persists the transport +
+`remoteProjectId` into the sync state, then runs the **first push/pull
+immediately** (including the W-b binding reconcile and W-c role-cache
+refresh a manual sync performs), so no manual sync step follows it —
+session boundaries auto-sync from there (P3-b). With no argument it
+prints the attached remote id + URL, `git remote -v` style. Requires a
+host credential (`memorize login <hub-url>`) or `--token`.
 
 ### `memorize project encryption (enable [--key <b64>] [--force] | show | disable)` (experimental)
 

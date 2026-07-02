@@ -36,6 +36,11 @@ const handlers: Record<string, CommandHandler> = {
   // `memorize login` — optional convenience alias for `memorize auth login`
   // (the namespaced form stays canonical, mirroring `gh auth login`).
   login: (args, ctx) => runAuthCommand(['login', ...args], ctx),
+  // `memorize clone <hub-url>` / `memorize remote <hub-url>` — git-style
+  // onboarding aliases for the namespaced `project` forms; these are the two
+  // commands the Hub renders in its copy-paste quickstart blocks.
+  clone: (args, ctx) => runProjectCommand(['clone', ...args], ctx),
+  remote: (args, ctx) => runProjectCommand(['remote', ...args], ctx),
   project: runProjectCommand,
   workspace: runWorkspaceCommand,
   projection: runProjectionCommand,
