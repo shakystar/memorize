@@ -26,6 +26,7 @@ import { runUninstallCommand } from './commands/uninstall.js';
 import { runUpdateCommand } from './commands/update.js';
 import { runWorkspaceCommand } from './commands/workspace.js';
 import type { CliContext, CommandHandler } from './context.js';
+import { writeFatalErrorAndExit } from './fatal-error.js';
 import { assertNotWindowsInteropLeak } from './interop-guard.js';
 import { renderScaffoldUsage } from './usage.js';
 
@@ -149,6 +150,6 @@ async function main(): Promise<void> {
 }
 
 main().catch((error: unknown) => {
-  console.error(error instanceof Error ? error.message : error);
   process.exitCode = 1;
+  writeFatalErrorAndExit(error);
 });
