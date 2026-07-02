@@ -59,6 +59,22 @@ export interface StartupContextPayload {
     text: string;
     salience: number;
   }>;
+  /** W3: the workspace shared channel — other members' memories read from the
+   *  union lane and labelled by writer (origin store), NEVER folded into the
+   *  local `consolidatedMemories` truth (SoT-010/040). Selected under its OWN
+   *  budget pool so it cannot crowd the private channels. Absent when the
+   *  project is not workspace-bound or carries no foreign-lane memories.
+   *  Entries arrive grouped by writer so renderers can label lanes by
+   *  adjacency. */
+  sharedMemories?: Array<{
+    id: string;
+    kind: ConsolidatedMemoryKind;
+    text: string;
+    salience: number;
+    /** Origin store lane of the writing member (`proj_…`) — the provenance
+     *  label; maps to a person via the workspace roster when online. */
+    writer: string;
+  }>;
   /** CLS short-term layer: tail of the previous session's raw observations
    *  (high-signal only — the capture filter already rejected chatter). */
   recentObservations?: Array<{

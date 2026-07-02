@@ -77,6 +77,27 @@ export function renderCodexStartupContext(
     });
   }
 
+  if (payload.sharedMemories && payload.sharedMemories.length > 0) {
+    const sharedLines: string[] = [
+      "## Workspace shared memory (other members' memories, labelled by writer — context, not local truth)",
+    ];
+    let lastWriter: string | undefined;
+    for (const memory of payload.sharedMemories) {
+      if (memory.writer !== lastWriter) {
+        sharedLines.push(`From ${memory.writer}:`);
+        lastWriter = memory.writer;
+      }
+      sharedLines.push(`- [${memory.kind}/s${memory.salience}] ${memory.text}`);
+    }
+    blocks.push({
+      priority: 2.3,
+      source: 'memorize.shared',
+      content: wrapUntrusted(sharedLines.join('\n'), {
+        source: 'memorize.shared',
+      }),
+    });
+  }
+
   if (payload.recentObservations && payload.recentObservations.length > 0) {
     const observationLines: string[] = [
       '## Recent work signals (prior session tail)',
