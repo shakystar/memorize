@@ -1,6 +1,8 @@
 import { ACTOR_NEXT_AGENT, ACTOR_USER } from '../../domain/common.js';
 import {
   isConfidence,
+  isPriority,
+  PRIORITY_VALUES,
   type Confidence,
   type Task,
 } from '../../domain/entities.js';
@@ -12,6 +14,7 @@ import {
 import { resolveSessionContext } from '../../services/session-context.js';
 import { getCurrentSessionId } from '../../services/session-service.js';
 import {
+  appendTaskItems,
   createCheckpoint,
   createHandoff,
   createTask,
@@ -27,6 +30,8 @@ const HANDOFF_INTENT_NOTICE = [
   'Note: Handoff records intent, context, and decisions only —',
   '      not code state. The next agent verifies tests and git',
   '      state independently at session start.',
+  '      Questions/risks that should OUTLIVE this handoff belong',
+  '      on the task: `memorize task update --question/--risk`.',
 ].join('\n');
 
 const ALLOWED_STATUSES: Task['status'][] = [
@@ -48,19 +53,28 @@ async function runCreateTask(
   _ctx: CliContext,
   projectId: string,
 ): Promise<void> {
-  const title = args.join(' ').trim();
+  // parseFlags rejects unknown flags loudly, so a guessed flag (e.g.
+  // `--priority` before it existed) errors instead of being silently
+  // joined into the title — the "--priority high in the title" junk task.
+  const flags = parseFlags(args, {
+    single: ['priority', 'goal', 'description'],
+    multi: ['ac'],
+  });
+  const title = flags.positional.join(' ').trim();
   if (!title) throw new Error('Task title is required.');
-  // Defense in depth: if a flag slipped through as the "title", reject it
-  // rather than creating a junk task (e.g. `task create --foo`).
-  if (args[0]?.startsWith('--')) {
-    throw new Error(
-      `Unknown flag ${args[0]}. Run \`memorize task --help\` for usage.`,
-    );
+  const priority = flags.single.priority;
+  if (priority && !isPriority(priority)) {
+    throw new Error(`--priority must be one of ${PRIORITY_VALUES.join('|')}.`);
   }
   const task = await createTask({
     projectId,
     title,
-    description: title,
+    ...(flags.single.description
+      ? { description: flags.single.description }
+      : {}),
+    ...(flags.single.goal ? { goal: flags.single.goal } : {}),
+    ...(priority && isPriority(priority) ? { priority } : {}),
+    ...(flags.multi.ac ? { acceptanceCriteria: flags.multi.ac } : {}),
     actor: ACTOR_USER,
   });
   console.log(`Created task ${task.id}`);
@@ -291,17 +305,22 @@ async function resolveTaskId(
 }
 
 /**
- * `memorize task update` — append-only correction of a task's title/note.
- * Calls updateTask, which APPENDS a `task.updated` event; the task.created
- * event and every prior update stay in the log untouched. Status changes are
- * NOT permitted here — status has its own verbs (start/handoff/done/cancel).
+ * `memorize task update` — append-only correction of a task's title/note,
+ * plus item-level appends to its living list fields (--question/--risk/--ac).
+ * Corrections APPEND a `task.updated` event; list items each APPEND a
+ * `task.item-appended` event (never a whole-array patch, so concurrent
+ * sessions can't clobber each other's items). Status changes are NOT
+ * permitted here — status has its own verbs (start/handoff/done/cancel).
  */
 async function runUpdateTask(
   args: string[],
   ctx: CliContext,
   projectId: string,
 ): Promise<void> {
-  const flags = parseFlags(args, { single: ['task', 'title', 'note'] });
+  const flags = parseFlags(args, {
+    single: ['task', 'title', 'note'],
+    multi: ['question', 'risk', 'ac'],
+  });
   const positional = flags.positional[0];
   const resolvedTaskId = await resolveTaskId(flags, ctx, projectId, positional);
   if (!resolvedTaskId) {
@@ -312,14 +331,32 @@ async function runUpdateTask(
   const patch: Partial<Task> = {};
   if (flags.single.title !== undefined) patch.title = flags.single.title;
   if (flags.single.note !== undefined) patch.description = flags.single.note;
-  if (Object.keys(patch).length === 0) {
-    throw new Error('task update requires at least one of --title or --note.');
+  const items = {
+    ...(flags.multi.question ? { openQuestions: flags.multi.question } : {}),
+    ...(flags.multi.risk ? { riskNotes: flags.multi.risk } : {}),
+    ...(flags.multi.ac ? { acceptanceCriteria: flags.multi.ac } : {}),
+  };
+  const hasItems = Object.keys(items).length > 0;
+  if (Object.keys(patch).length === 0 && !hasItems) {
+    throw new Error(
+      'task update requires at least one of --title, --note, --question, --risk, or --ac.',
+    );
   }
   const sessionCtx = await resolveSessionContext(ctx.cwd, {
     debugLabel: 'task-update',
   });
   const actor = sessionCtx.actor ?? ACTOR_USER;
-  await updateTask(projectId, resolvedTaskId, patch, actor);
+  if (Object.keys(patch).length > 0) {
+    await updateTask(projectId, resolvedTaskId, patch, actor);
+  }
+  if (hasItems) {
+    await appendTaskItems({
+      projectId,
+      taskId: resolvedTaskId,
+      items,
+      actor,
+    });
+  }
   console.log(`Task ${resolvedTaskId} updated`);
 }
 

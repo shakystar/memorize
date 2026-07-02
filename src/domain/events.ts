@@ -15,6 +15,7 @@ import type {
   Session,
   SessionHeartbeatPayload,
   Task,
+  TaskItemAppendedPayload,
   Workstream,
 } from './entities.js';
 
@@ -24,6 +25,11 @@ export type DomainEventType =
   | 'workstream.created'
   | 'task.created'
   | 'task.updated'
+  // Item-level append into a Task list field (acceptanceCriteria /
+  // openQuestions / riskNotes). One event per item keeps the log a G-Set
+  // (SoT-030): concurrent writers union cleanly, where a whole-array
+  // `task.updated` patch would last-writer-wins away the other's items.
+  | 'task.item-appended'
   | 'handoff.created'
   | 'checkpoint.created'
   | 'decision.proposed'
@@ -76,6 +82,7 @@ export type DomainEventPayload =
   | Partial<Workstream>
   | Task
   | Partial<Task>
+  | TaskItemAppendedPayload
   | Handoff
   | Checkpoint
   | Decision

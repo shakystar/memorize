@@ -272,6 +272,83 @@ describe('projector', () => {
     expect(first.tasks['task_1']?.updatedAt).toBe('2026-04-12T09:30:00.000Z');
   });
 
+  it('appends task.item-appended items in order and ignores unsafe payloads', () => {
+    const itemEvent = (
+      id: string,
+      field: string,
+      text: unknown,
+      createdAt: string,
+    ): DomainEvent =>
+      makeEvent({
+        id,
+        type: 'task.item-appended',
+        scopeType: 'task',
+        scopeId: 'task_1',
+        createdAt,
+        updatedAt: createdAt,
+        payload: { field, text },
+      });
+
+    const state = reduceProjectState([
+      projectCreated(),
+      taskEvent('task_1', 'in_progress', '2026-04-11T00:00:00.000Z'),
+      itemEvent(
+        'evt_q1',
+        'openQuestions',
+        'Which store wins on conflict?',
+        '2026-04-12T00:00:00.000Z',
+      ),
+      itemEvent(
+        'evt_q2',
+        'openQuestions',
+        'Does the Hub need pagination?',
+        '2026-04-12T01:00:00.000Z',
+      ),
+      itemEvent(
+        'evt_r1',
+        'riskNotes',
+        'Blocked on upstream API key',
+        '2026-04-12T02:00:00.000Z',
+      ),
+      itemEvent(
+        'evt_ac1',
+        'acceptanceCriteria',
+        'Panel renders questions',
+        '2026-04-12T03:00:00.000Z',
+      ),
+      // A synced event must never append into an arbitrary Task property
+      // or inject a non-string item — both are dropped, not applied.
+      itemEvent('evt_bad1', 'title', 'hijacked', '2026-04-12T04:00:00.000Z'),
+      itemEvent(
+        'evt_bad2',
+        'riskNotes',
+        { nested: 'object' },
+        '2026-04-12T05:00:00.000Z',
+      ),
+      // Append aimed at a task that does not exist in this lane: dropped.
+      makeEvent({
+        id: 'evt_bad3',
+        type: 'task.item-appended',
+        scopeType: 'task',
+        scopeId: 'task_missing',
+        createdAt: '2026-04-12T06:00:00.000Z',
+        payload: { field: 'riskNotes', text: 'orphan' },
+      }),
+    ]);
+
+    const task = state.tasks['task_1'];
+    expect(task?.openQuestions).toEqual([
+      'Which store wins on conflict?',
+      'Does the Hub need pagination?',
+    ]);
+    expect(task?.riskNotes).toEqual(['Blocked on upstream API key']);
+    expect(task?.acceptanceCriteria).toEqual(['Panel renders questions']);
+    expect(task?.title).not.toBe('hijacked');
+    // The last APPLIED append stamps updatedAt from the event's createdAt.
+    expect(task?.updatedAt).toBe('2026-04-12T03:00:00.000Z');
+    expect(state.tasks['task_missing']).toBeUndefined();
+  });
+
   it('caps topTasks and recentDecisions at their configured maximums', () => {
     const taskEvents = Array.from({ length: MAX_TOP_TASKS + 5 }, (_, i) =>
       taskEvent(

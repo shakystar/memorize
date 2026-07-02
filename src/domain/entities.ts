@@ -11,10 +11,15 @@ export {
 } from './entities/workstream.js';
 export {
   type OwnerType,
+  PRIORITY_VALUES,
   type Priority,
+  TASK_APPENDABLE_FIELDS,
   type Task,
+  type TaskAppendableField,
+  type TaskItemAppendedPayload,
   type TaskStatus,
   createTask,
+  isPriority,
 } from './entities/task.js';
 export {
   CONFIDENCE_VALUES,

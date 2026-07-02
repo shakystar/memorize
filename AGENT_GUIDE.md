@@ -789,10 +789,24 @@ busy sessions and an empty task list is NORMAL, not broken (#85);
 never treat `task list` as the way to see what sessions are doing.
 That is `memorize session activity`.
 
-### `memorize task create "<title>"`
+### `memorize task create "<title>" [flags]`
 
-Appends a `task.created` event. Actor defaults to `user`. Title is
-required and becomes the default description/goal.
+Appends a `task.created` event. Actor defaults to `user`. Title is the
+positional argument and is required; unknown flags are rejected loudly
+(they are never silently joined into the title).
+
+| Flag | Shape | Purpose |
+|---|---|---|
+| `--goal <text>` | single | What "done" means, in one line |
+| `--description <text>` | single | Longer context than the title |
+| `--priority low\|medium\|high` | single | Default `medium` |
+| `--ac <text>` | multi | Item added to `acceptanceCriteria` |
+
+Fill `--goal` and `--ac` at creation when you already know them — they
+are what `task resume` and the Hub task panel show the next agent.
+`description`/`goal` are NOT defaulted from the title anymore: an empty
+field stays empty instead of masquerading as filled. Questions and risks
+discovered later are appended with `task update --question` / `--risk`.
 
 ### `memorize task list [flags]`
 
@@ -860,22 +874,39 @@ task status to `handoff_ready`.
 | `--warning <text>` | multi | Item added to `warnings` |
 | `--question <text>` | multi | Item added to `unresolvedQuestions` |
 
-### `memorize task update [<taskId>] [--title <text>] [--note <text>]`
+A handoff is an immutable snapshot. Before handing off, put questions
+and risks that should stay visible on the task itself (Hub shows them as
+the task's living state) with `task update --question` / `--risk` — the
+handoff's own `--question` / `--warning` record the moment, not the
+task's ongoing state.
 
-#148: append-only correction of a task's title and/or note. Calls the
-existing `updateTask`, which **appends** a `task.updated` event and
-rebuilds the projection; the original `task.created` event and every
-prior update stay in the log untouched (the events log is the immutable
-source of truth; nothing is mutated or deleted). Status changes are not
-permitted here; status has its own verbs (`start` / `handoff` / `done` /
-`cancel`).
+### `memorize task update [<taskId>] [flags]`
+
+#148: append-only correction of a task's title and/or note, plus
+item-level appends to the task's living list fields. Corrections
+**append** a `task.updated` event; each `--question` / `--risk` / `--ac`
+item **appends** its own `task.item-appended` event (never a whole-array
+patch, so two concurrent sessions can't clobber each other's items).
+The original `task.created` event and every prior update stay in the log
+untouched. Status changes are not permitted here; status has its own
+verbs (`start` / `handoff` / `done` / `cancel`).
 
 - `<taskId>` (positional) or `--task <taskId>` (single): the target;
   falls back to the session's claimed task, then the active task, the
   same way `task done` resolves.
 - `--title <text>` (single): set the task title.
 - `--note <text>` (single): set the task description.
-- At least one of `--title` / `--note` is required, else it errors.
+- `--question <text>` (multi): append to `openQuestions`.
+- `--risk <text>` (multi): append to `riskNotes`.
+- `--ac <text>` (multi): append to `acceptanceCriteria`.
+- At least one flag is required, else it errors.
+
+`openQuestions` / `riskNotes` are the task's LIVING state — what a
+teammate clicking the task (especially a `blocked` one) reads to learn
+"why is this stuck". The handoff's `--question` / `--warning` capture a
+moment-in-time snapshot instead; record in BOTH places when a question
+should outlive the handoff. The natural moments to append here: when a
+task becomes `blocked`, before a handoff, and at a checkpoint.
 
 ### `memorize task cancel [<taskId>]`
 
