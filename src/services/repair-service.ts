@@ -4,10 +4,11 @@ import path from 'node:path';
 
 import { spawnSync } from 'node:child_process';
 
+import type { ProjectSyncState } from '../domain/entities.js';
 import { getDb } from '../storage/db.js';
 import { readEventsWithIntegrity } from '../storage/event-store.js';
-import { isEnoent, stripBom } from '../storage/fs-utils.js';
-import { getProjectRoot } from '../storage/path-resolver.js';
+import { isEnoent, readJson, stripBom } from '../storage/fs-utils.js';
+import { getProjectRoot, getSyncFile } from '../storage/path-resolver.js';
 import {
   CLAUDE_HOOK_EVENTS,
   isMemorizeHookCommandForAgent,
@@ -649,6 +650,65 @@ function checkConsolidationHealth(projectId: string): DoctorCheck {
   };
 }
 
+/**
+ * W-b full reconcile (SoT-031): canonical remote sync routes by a server-minted
+ * store id (`wsp_`/`psm_`); the gateway 403s a raw client `proj_` path. Flag the
+ * two legacy shapes so doctor explains that 403 before the user hits it — both
+ * self-heal at the next sync boundary, so the fix is simply "sync". The
+ * deprecated file transport is a warn too: it keeps working, frozen (no server
+ * exists to mint ids for a shared folder). Exported for unit tests.
+ */
+export async function checkSyncBinding(
+  projectId: string,
+): Promise<DoctorCheck | undefined> {
+  const state = await readJson<ProjectSyncState>(getSyncFile(projectId));
+  // Single-machine (no transport) — nothing to check. The personal store's
+  // psm_ binding is managed by its own resolve path.
+  if (!state?.syncTransport) return undefined;
+  if (state.remoteProjectId?.startsWith('psm_')) return undefined;
+  const label = 'Remote sync binding (canonical wsp_, SoT-031)';
+  if (state.syncTransport.type === 'file') {
+    return {
+      id: 'sync.binding',
+      label,
+      status: 'warn',
+      message:
+        'File transport is deprecated (SoT-031): it keeps working but is frozen. ' +
+        'Canonical remote sync is a Hub workspace store.',
+      fix: 'memorize auth login --remote-url <hub>, then memorize workspace create',
+    };
+  }
+  if (state.remoteProjectId?.startsWith('wsp_')) {
+    if (state.workspaceRole) {
+      return {
+        id: 'sync.binding',
+        label,
+        status: 'ok',
+        message: `Canonical workspace binding (${state.remoteProjectId})`,
+      };
+    }
+    return {
+      id: 'sync.binding',
+      label,
+      status: 'warn',
+      message:
+        `Workspace binding ${state.remoteProjectId} is missing its control-plane ` +
+        'role cache; the next sync boundary backfills it.',
+      fix: 'memorize project sync --pull',
+    };
+  }
+  return {
+    id: 'sync.binding',
+    label,
+    status: 'warn',
+    message:
+      `Legacy ${state.remoteProjectId ? `client-bound (${state.remoteProjectId})` : 'unbound'} ` +
+      'http sync: the Hub rejects raw client store ids (403 unknown store). ' +
+      'The next sync boundary migrates it to a server-minted workspace store.',
+    fix: 'memorize project sync --push',
+  };
+}
+
 async function buildUpdateVersionCheck(): Promise<DoctorCheck> {
   const current = getCurrentVersion();
   let notice: string | undefined;
@@ -736,6 +796,9 @@ export async function doctor(cwd: string): Promise<DoctorReport> {
 
     const ndjsonCheck = await checkNdjsonMigrated(projectId);
     if (ndjsonCheck) checks.push(ndjsonCheck);
+
+    const syncBindingCheck = await checkSyncBinding(projectId);
+    if (syncBindingCheck) checks.push(syncBindingCheck);
   }
 
   const claudeCheck = await checkClaudeInstall(cwd);

@@ -596,22 +596,37 @@ need JSON.
 
 ### `memorize project sync [flags]` (experimental)
 
-> **Experimental in 2.x.** The file transport works and is roundtrip-tested,
-> but real cross-machine dogfooding is still maturing. Flags and on-disk wire
-> format may change in a 2.x minor release. Do not depend on it for
-> production sharing yet.
+> **Canonical remote sync is the Hub** (SoT-031): `memorize auth login
+> --remote-url <hub>`, then `memorize workspace create` — after that a plain
+> `memorize project sync --push/--pull` (no flags) syncs the bound workspace
+> store. The file transport (`--remote-path`) is **deprecated**: it keeps
+> working but is frozen and will be removed in a later release.
 
-Event sync with a remote path.
+Event sync over the persisted transport (or one given by flag).
 
 | Flag | Shape | Purpose |
 |---|---|---|
-| `--bind <remoteProjectId>` | single | Bind this local project to a remote project id |
+| `--bind <remoteProjectId>` | single | Bind this local project to a remote store id |
 | `--push` | boolean | Push queued events to the remote |
 | `--pull` | boolean | Pull new events from the remote and merge |
-| `--remote-path <dir>` | single | Required with `--push`/`--pull`. Points at a filesystem transport location. |
+| `--remote-url <url>` | single | Hub/relay URL; persisted so later boundaries auto-sync flag-less |
+| `--token <t>` | single | Bearer token for `--remote-url` (written through to the host credential store, #192) |
+| `--remote-path <dir>` | single | **Deprecated (SoT-031).** Filesystem transport location |
 
 Running with no flags prints the current sync state and queue
 snapshot as JSON.
+
+**Legacy binding auto-migration (W-b full reconcile, SoT-031).** A Hub-bound
+http sync whose `remoteProjectId` is still a raw client `proj_` (the
+pre-workspace first-push self-bind — the Hub rejects that path with 403
+"unknown store") is migrated automatically at every sync boundary: a 1-member
+workspace store is minted (`POST /v1/workspaces`), the binding is repointed at
+the new `wsp_`, and the push/pull watermarks reset so the full local history
+re-publishes. A `wsp_` binding that lacks its control-plane role cache (e.g.
+after `--bind wsp_…` or a clone on a second device) gets the cache backfilled
+from account discovery instead. Both are best-effort: on failure the sync
+proceeds on the legacy path and a `WARN:` explains why. `memorize doctor`
+surfaces legacy shapes under the `sync.binding` check.
 
 ### `memorize project clone <remoteProjectId> (--remote-path <path> | --remote-url <url> [--token <t>]) [--encryption-key <b64>]` (experimental)
 

@@ -6,7 +6,10 @@ import type { SyncTransport } from '../domain/sync-transport.js';
 import { resolveSyncToken } from '../storage/credentials-store.js';
 import { readSyncState } from './project-service.js';
 import { pullProject, pushProject } from './sync-service.js';
-import { tryRefreshWorkspaceBinding } from './workspace-service.js';
+import {
+  tryReconcileWorkspaceBinding,
+  tryRefreshWorkspaceBinding,
+} from './workspace-service.js';
 
 /**
  * P3-b — background auto-sync. Agents never call sync; boundary hooks invoke
@@ -59,7 +62,15 @@ export async function autoPush(projectId: string): Promise<AutoSyncResult> {
   // state so this is already a no-op, but short-circuit explicitly.
   if (isPersonalStoreId(projectId)) return { ran: false, reason: 'not-configured' };
   try {
-    const state = await readSyncState(projectId);
+    let state = await readSyncState(projectId);
+    // W-b full reconcile (SoT-031): a Hub-bound sync still carrying a legacy
+    // proj_ self-bind (or a wsp_ missing its role cache) is converged onto the
+    // canonical wsp_ binding BEFORE the push. Best-effort — a reconcile failure
+    // degrades to the legacy path and the transport's own error explains it.
+    if (state?.syncTransport?.type === 'http') {
+      const outcome = await tryReconcileWorkspaceBinding(projectId);
+      if (outcome && outcome.action !== 'none') state = await readSyncState(projectId);
+    }
     if (!isConfigured(state)) return { ran: false, reason: 'not-configured' };
     // Reentrancy guard: a push already in flight. (autoPull does NOT gate on
     // this — pull is idempotent, and gating risks wedging on a stale 'syncing'
@@ -80,7 +91,13 @@ export async function autoPush(projectId: string): Promise<AutoSyncResult> {
 export async function autoPull(projectId: string): Promise<AutoSyncResult> {
   if (isPersonalStoreId(projectId)) return { ran: false, reason: 'not-configured' };
   try {
-    const state = await readSyncState(projectId);
+    let state = await readSyncState(projectId);
+    // Same W-b reconcile as autoPush — the session-start pull is equally a
+    // boundary a legacy binding must not survive.
+    if (state?.syncTransport?.type === 'http') {
+      const outcome = await tryReconcileWorkspaceBinding(projectId);
+      if (outcome && outcome.action !== 'none') state = await readSyncState(projectId);
+    }
     if (!isConfigured(state)) return { ran: false, reason: 'not-configured' };
     const transport = await resolveTransport(state);
     if (!transport) return { ran: false, reason: 'not-configured' };

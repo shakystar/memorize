@@ -7,6 +7,7 @@ import {
   removeWorkspaceMember,
   setWorkspaceMemberRole,
   type WorkspaceInvite,
+  type WorkspaceResolution,
   type WorkspaceRole,
   type WorkspaceRoster,
 } from '../adapters/sync-transport-http.js';
@@ -420,6 +421,129 @@ export async function requireOwnerForGlobalRetract(
     );
   }
   return 'owner';
+}
+
+/**
+ * W-b full reconcile (SoT-031): converge a Hub-bound http sync onto the
+ * canonical server-minted `wsp_` binding at a sync boundary. Two legacy shapes
+ * are healed:
+ *
+ * 1. `remoteProjectId` is a raw client id (a `proj_` self-bind from the
+ *    pre-workspace era) or absent — the gateway rejects that path outright
+ *    (403 'unknown store', side-effect-free), so NO remote history exists to
+ *    adopt. A fresh 1-member `wsp_` is minted (a private project IS a
+ *    degenerate workspace, Hub H040) and both watermarks are dropped so the
+ *    full local log re-publishes into it and the pull cursor starts over.
+ * 2. `remoteProjectId` is already a `wsp_` but the control-plane role cache is
+ *    missing (`project sync --bind wsp_…`, or a clone of a workspace store on
+ *    a second device) — the cache is backfilled from account discovery; nothing
+ *    is minted.
+ *
+ * Out of scope by decision (SoT-031): file transports (no server exists to
+ * mint ids) and bare relays (no control-plane — detected by the 404 on the
+ * create call, and left untouched: their proj_-pathed logs stay valid). The
+ * personal store (`psm_`) binds via its own resolve path.
+ */
+export type ReconcileOutcome =
+  | { action: 'none' }
+  | { action: 'role-backfilled'; workspaceId: string }
+  | { action: 'migrated'; workspaceId: string };
+
+export async function reconcileWorkspaceBinding(
+  projectId: string,
+  params: { fetchImpl?: typeof fetch } = {},
+): Promise<ReconcileOutcome> {
+  const syncFile = getSyncFile(projectId);
+  const state = await readJson<ProjectSyncState>(syncFile);
+  if (state?.syncTransport?.type !== 'http') return { action: 'none' };
+  if (state.remoteProjectId?.startsWith('psm_')) return { action: 'none' };
+  const wspBound = state.remoteProjectId?.startsWith('wsp_') ?? false;
+  if (wspBound && state.workspaceRole) return { action: 'none' };
+
+  const remoteUrl = state.syncTransport.url;
+  const token = await resolveSyncToken(remoteUrl, state.syncTransport.token);
+  if (!token) {
+    throw new Error(
+      `No stored credential for ${remoteUrl}. Run ` +
+        `\`memorize auth login --remote-url ${remoteUrl}\` first.`,
+    );
+  }
+  const fetchOpts = params.fetchImpl ? { fetchImpl: params.fetchImpl } : {};
+
+  if (wspBound) {
+    const workspaces = await listWorkspaces(remoteUrl, token, fetchOpts);
+    const entry = workspaces.find((w) => w.workspaceId === state.remoteProjectId);
+    if (!entry) {
+      throw new Error(
+        `Workspace ${state.remoteProjectId} does not list this account; ` +
+          'join it first (`memorize workspace join --token <invite-token>`).',
+      );
+    }
+    await writeJson(syncFile, {
+      ...state,
+      workspaceRole: entry.role,
+      inviteReachable: entry.inviteReachable,
+      syncEnabled: true,
+      updatedAt: nowIso(),
+    });
+    return { action: 'role-backfilled', workspaceId: entry.workspaceId };
+  }
+
+  let workspace: WorkspaceResolution;
+  try {
+    workspace = await createWorkspace(remoteUrl, token, fetchOpts);
+  } catch (error) {
+    // A bare relay serves the events route but no control-plane, so the
+    // create 404s there — that sync is out of scope, leave it untouched.
+    if (error instanceof Error && /\(404\b/.test(error.message)) {
+      return { action: 'none' };
+    }
+    throw error;
+  }
+  const rest = { ...state };
+  delete rest.lastPushedEventId;
+  delete rest.lastPulledEventId;
+  await writeJson(syncFile, {
+    ...rest,
+    remoteProjectId: workspace.workspaceId,
+    workspaceRole: workspace.role,
+    inviteReachable: workspace.inviteReachable,
+    syncEnabled: true,
+    updatedAt: nowIso(),
+  });
+  return { action: 'migrated', workspaceId: workspace.workspaceId };
+}
+
+/**
+ * Best-effort wrapper for sync boundaries (autoPush/autoPull and manual
+ * `project sync`): a reconcile failure must never break the sync that
+ * triggered it — degrade to a stderr warn and let the legacy path proceed
+ * (the Hub's own 403 then explains itself). Narrates a migration loudly:
+ * minting a store on the Hub is a remote mutation the user should see.
+ */
+export async function tryReconcileWorkspaceBinding(
+  projectId: string,
+  params: { fetchImpl?: typeof fetch } = {},
+): Promise<ReconcileOutcome | undefined> {
+  try {
+    const outcome = await reconcileWorkspaceBinding(projectId, params);
+    if (outcome.action === 'migrated') {
+      process.stderr.write(
+        `INFO: legacy sync binding migrated to workspace ${outcome.workspaceId} ` +
+          '(server-minted store, SoT-031); the full local history re-pushes ' +
+          'on this sync.\n',
+      );
+    } else if (outcome.action === 'role-backfilled') {
+      process.stderr.write(
+        `INFO: workspace role cache backfilled for ${outcome.workspaceId}.\n`,
+      );
+    }
+    return outcome;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    process.stderr.write(`WARN: sync binding reconcile skipped (${message})\n`);
+    return undefined;
+  }
 }
 
 /**
