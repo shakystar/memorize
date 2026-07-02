@@ -182,7 +182,10 @@ function dedupeMemoriesBySource(memories: Record<string, MemoryRecord>): void {
   }
 }
 
-export function reduceProjectState(events: DomainEvent[]): ProjectState {
+export function reduceProjectState(
+  events: DomainEvent[],
+  selfProjectId?: string,
+): ProjectState {
   const state: ProjectState = {
     project: undefined,
     workstreams: {},
@@ -199,27 +202,56 @@ export function reduceProjectState(events: DomainEvent[]): ProjectState {
 
   // This store's own identity. Every event whose `sourceProjectId` is NULL
   // (legacy) or equal to this belongs to SELF_LANE; anything else is a foreign
-  // origin store carried in by a workspace union. The #30 one-identity
-  // invariant guarantees exactly one project.created, so a prescan is safe.
-  let selfProjectId: string | undefined;
+  // origin store carried in by a workspace union.
+  //
+  // AUTHORITATIVE when the caller passes `selfProjectId` — every real projection
+  // path (rebuildProjectProjection, getProjectStateAtRevision) knows the store's
+  // own proj_. A workspace union legitimately carries MULTIPLE distinct
+  // project.created (one per member); anchoring self on "first by seq" would
+  // mis-identify self when a foreign member's genesis synced in at a lower seq
+  // (SoT-021). When the caller omits it, fall back to the first project.created —
+  // correct for a single-identity (non-union) log (migrate sanity-check, ad-hoc).
+  // Only an EXPLICIT selfProjectId lets us treat a foreign project.created as
+  // provenance (union-safe). Without it we cannot tell a legitimate union
+  // genesis from a #30 identity clobber, so we keep the strict divergent-throw.
+  const hasAuthoritativeSelf = selfProjectId !== undefined;
+  // Prescan the genesis events: the self-lane anchor + whether this is a workspace
+  // union (MORE THAN ONE distinct project.created id — one per member's whole-DB
+  // union). A single-genesis log keeps legacy behavior even when the store's dir
+  // id differs from the genesis (e.g. a cross-dir migrate round-trip), so the
+  // provenance-skip below is gated on `isUnion`.
+  const genesisIds = new Set<string>();
+  let firstGenesisId: string | undefined;
   for (const event of events) {
     if (event.type === 'project.created') {
-      selfProjectId = (event.payload as Project).id;
-      break;
+      const id = (event.payload as Project).id;
+      if (firstGenesisId === undefined) firstGenesisId = id;
+      genesisIds.add(id);
     }
   }
+  const isUnion = genesisIds.size > 1;
+  const selfId = selfProjectId ?? firstGenesisId;
 
   for (const event of events) {
-    const eventLane = laneOf(event, selfProjectId);
+    const eventLane = laneOf(event, selfId);
     switch (event.type) {
       case 'project.created': {
-        // True-replica invariant (#30): a project's event log holds exactly
-        // ONE identity. Two distinct project.created ids in one store means a
-        // cross-machine bind clobbered identity (the pre-clone-on-bind bug).
-        // Fail LOUD instead of silently letting the last-by-seq id win and
-        // leaving getProjectProjection() returning an empty/wrong row. A
-        // repeated SAME id (idempotent re-pull) is fine.
         const incoming = event.payload as Project;
+        // Workspace union (SoT-021/022): with MULTIPLE distinct member genesis in
+        // one store, only the authoritative self proj_ is identity; a non-self
+        // member genesis is a PROVENANCE label — skip it (no adopt, no throw). Its
+        // entities already live in a foreign lane (laneOf keyed on sourceProjectId).
+        // Gated on isUnion so a single-genesis log is untouched (legacy/migrate).
+        if (hasAuthoritativeSelf && isUnion && incoming.id !== selfId) {
+          break;
+        }
+        // True-replica invariant (#30): a store's OWN log holds exactly ONE
+        // identity. Two distinct SELF project.created ids means a cross-machine
+        // bind clobbered identity (the pre-clone-on-bind bug). Fail LOUD instead
+        // of silently letting the last-by-seq id win and leaving
+        // getProjectProjection() returning an empty/wrong row. A repeated SAME id
+        // (idempotent re-pull) is fine. (When selfId is omitted this still guards
+        // a single-identity log exactly as before.)
         if (state.project && state.project.id !== incoming.id) {
           throw new Error(
             `Divergent project identity in event log: project.created for ` +

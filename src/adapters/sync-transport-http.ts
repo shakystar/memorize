@@ -289,3 +289,195 @@ export async function resolvePersonalStore(
   }
   return (await response.json()) as { storeId: string; eventsUrl: string };
 }
+
+/**
+ * Workspace control-plane client (Hub SoT H010/H040, docs/protocol/workspace.md).
+ * `wsp_` identity, role, and membership are CONTROL-PLANE facts served by the
+ * gateway — never domain events (memorize SoT-022). Like `psm_`, a `wsp_` is a
+ * server-minted OPAQUE id (`[A-Za-z0-9_-]`, uppercase allowed) and MUST NOT be
+ * validated against the client's lowercase ID_PATTERN; it travels only as the
+ * events-route path component and as `remoteProjectId` in sync state. All three
+ * calls require an UNSCOPED bearer key.
+ */
+export type WorkspaceRole = 'owner' | 'member';
+
+export interface WorkspaceResolution {
+  /** Server-minted opaque `wsp_…`. */
+  workspaceId: string;
+  eventsUrl: string;
+  role: WorkspaceRole;
+  inviteReachable: boolean;
+}
+
+export interface WorkspaceListEntry extends WorkspaceResolution {
+  name: string | null;
+  memberCount: number;
+}
+
+export interface WorkspaceMember {
+  accountId: string;
+  role: WorkspaceRole;
+  email: string;
+  joinedAt: string;
+}
+
+export interface WorkspaceRoster {
+  workspaceId: string;
+  name: string | null;
+  inviteReachable: boolean;
+  members: WorkspaceMember[];
+}
+
+/** Shared control-plane error reader: status + a short body snippet. */
+async function throwControlPlaneError(
+  response: Response,
+  action: string,
+): Promise<never> {
+  let body = '';
+  try {
+    body = await response.text();
+  } catch {
+    // Status alone is enough to report.
+  }
+  throw new Error(
+    `Workspace ${action} failed (${response.status} ${response.statusText})` +
+      (body ? `: ${body.slice(0, 200)}` : ''),
+  );
+}
+
+/**
+ * Create a workspace — the caller becomes its sole `owner` and the store starts
+ * `inviteReachable:false` (a private project; store-resolution.md). `POST /v1/workspaces`.
+ */
+export async function createWorkspace(
+  baseUrl: string,
+  token: string,
+  options: { name?: string; fetchImpl?: typeof fetch } = {},
+): Promise<WorkspaceResolution> {
+  const doFetch = options.fetchImpl ?? fetch;
+  const base = baseUrl.replace(/\/+$/, '');
+  const response = await doFetch(`${base}/v1/workspaces`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', authorization: `Bearer ${token}` },
+    body: JSON.stringify(options.name ? { name: options.name } : {}),
+  });
+  if (!response.ok) return throwControlPlaneError(response, 'create');
+  return (await response.json()) as WorkspaceResolution;
+}
+
+/**
+ * List the workspaces the calling account belongs to (includes 1-member private
+ * projects). Used to ADOPT an existing `wsp_` instead of minting a duplicate.
+ * `GET /v1/account/workspaces`.
+ */
+export async function listWorkspaces(
+  baseUrl: string,
+  token: string,
+  options: { fetchImpl?: typeof fetch } = {},
+): Promise<WorkspaceListEntry[]> {
+  const doFetch = options.fetchImpl ?? fetch;
+  const base = baseUrl.replace(/\/+$/, '');
+  const response = await doFetch(`${base}/v1/account/workspaces`, {
+    method: 'GET',
+    headers: { authorization: `Bearer ${token}` },
+  });
+  if (!response.ok) return throwControlPlaneError(response, 'discovery');
+  const body = (await response.json()) as { workspaces?: WorkspaceListEntry[] };
+  return body.workspaces ?? [];
+}
+
+/**
+ * Read the membership roster — co-writers + their roles — so the client can label
+ * shared-memory provenance and refresh its cached role. `GET /v1/workspaces/:id`.
+ */
+export async function getWorkspaceRoster(
+  baseUrl: string,
+  token: string,
+  workspaceId: string,
+  options: { fetchImpl?: typeof fetch } = {},
+): Promise<WorkspaceRoster> {
+  const doFetch = options.fetchImpl ?? fetch;
+  const base = baseUrl.replace(/\/+$/, '');
+  const response = await doFetch(
+    `${base}/v1/workspaces/${encodeURIComponent(workspaceId)}`,
+    { method: 'GET', headers: { authorization: `Bearer ${token}` } },
+  );
+  if (!response.ok) return throwControlPlaneError(response, 'roster');
+  return (await response.json()) as WorkspaceRoster;
+}
+
+export interface WorkspaceInvite {
+  inviteId: string;
+  /** The join capability — shown ONCE at mint, never re-served by the Hub. */
+  token: string;
+  joinUrl: string;
+  role: 'member';
+  maxUses: number | null;
+  expiresAt: string | null;
+}
+
+/**
+ * Owner mints a revocable, multi-use invite (always grants `member`; promotion
+ * is a later role change). The FIRST successful mint flips the store to
+ * `inviteReachable:true` on the Hub — private project -> shared workspace.
+ * `POST /v1/workspaces/:id/invites`.
+ */
+export async function mintWorkspaceInvite(
+  baseUrl: string,
+  token: string,
+  workspaceId: string,
+  options: {
+    maxUses?: number;
+    expiresAt?: string;
+    fetchImpl?: typeof fetch;
+  } = {},
+): Promise<WorkspaceInvite> {
+  const doFetch = options.fetchImpl ?? fetch;
+  const base = baseUrl.replace(/\/+$/, '');
+  const response = await doFetch(
+    `${base}/v1/workspaces/${encodeURIComponent(workspaceId)}/invites`,
+    {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify({
+        ...(options.maxUses !== undefined ? { maxUses: options.maxUses } : {}),
+        ...(options.expiresAt ? { expiresAt: options.expiresAt } : {}),
+      }),
+    },
+  );
+  if (!response.ok) return throwControlPlaneError(response, 'invite');
+  return (await response.json()) as WorkspaceInvite;
+}
+
+/**
+ * Redeem an invite token for the calling account (become a `member`). Idempotent
+ * on the Hub: an already-member join returns the existing membership without
+ * consuming a use. Dead tokens (revoked/expired/exhausted) -> `403`.
+ * `POST /v1/workspaces/join`.
+ */
+export async function joinWorkspaceRemote(
+  baseUrl: string,
+  token: string,
+  inviteToken: string,
+  options: { fetchImpl?: typeof fetch } = {},
+): Promise<{ workspaceId: string; eventsUrl: string; role: WorkspaceRole }> {
+  const doFetch = options.fetchImpl ?? fetch;
+  const base = baseUrl.replace(/\/+$/, '');
+  const response = await doFetch(`${base}/v1/workspaces/join`, {
+    method: 'POST',
+    headers: {
+      'content-type': 'application/json',
+      authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify({ token: inviteToken }),
+  });
+  if (!response.ok) return throwControlPlaneError(response, 'join');
+  return (await response.json()) as {
+    workspaceId: string;
+    eventsUrl: string;
+    role: WorkspaceRole;
+  };
+}

@@ -452,6 +452,39 @@ consolidation under a reserved id, living in `~/.memorize/personal/`
   project memory pool — so the personal/project boundary is visible in
   context, not just in storage.
 
+### `memorize workspace create --remote-url <hub-url> [--name <name>]` (+ `workspace status`, `workspace invite`, `workspace join`)
+
+Bind the bound project to a **workspace** — a shared, multi-account project
+surface. `workspace create` mints a server-minted workspace store id (`wsp_…`)
+on the Hub gateway and records it as the project's remote store, layered on top
+of the local `proj_` identity (which is never rekeyed). A freshly created
+workspace is a **private project** (1 member, you as `owner`); it becomes shared
+only once someone is invited (a later slice).
+
+- The `wsp_` id, your `role`, and reachability are **control-plane facts** the
+  client fetches from the gateway (`POST /v1/workspaces`) and caches locally —
+  they are NOT domain events (Hub two-plane boundary: the relay never authors or
+  parses events). Identity binding is stored client-side only.
+- Requires a host credential for the Hub (`memorize auth login --remote-url
+  <hub-url>` first). Idempotent: a project already workspace-bound is not
+  re-minted.
+- `workspace status [--json]` prints the current binding (`wsp_`, role, whether
+  the store is shared) or reports that the project is not workspace-bound.
+- The bind also persists the Hub URL as the project's http `syncTransport`, so a
+  workspace-bound project syncs flag-less (`memorize project sync --push/--pull`)
+  and is auto-sync eligible — the union data-plane is the existing events route
+  keyed by the `wsp_` remote id. Doctor's single-identity check is union-aware:
+  foreign members' `project.created` (provenance-labeled) never false-alarm it.
+- `workspace invite [--remote-url <hub-url>] [--max-uses <N>] [--expires <ISO-8601>]`
+  (owner only) mints a revocable multi-use invite and prints the join token +
+  URL **once** — the Hub never re-serves them. The first mint flips the store
+  from private project to shared workspace; the local cache mirrors it.
+- `workspace join --remote-url <hub-url> --token <invite-token>` redeems an
+  invite for the calling account and binds the bound project to the joined
+  workspace as `member`. A project already bound to a workspace refuses to join
+  a different one.
+- Role management (promote/demote/remove) is a separate follow-up slice.
+
 ### `memorize init [--nested]`
 
 **The recommended one-shot onboarding command** — prefer it over running
