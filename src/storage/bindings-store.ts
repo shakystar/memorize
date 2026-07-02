@@ -46,6 +46,21 @@ export async function resolveProjectIdForPath(
   }
 }
 
+/**
+ * Reverse of {@link resolveProjectIdForPath}: find a bound folder path for a
+ * projectId. Genesis backfill uses this to recover a store's rootPath/title
+ * when the `project.created` event is missing. Returns the first bound path.
+ */
+export async function getPathForProject(
+  projectId: string,
+): Promise<string | undefined> {
+  const bindings = await readBindings();
+  for (const [boundPath, id] of Object.entries(bindings.byPath)) {
+    if (id === projectId) return boundPath;
+  }
+  return undefined;
+}
+
 export interface BindingMatch {
   projectId: string;
   matchedPath: string;

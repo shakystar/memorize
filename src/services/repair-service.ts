@@ -459,6 +459,25 @@ function checkProjectionBuilt(projectId: string): DoctorCheck {
     .prepare('SELECT 1 FROM projects WHERE id = ?')
     .get(projectId);
   if (eventCount > 0 && !projectRow) {
+    const genesisCount = (
+      db
+        .prepare(
+          "SELECT COUNT(*) AS n FROM events WHERE type = 'project.created'",
+        )
+        .get() as { n: number }
+    ).n;
+    if (genesisCount === 0) {
+      return {
+        id: 'projection.built',
+        label: 'Projection tables built from events',
+        status: 'error',
+        message:
+          'Event log has events but NO project.created genesis (migration / ' +
+          'capture-without-genesis). `projection rebuild` cannot help — it ' +
+          'needs a genesis to reduce from.',
+        fix: 'Backfilled automatically at next SessionStart (ensureProjectGenesis).',
+      };
+    }
     return {
       id: 'projection.built',
       label: 'Projection tables built from events',

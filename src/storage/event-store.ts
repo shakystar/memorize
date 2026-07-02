@@ -45,6 +45,20 @@ export async function ensureProjectDirectories(projectId: string): Promise<void>
   );
 }
 
+/**
+ * Earliest `created_at` in the log, or undefined if the log is empty. Genesis
+ * backfill uses this to date a reconstructed `project.created` at the store's
+ * true start (its first captured event) rather than at repair time.
+ */
+export function getEarliestEventCreatedAt(
+  projectId: string,
+): string | undefined {
+  const row = getDb(projectId)
+    .prepare('SELECT MIN(created_at) AS t FROM events')
+    .get() as { t: string | null } | undefined;
+  return row?.t ?? undefined;
+}
+
 /** Map a DomainEvent onto the `events` table columns. payload is JSON text. */
 function insertEvent(db: Database.Database, event: DomainEvent): void {
   db.prepare(
