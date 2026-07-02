@@ -10,9 +10,11 @@
 
 **English** | [한국어](./docs/i18n/README.ko.md)
 
-> One persistent project brain shared between you, Claude Code, and Codex. No server, no API key, fully local, and modeled on how human memory actually works.
+> One persistent project brain shared by you, Claude Code, Codex, and your machines.
 
-Your agent forgets everything when the session ends. What it was doing, what it decided and why, where it stopped. You explain all of it again next session. Memorize watches the agent work, distills what mattered into long-term memory, and feeds the right memories back when the next session opens. It does this for every agent on the project, across machines, with no server.
+Your agent loses the session context when the session ends. It forgets what it was doing, what it decided, why it decided it, and where it stopped. Memorize records the useful work signals, distills them into long-term memory, and injects the right context when the next session starts.
+
+Memorize is local-first. Project and personal memory live on your machine and work offline. When you want more than one machine or more than one person, an optional Hub provides sync, workspace identity, invites, and membership. Local startup never waits on the network.
 
 ## 30-second install
 
@@ -20,7 +22,7 @@ Memorize is built to be installed by your AI assistant, per project. Send your C
 
 > Follow this guide to set up memorize in this project: https://github.com/shakystar/memorize/blob/main/guides/AI_SETUP.md
 
-The assistant adds the package, binds the directory, installs the correct hook, asks whether to absorb your existing context (its own session memory, your decision docs) into memorize, then verifies the install. After that you use `claude` or `codex` exactly as before, and context arrives automatically when a session opens.
+The assistant adds the package, binds the directory, installs the correct hook, asks whether to absorb existing project context, and verifies the install. After that you use `claude` or `codex` as usual. Context arrives automatically when a session opens.
 
 Check any time:
 
@@ -28,17 +30,14 @@ Check any time:
 npx @shakystar/memorize doctor
 ```
 
-(Always use the scoped name with npx. The unscoped `memorize` on npm is an unrelated package.)
-
-If you would rather put `memorize` on your PATH by hand, [AI_SETUP.md](./guides/AI_SETUP.md) has the manual route. Node.js 22 or newer is required.
+Always use the scoped name with npx. The unscoped `memorize` on npm is an unrelated package. If you would rather put `memorize` on your PATH by hand, [AI_SETUP.md](./guides/AI_SETUP.md) has the manual route. Node.js 22 or newer is required.
 
 ## What your agent sees at session start
 
 ```text
 # Memorize context
 
-Ground rule: memorize is the single source of truth for project state …
-
+Ground rule: memorize is the single source of truth for project state.
 Project: Realtime whiteboard MVP
 Task: Fix cursor jitter on remote drag
 Latest handoff: from codex. "Repro narrowed to the throttle in
@@ -49,23 +48,23 @@ Consolidated memories:
 - [rationale/s7] Cursor positions are sent unthrottled on purpose; the
   jitter came from double-throttling, not bandwidth
 - [progress/s5] LAN sync verified; jitter reproduces only above 80ms RTT
-Recent work signals (prior session tail):
+Recent work signals:
 - [write-tool/Edit] src/hooks/useRemoteCursor.ts
 - [decision-keyword/Bash] git commit -m "remove inner throttle"
 ```
 
-No re-explaining. The next agent, any agent on any machine, picks up exactly here.
+No re-explaining. The next agent can resume from the recorded project state.
 
 ## Evidence from real usage
 
 These numbers come from three days of unsupervised, hands-off dogfooding.
 
 - **654 of 667 captured observations became memories**, a 98% conversion rate.
-- **117 memories were injected 407 times across sessions.** The most-used ones (commit hashes, field names) showed up 19 to 21 times each, exactly the things an engineer would track by hand.
-- **29 stale facts were replaced automatically by newer ones.** Nothing is write-and-forget; memory stays curated over its lifetime.
+- **117 memories were injected 407 times across sessions.** The most-used ones, like commit hashes and field names, showed up 19 to 21 times each.
+- **29 stale facts were replaced by newer ones.** Memory is curated over its lifetime.
 - **The overhead is roughly 0.25% of coding tokens**, and up to 1.8% at a conservative ceiling.
-- **Capture, consolidation, replacement, and injection all run with no human in the loop.**
-- **When parallel sessions touch the same file, a warning fires on the spot.**
+- **Capture, consolidation, replacement, and injection all run without human intervention.**
+- **When parallel sessions touch the same file, a warning fires during the work.**
 
 ### Retrieval benchmark
 
@@ -76,28 +75,37 @@ Beyond live usage, we score retrieval on [LongMemEval-S](https://github.com/xiao
 | lexical (BM25) | 0.966 | 0.986 | 0.994 | 0.896 | 0.911 |
 | hybrid (BM25 + bge-m3) | 0.978 | 0.994 | 1.000 | 0.925 | 0.932 |
 
-Lexical search alone puts the right session in the top five for 96.6% of questions. Semantic search adds the most where the question and the session use different words, like preferences and paraphrased facts, and it ranks the right session higher. These are retrieval-recall scores, not answer accuracy, and they test the search layer rather than the consolidation that sits above it. Reproduce with `pnpm benchmark:retrieval bm25`.
+Lexical search alone puts the right session in the top five for 96.6% of questions. Semantic search helps most when the question and the session use different words, such as preferences and paraphrased facts. These are retrieval-recall scores, not answer accuracy, and they test the search layer rather than the consolidation layer. Reproduce with `pnpm benchmark:retrieval bm25`.
 
 ## Why
 
-- **When a Claude session ends, the context dies with it.** Next session you re-explain what you were doing, what you decided, and where you stopped.
-- **Switching from Claude to Codex means starting over.** Each agent keeps its own memory, and none of them see the others' notes.
-- **Two machines means half a brain in each.** The context piled up on your desktop does not follow you to the laptop.
+- **When a Claude session ends, the context dies with it.** Next session you re-explain the work, decisions, and stopping point.
+- **Switching from Claude to Codex means starting over.** Each agent keeps its own memory unless the project has a shared project brain.
+- **Two machines split the project brain.** Desktop context does not automatically follow the laptop.
 
 ## How it works
 
-1. **Capture.** While the agent works, hooks record only cheap, rule-filtered observations (file writes, decisions, task transitions). No LLM, no latency.
-2. **Consolidate.** At session boundaries a detached background process distills the observations and the conversation itself into long-term memory (decisions, rationale, progress) and scores each by salience. The extractor runs through the `claude` or `codex` login you already have, so no API key is needed. An OpenAI-compatible endpoint or a rule-based fallback works too.
-3. **Retrieve.** When the next session opens, memories compete for a context budget. The ranking is salience times recency (a 14-day half-life, reinforced on reuse) times relevance to the current task. Forgetting happens only at retrieval time; nothing is ever deleted.
-4. **Share.** Parallel sessions see each other's work live, including file-collision warnings. The same event log syncs across machines and converges deterministically. When memories contradict each other, the conflict is detected and resolved: the newer one wins, and the older stays reconstructable.
+1. **Capture.** While the agent works, hooks record cheap, rule-filtered observations: file writes, decisions, commands, and task transitions. No LLM runs in this path.
+2. **Consolidate.** At session boundaries, a detached background process distills observations and conversation text into long-term memories: decisions, rationale, and progress. The extractor can use the `claude` or `codex` login you already have, an OpenAI-compatible endpoint, or a rule-based fallback.
+3. **Retrieve.** When the next session opens, memories compete for a context budget. Ranking combines salience, recency, reuse, and relevance to the current task. Forgetting happens at retrieval time; the event log remains append-only.
+4. **Share.** Parallel sessions share live work signals and file-collision warnings. Optional Hub sync lets machines and workspace members exchange event logs. Workspace memories from other members appear in a separate shared context channel.
+5. **Separate.** Project memory, personal memory, and shared workspace memory are separate channels. Personal memory follows the same account across projects and can sync only through the account's personal Hub store. It is not mixed into a project workspace.
 
-The deeper story lives in [ARCHITECTURE.md](./docs/ARCHITECTURE.md): the two-layer CLS memory design, watermark-idempotent consolidation, retrieval-time forgetting, and the lifecycle-evidence program that evolves the schema using dogfooding data.
+The deeper story lives in [ARCHITECTURE.md](./docs/ARCHITECTURE.md): the two-layer CLS memory design, watermark-idempotent consolidation, retrieval-time forgetting, account-scoped storage, and Hub workspace sync.
 
-## Every agent, every machine
+## Local-first, optional Hub
 
-Memorize is not tied to one agent. Claude Code and Codex share the same project brain, and your desktop and laptop read the same event log. There is no server, no central API, and no vendor lock-in. Everything is local-first and event-sourced.
+Memorize is not tied to one agent. Claude Code and Codex can read the same project memory, and multiple sessions in the same checkout can see each other's work. The local store works without a server.
 
-> **Support tiers.** Claude Code is the first-class, fully maintained target. The other harness integrations (Codex, opencode, Gemini CLI, pi, Hermes, Cursor) are **frozen**: kept in the tree and still installable, but no longer covered by conformance CI and not guaranteed to keep pace with upstream changes — community-maintained, fixes welcome via PR. Any MCP-capable host can also use the generic [`memorize mcp`](./AGENT_GUIDE.md) server.
+The Hub is used when there is a remote coordination job:
+
+- sync a project across machines
+- create a workspace
+- invite or remove members
+- route a shared workspace store by its server-minted `wsp_` id
+- route a personal memory store by its server-minted `psm_` id
+
+> **Support tiers.** Claude Code is the first-class, fully maintained target. The other harness integrations, including Codex, opencode, Gemini CLI, pi, Hermes, and Cursor, are frozen: kept in the tree and still installable, but no longer covered by conformance CI and not guaranteed to keep pace with upstream changes. Fixes are welcome via PR. Any MCP-capable host can also use the generic [`memorize mcp`](./AGENT_GUIDE.md) server.
 
 ## Day-to-day commands
 
@@ -114,30 +122,26 @@ memorize project show      # print the bound project summary (JSON)
 
 Every other command lives in [AGENT_GUIDE.md](./AGENT_GUIDE.md), which your AI reads when it needs the detail.
 
-## Limits and roadmap
+## Current scope
 
-Here is the honest state of what is verified so far. Every item is on the near-term roadmap.
+Memorize has these current surfaces:
 
-- **Confirmed at three-day scale.** Performance at months and hundreds of memories is not proven yet.
-- **Embedding-based search is validated on the benchmark above, not yet in long-run production use.**
-- **Decision capture leans toward file writes and commands** (99.8% of signals). Catching explicit decision keywords is in progress.
-
-Embedding search and decision capture are the next things we are building.
-
-## For AI assistants
-
-If you are an AI coding assistant and the user asked you to set memorize up, follow [guides/AI_SETUP.md](./guides/AI_SETUP.md). It has the idempotent setup steps, the absorption flow for pre-existing context, and the ground rule (memorize is the single source of truth, and you do not duplicate its state in your own memory). Full command behavior is in [AGENT_GUIDE.md](./AGENT_GUIDE.md).
+- Project memory: per-project event log, consolidation, search, startup injection, task state, handoffs, decisions, and conflict records.
+- Personal memory: account-scoped memory for preferences and working-style facts, stored outside any project and surfaced in its own startup channel.
+- Workspace memory: optional Hub-backed shared project memory, routed by `wsp_`, with membership and role data in the Hub control plane.
+- Sync: canonical remote sync through the Hub. The file transport remains available for existing users but is deprecated and frozen.
+- Storage: account-scoped stores under `MEMORIZE_ROOT`, with SQLite as the project event log and derived projection store.
 
 ## Status
 
-Memorize is on the `2.x` line (AGPL-3.0-or-later since 2.0.0). The compatibility promise covers the on-disk event-log layout, the day-to-day CLI above, and the hook contracts written at install time. Within a major line those will not break. The event log is versioned and projections are regenerable, so upgrades within a major version need no manual data migration.
+The 3.0 line is the local-first plus optional Hub line. Local stores remain authoritative for startup context. Hub state is used for remote routing, credentials, workspace membership, and same-account personal sync. The event log is append-only, migrations are versioned, and derived projections can be rebuilt from the log.
 
 ## Community
 
-Issues and discussions are open to everyone. Bug reports, design debates, and "how do I…" questions are all welcome.
+Issues and discussions are open to everyone. Bug reports, design debates, and usage questions are welcome.
 
 - File bugs and concrete feature requests in [Issues](https://github.com/shakystar/memorize/issues).
-- Take design directions and open-ended ideas to [Discussions](https://github.com/shakystar/memorize/discussions) (the memory-taxonomy debates live there).
+- Take design directions and open-ended ideas to [Discussions](https://github.com/shakystar/memorize/discussions).
 
 See [CONTRIBUTING.md](./.github/CONTRIBUTING.md) for the developer workflow.
 

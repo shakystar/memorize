@@ -44,13 +44,19 @@ outputs as a cache that must be re-validated, not as authoritative.
 ## Mental model
 
 1. **Event log** is the source of truth. Every task, handoff,
-   checkpoint, rule, decision, and conflict is an append-only event
-   under `.memorize/<project-id>/events/YYYY-MM-DD.ndjson`.
-2. **Projection** is a derived cache rebuilt from the event log.
-   Safe to delete; `memorize projection rebuild` regenerates it.
-3. **Startup payload** is a small bundle built from the projection
-   and rendered per-agent (`claude` vs `codex` formats differ).
-4. **Install hooks** wire your agent runtime:
+   checkpoint, rule, decision, observation, memory, and retraction is
+   an append-only event in the account-scoped SQLite store.
+2. **Projection** is derived state rebuilt from the event log. Safe
+   rebuild commands are `memorize projection rebuild` and
+   `memorize memory-index rebuild`.
+3. **Startup payload** is a local bundle built from projections. It can
+   include three separate channels: project memory, account-personal
+   memory, and workspace-shared memory.
+4. **Scope is decisive.** Project state belongs in project memory. User
+   preferences and working-style facts belong in personal memory.
+   Workspace membership, role, invite state, and `wsp_` identity are
+   Hub control-plane facts, not domain events.
+5. **Install hooks** wire your agent runtime:
    - Claude Code: `.claude/settings.local.json` (per-project) registers
      `SessionStart`, `PostToolUse` (capture), `PostCompact`, `SessionEnd`.
    - Codex: `~/.codex/hooks.json` (global per-user; the handler no-ops
@@ -62,7 +68,7 @@ outputs as a cache that must be re-validated, not as authoritative.
    SessionStart` and the output is injected as
    `hookSpecificOutput.additionalContext`.
 
-5. **Session lifecycle** is owned by memorize, not by per-turn hooks.
+6. **Session lifecycle** is owned by memorize, not by per-turn hooks.
    - `SessionStart` mints a new session, claims a task (best-effort),
      and reaps any prior abandoned pointers in the same cwd.
    - Heartbeat events fire from every memorize CLI call; they keep
@@ -74,7 +80,7 @@ outputs as a cache that must be re-validated, not as authoritative.
      30 min by default; tunable via `MEMORIZE_STALE_SESSION_MS`) and
      emits `session.abandoned`. Run `memorize session reap` to force a
      sweep at any time.
-6. **Handoffs are agent-initiated.** The `Stop` hook used to auto-write
+7. **Handoffs are agent-initiated.** The `Stop` hook used to auto-write
    a handoff at every assistant turn, which conflated "turn end" with
    "session end." Now agents call `memorize handoff create ...` only
    when they actually want to hand off control or summarize their work
@@ -91,23 +97,22 @@ You interact with memorize through the CLI; never hand-edit
 ```
 <MEMORIZE_ROOT>/
 ├── profile/
-│   └── bindings.json                # path → projectId (walk-up resolved)
-└── projects/
-    └── <projectId>/
-        ├── project.json             # projection (rebuilt from events)
-        ├── memory-index.json        # derived summary index
-        ├── events/
-        │   └── YYYY-MM-DD.ndjson    # append-only, integrity-checked
-        ├── tasks/<taskId>.json
-        ├── workstreams/<wsId>.json
-        ├── handoffs/<handoffId>.json
-        ├── checkpoints/<id>.json
-        ├── decisions/<id>.json
-        ├── rules/<id>.json
-        ├── conflicts/<id>.json
-        ├── topics/<topicId>.md
-        └── sync/
-            └── remote.json          # sync state
+│   └── bindings.json                # path → projectId hints
+├── credentials                      # host-scoped Hub credentials
+└── accounts/
+    └── <accountId>/
+        ├── projects/
+        │   └── <projectId>/
+        │       ├── memorize.db      # events + projections + FTS + embeddings + meta
+        │       ├── sync/
+        │       │   └── remote.json  # Hub binding, watermarks, workspace role cache
+        │       └── topics/
+        │           └── <topicId>.md # imported rules as readable topics
+        └── personal/
+            ├── memorize.db          # account personal memory store
+            ├── sync/
+            │   └── remote.json      # psm_ binding when personal sync is enabled
+            └── topics/
 ```
 
 Defaults: `MEMORIZE_ROOT` env overrides the location; if unset,
@@ -118,6 +123,9 @@ In the user's project directory, a small `.memorize/` may also appear
 for per-project runtime state (current session, bootstrap files). The
 `.memorize/` directory should be listed in the project's `.gitignore`;
 `memorize doctor` warns if it is not.
+
+Do not hand-edit files under `MEMORIZE_ROOT`. Use the CLI. The event
+log is inside `memorize.db`, not in per-day ndjson files.
 
 ---
 
@@ -424,44 +432,43 @@ them.
   no still-valid memories is a no-op (`reverted: []`). The tombstones
   `autoPush` so synced peers converge on the revert.
 
-### `memorize personal import --source <label>` (+ `personal list`, `personal show`)
+### `memorize personal import --source <label>` (+ `personal list`, `personal show`, `personal sync`)
 
-Path A: the **global / personal** memory pipeline — a host-level,
-account-scoped store for memory that follows the user **across
-projects** (personal preferences, working-style facts), kept
-deliberately separate from shared project memory. It is NOT a project
-and NOT a `scopeType` value: it has its own event log + projection +
-consolidation under a reserved id, living in `~/.memorize/personal/`
-(a sibling of `projects/`, so it never appears in project listings).
+Personal memory is an account-scoped store for facts about the user:
+preferences, durable working-style rules, and cross-project habits. It
+is NOT a project and NOT a `scopeType` value.
 
-- **Primary path — automatic.** At each consolidation boundary the
-  extractor classifies every memory as personal vs project and routes
-  the personal ones here, applying the SAME short-term→long-term CLS
-  logic memorize already uses for project memory. This is how
-  cross-project personal context (which used to live only in your
-  harness's own memory) gets captured and managed by memorize. The
-  classifier is also the leak fix: personal items are diverted OUT of
-  the project store, not left in it (the #181 class of bug).
-- **Secondary path — explicit import.** `personal import` lets you push
-  in pre-existing external notes (your harness memory, a notes folder)
-  on purpose, distilled to the same JSON shape.
-- **It never leaves the host.** The personal store is hard-excluded from
-  sync/teams: every sync entry point refuses the reserved id, so
-  personal memory is structurally private.
-- `personal import --source <label>` reads the SAME extractor-shaped
-  JSON array on stdin as `memory import`
-  (`[{"kind":"decision"|"rationale"|"progress","text":string,"salience":1-10,...}]`),
-  is idempotent (dedup by kind + normalized text), and reports
-  `{imported, skippedDuplicates}`. Unlike `memory import` it needs no
-  bound project — the store is global.
-- `personal list [--json] [--limit <N>]` and
-  `personal show <memoryId> [--json]` read the personal store with the
-  same shapes as their `memory` counterparts.
-- **Startup injection.** At SessionStart the top personal memories (a
-  small, salience-ranked fixed slot) are surfaced in their OWN context
-  channel (`memorize.personal`), alongside but never mixed into the
-  project memory pool — so the personal/project boundary is visible in
-  context, not just in storage.
+Use these rules:
+
+- Project decisions, progress, constraints, and handoffs → project memory.
+- User preferences and working-style facts → personal memory.
+- `memorize.personal` startup content stays personal. Do not copy it
+  into project tasks, handoffs, or summaries.
+- Personal sync is same-account only. It uses the account's
+  server-minted `psm_` Hub store. It must never cross accounts and must
+  never merge into a workspace `wsp_` store.
+
+Primary path: at each consolidation boundary, the extractor classifies
+memories as project vs personal. Personal items route to the personal
+store and stay out of the project store.
+
+Explicit import: `personal import --source <label>` reads the same JSON
+array shape as `memory import`
+(`[{"kind":"decision"|"rationale"|"progress","text":string,"salience":1-10,...}]`),
+is idempotent by kind + normalized text, and reports
+`{imported, skippedDuplicates}`. It needs no bound project.
+
+Read commands:
+
+- `personal list [--json] [--limit <N>]`
+- `personal show <memoryId> [--json]`
+
+Sync command:
+
+- `personal sync --remote-url <hub-url>`
+
+Startup injection: top personal memories surface in their own
+`memorize.personal` channel.
 
 ### `memorize workspace create --remote-url <hub-url> [--name <name>]` (+ `memorize workspace status`, `memorize workspace invite`, `memorize workspace join`, `memorize workspace members`, `memorize workspace promote|demote|remove`)
 
@@ -1249,7 +1256,11 @@ handled automatically after writes.
 
 ## Event types (for code that reads the log)
 
-Types used in `.memorize/<pid>/events/*.ndjson`:
+The event log is stored in `memorize.db` under the active account store.
+Do not look for `.memorize/<pid>/events/*.ndjson`; that layout is no
+longer current.
+
+Common domain event types:
 
 - `project.created`, `project.updated`
 - `workstream.created`
@@ -1259,9 +1270,13 @@ Types used in `.memorize/<pid>/events/*.ndjson`:
 - `decision.proposed`, `decision.accepted`
 - `rule.upserted`
 - `conflict.detected`, `conflict.resolved`
+- `observation.captured`
+- `memory.consolidated`, `memory.superseded`, `memory.retracted`
 
 Each event wraps its payload under a `payload` field and includes
 `id`, `projectId`, `scopeType`, `scopeId`, `actor`, and `createdAt`.
+Workspace union events can also carry `writer` and `sourceProjectId`
+so projections keep each member's provenance separate.
 
 ---
 

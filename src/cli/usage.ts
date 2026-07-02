@@ -34,7 +34,7 @@ export function renderScaffoldUsage(): string {
     'Setup (usually run by the AI assistant):',
     '  memorize init                One-shot: bind cwd + import context + detect & wire agent(s)',
     '  memorize memory import ...   Ingest agent-distilled memories (stdin JSON)',
-    '  memorize personal import ... Ingest personal (cross-project, never-synced) memories',
+    '  memorize personal import ... Ingest account personal memories (same-account sync only)',
     '',
     'Joining a shared project (paste the URL from the Hub page):',
     '  memorize login <hub-url>     Authenticate this host to a Hub (once per host)',
