@@ -19,6 +19,7 @@ import {
   requireBoundProjectId,
   supersedeDecision,
 } from '../../services/project-service.js';
+import { resolveTransport } from '../../services/auto-sync-service.js';
 import { inspectProject } from '../../services/repair-service.js';
 import { computeRepoIdentity } from '../../services/repo-identity.js';
 import { setupProject } from '../../services/setup-service.js';
@@ -426,11 +427,28 @@ export async function runProjectCommand(
     }
 
     if (flags.boolean.push || flags.boolean.pull) {
-      const { transport, config } = await resolveTransportFlags(flags.single);
-      // Persist the transport location so background auto-sync (P3-b) can run
-      // at boundaries without a flag — this manual push/pull is how the origin
-      // machine opts in.
-      await updateSyncState(projectId, { syncTransport: config });
+      let transport: SyncTransport;
+      if (flags.single['remote-path'] || flags.single['remote-url']) {
+        const resolved = await resolveTransportFlags(flags.single);
+        transport = resolved.transport;
+        // Persist the transport location so background auto-sync (P3-b) can run
+        // at boundaries without a flag — this manual push/pull is how the origin
+        // machine opts in.
+        await updateSyncState(projectId, { syncTransport: resolved.config });
+      } else {
+        // Flag-less manual sync (W-b): fall back to the persisted transport —
+        // present after a prior flagged sync or a workspace bind (which stores
+        // the Hub URL). Same resolver auto-sync uses, incl. the token ladder.
+        const state = await readSyncState(projectId);
+        const persisted = state ? await resolveTransport(state) : undefined;
+        if (!persisted) {
+          throw new Error(
+            '--remote-path or --remote-url is required (no transport is ' +
+              'persisted for this project yet).',
+          );
+        }
+        transport = persisted;
+      }
       if (flags.boolean.push) {
         const response = await pushProject(projectId, transport);
         console.log(
