@@ -23,7 +23,10 @@ import { resolveTransport } from '../../services/auto-sync-service.js';
 import { inspectProject } from '../../services/repair-service.js';
 import { computeRepoIdentity } from '../../services/repo-identity.js';
 import { setupProject } from '../../services/setup-service.js';
-import { tryRefreshWorkspaceBinding } from '../../services/workspace-service.js';
+import {
+  tryReconcileWorkspaceBinding,
+  tryRefreshWorkspaceBinding,
+} from '../../services/workspace-service.js';
 import {
   cloneProject,
   getQueueSnapshot,
@@ -76,6 +79,15 @@ async function resolveTransportFlags(flags: {
     if (flags.token) {
       throw new Error('--token is only valid with --remote-url.');
     }
+    // SoT-031: the file transport is frozen legacy — it keeps working (no
+    // server exists to mint store ids for a shared folder), but the canonical
+    // remote sync path is the Hub.
+    process.stderr.write(
+      'WARN: --remote-path (file transport) is deprecated (SoT-031). It keeps ' +
+        'working but is frozen and will be removed in a later release; use Hub ' +
+        'sync instead (`memorize auth login --remote-url <hub>`, then ' +
+        '`memorize workspace create`).\n',
+    );
     return {
       transport: createFileSyncTransport(remotePath),
       config: { type: 'file', location: remotePath },
@@ -449,6 +461,13 @@ export async function runProjectCommand(
           );
         }
         transport = persisted;
+      }
+      // W-b full reconcile (SoT-031): converge a legacy Hub binding (proj_
+      // self-bind, or wsp_ without its role cache) onto the canonical wsp_
+      // BEFORE syncing. Best-effort; file transports are untouched.
+      const preSyncState = await readSyncState(projectId);
+      if (preSyncState?.syncTransport?.type === 'http') {
+        await tryReconcileWorkspaceBinding(projectId);
       }
       if (flags.boolean.push) {
         const response = await pushProject(projectId, transport);
