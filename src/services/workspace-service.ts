@@ -1,5 +1,8 @@
 import {
   createWorkspace,
+  joinWorkspaceRemote,
+  mintWorkspaceInvite,
+  type WorkspaceInvite,
   type WorkspaceRole,
 } from '../adapters/sync-transport-http.js';
 import { CURRENT_SCHEMA_VERSION, nowIso } from '../domain/common.js';
@@ -73,7 +76,7 @@ export async function bindWorkspace(
     ...(params.name ? { name: params.name } : {}),
     ...(params.fetchImpl ? { fetchImpl: params.fetchImpl } : {}),
   });
-  await writeWorkspaceBinding(projectId, workspace);
+  await writeWorkspaceBinding(projectId, params.remoteUrl, workspace);
   return {
     workspaceId: workspace.workspaceId,
     role: workspace.role,
@@ -83,13 +86,108 @@ export async function bindWorkspace(
 }
 
 /**
+ * Owner mints an invite for the bound workspace (W-d). The Hub flips the store
+ * to `inviteReachable:true` on the first successful mint (private project ->
+ * shared workspace); the local control-plane cache is mirrored immediately so
+ * `workspace status` reflects it without a round-trip. The invite `token` is
+ * shown ONCE — the Hub never re-serves it.
+ */
+export async function inviteToWorkspace(
+  projectId: string,
+  params: {
+    remoteUrl?: string;
+    maxUses?: number;
+    expiresAt?: string;
+    fetchImpl?: typeof fetch;
+  } = {},
+): Promise<WorkspaceInvite> {
+  const syncFile = getSyncFile(projectId);
+  const state = await readJson<ProjectSyncState>(syncFile);
+  if (!state?.remoteProjectId || !state.workspaceRole) {
+    throw new Error(
+      'Project is not workspace-bound. Run `memorize workspace create` first.',
+    );
+  }
+  // The bind persisted the Hub URL as the http transport; an explicit flag wins.
+  const remoteUrl =
+    params.remoteUrl ??
+    (state.syncTransport?.type === 'http' ? state.syncTransport.url : undefined);
+  if (!remoteUrl) {
+    throw new Error('No Hub URL known for this workspace. Pass --remote-url.');
+  }
+  const token = await readToken(remoteUrl);
+  if (!token) {
+    throw new Error(
+      `No stored credential for ${remoteUrl}. Run ` +
+        `\`memorize auth login --remote-url ${remoteUrl}\` first.`,
+    );
+  }
+  const invite = await mintWorkspaceInvite(remoteUrl, token, state.remoteProjectId, {
+    ...(params.maxUses !== undefined ? { maxUses: params.maxUses } : {}),
+    ...(params.expiresAt ? { expiresAt: params.expiresAt } : {}),
+    ...(params.fetchImpl ? { fetchImpl: params.fetchImpl } : {}),
+  });
+  if (!state.inviteReachable) {
+    await writeJson(syncFile, {
+      ...state,
+      inviteReachable: true,
+      updatedAt: nowIso(),
+    });
+  }
+  return invite;
+}
+
+/**
+ * Redeem an invite and bind THIS project to the joined workspace (W-d) — the
+ * member-side counterpart of `bindWorkspace`. Refuses a project that is already
+ * workspace-bound (re-pointing an existing binding at a different `wsp_` would
+ * silently split its history; unbind is a deliberate separate act). The joined
+ * store is `inviteReachable` by definition — an invite existed to join through.
+ */
+export async function joinAndBindWorkspace(
+  projectId: string,
+  params: { remoteUrl: string; inviteToken: string; fetchImpl?: typeof fetch },
+): Promise<WorkspaceBinding> {
+  const already = await getWorkspaceBinding(projectId);
+  if (already) {
+    throw new Error(
+      `Project is already bound to workspace ${already.workspaceId}. ` +
+        'Joining a different workspace from the same project is not supported.',
+    );
+  }
+  const token = await readToken(params.remoteUrl);
+  if (!token) {
+    throw new Error(
+      `No stored credential for ${params.remoteUrl}. Run ` +
+        `\`memorize auth login --remote-url ${params.remoteUrl}\` first.`,
+    );
+  }
+  const joined = await joinWorkspaceRemote(
+    params.remoteUrl,
+    token,
+    params.inviteToken,
+    params.fetchImpl ? { fetchImpl: params.fetchImpl } : {},
+  );
+  const binding = {
+    workspaceId: joined.workspaceId,
+    role: joined.role,
+    inviteReachable: true,
+  };
+  await writeWorkspaceBinding(projectId, params.remoteUrl, binding);
+  return binding;
+}
+
+/**
  * Persist the `wsp_` binding into the project's sync state. `remoteProjectId`
  * carries the opaque `wsp_` (never validated against the client ID_PATTERN);
- * `workspaceRole` + `inviteReachable` are the control-plane cache. Does NOT set a
- * `syncTransport` — the actual union sync (and thus auto-sync eligibility) is W-b.
+ * `workspaceRole` + `inviteReachable` are the control-plane cache. Also persists
+ * the http `syncTransport` (W-b): the bind already knows the Hub URL, so a bound
+ * workspace is immediately flag-less-syncable and auto-sync eligible — the union
+ * data-plane is the EXISTING events route keyed by the `wsp_` remoteProjectId.
  */
 async function writeWorkspaceBinding(
   projectId: string,
+  remoteUrl: string,
   workspace: { workspaceId: string; role: WorkspaceRole; inviteReachable: boolean },
 ): Promise<void> {
   const syncFile = getSyncFile(projectId);
@@ -100,6 +198,7 @@ async function writeWorkspaceBinding(
     workspaceRole: workspace.role,
     inviteReachable: workspace.inviteReachable,
     syncEnabled: true,
+    syncTransport: { type: 'http' as const, url: remoteUrl },
     updatedAt: now,
   };
   if (!existing) {

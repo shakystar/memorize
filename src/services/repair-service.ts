@@ -477,31 +477,37 @@ function checkProjectionBuilt(projectId: string): DoctorCheck {
 }
 
 /**
- * True-replica invariant (#30): one store holds exactly ONE project identity.
- * More than one distinct `project.created` id means a cross-machine bind
- * clobbered identity (the pre-clone-on-bind bug) — `reduceProjectState` now
- * throws on this, and `getProjectProjection` would otherwise have returned an
- * empty/wrong row. Uses a raw SQL COUNT(DISTINCT …) rather than
- * `reduceProjectState` so doctor still runs on an already-diverged store (the
- * reducer would throw before we could report).
+ * One-SELF-identity invariant (#30, union-aware — SoT-021/022): one store holds
+ * exactly ONE project identity IN ITS OWN LANE. More than one distinct SELF-lane
+ * `project.created` id means a cross-machine bind clobbered identity (the
+ * pre-clone-on-bind bug) — `reduceProjectState` throws on this. FOREIGN-lane
+ * genesis events (`source_project_id` = another store) are legitimate: a
+ * workspace union carries every member's `project.created` as a provenance
+ * label (W-b pull), so they are excluded from the count instead of
+ * false-alarming after a union pull. Self lane = provenance NULL (legacy) or
+ * equal to this store's id, mirroring the projector's `laneOf`. Uses raw SQL
+ * rather than `reduceProjectState` so doctor still runs on an already-diverged
+ * store (the reducer would throw before we could report).
  */
 function checkProjectIdentity(projectId: string): DoctorCheck {
   const distinct = (
     getDb(projectId)
       .prepare(
         "SELECT COUNT(DISTINCT json_extract(payload, '$.id')) AS n " +
-          "FROM events WHERE type = 'project.created'",
+          "FROM events WHERE type = 'project.created' " +
+          'AND (source_project_id IS NULL OR source_project_id = ?)',
       )
-      .get() as { n: number }
+      .get(projectId) as { n: number }
   ).n;
   if (distinct > 1) {
     return {
       id: 'project.identity',
-      label: 'Single project identity in event log',
+      label: 'Single self project identity in event log',
       status: 'error',
       message:
-        `Event log holds ${distinct} distinct project.created ids (#30 ` +
-        'cross-machine clobber). Re-clone into a fresh directory ' +
+        `Event log holds ${distinct} distinct SELF-lane project.created ids ` +
+        '(#30 cross-machine clobber; foreign union genesis is excluded). ' +
+        'Re-clone into a fresh directory ' +
         '(`memorize project clone <id> --remote-path <path>`); in-place repair ' +
         'of a diverged log is unsupported.',
       fix: 'memorize project clone <remoteProjectId> --remote-path <path> (fresh dir)',
@@ -509,9 +515,9 @@ function checkProjectIdentity(projectId: string): DoctorCheck {
   }
   return {
     id: 'project.identity',
-    label: 'Single project identity in event log',
+    label: 'Single self project identity in event log',
     status: 'ok',
-    message: 'Event log holds a single project identity',
+    message: 'Event log holds a single self project identity',
   };
 }
 

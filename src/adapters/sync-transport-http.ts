@@ -405,3 +405,79 @@ export async function getWorkspaceRoster(
   if (!response.ok) return throwControlPlaneError(response, 'roster');
   return (await response.json()) as WorkspaceRoster;
 }
+
+export interface WorkspaceInvite {
+  inviteId: string;
+  /** The join capability — shown ONCE at mint, never re-served by the Hub. */
+  token: string;
+  joinUrl: string;
+  role: 'member';
+  maxUses: number | null;
+  expiresAt: string | null;
+}
+
+/**
+ * Owner mints a revocable, multi-use invite (always grants `member`; promotion
+ * is a later role change). The FIRST successful mint flips the store to
+ * `inviteReachable:true` on the Hub — private project -> shared workspace.
+ * `POST /v1/workspaces/:id/invites`.
+ */
+export async function mintWorkspaceInvite(
+  baseUrl: string,
+  token: string,
+  workspaceId: string,
+  options: {
+    maxUses?: number;
+    expiresAt?: string;
+    fetchImpl?: typeof fetch;
+  } = {},
+): Promise<WorkspaceInvite> {
+  const doFetch = options.fetchImpl ?? fetch;
+  const base = baseUrl.replace(/\/+$/, '');
+  const response = await doFetch(
+    `${base}/v1/workspaces/${encodeURIComponent(workspaceId)}/invites`,
+    {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify({
+        ...(options.maxUses !== undefined ? { maxUses: options.maxUses } : {}),
+        ...(options.expiresAt ? { expiresAt: options.expiresAt } : {}),
+      }),
+    },
+  );
+  if (!response.ok) return throwControlPlaneError(response, 'invite');
+  return (await response.json()) as WorkspaceInvite;
+}
+
+/**
+ * Redeem an invite token for the calling account (become a `member`). Idempotent
+ * on the Hub: an already-member join returns the existing membership without
+ * consuming a use. Dead tokens (revoked/expired/exhausted) -> `403`.
+ * `POST /v1/workspaces/join`.
+ */
+export async function joinWorkspaceRemote(
+  baseUrl: string,
+  token: string,
+  inviteToken: string,
+  options: { fetchImpl?: typeof fetch } = {},
+): Promise<{ workspaceId: string; eventsUrl: string; role: WorkspaceRole }> {
+  const doFetch = options.fetchImpl ?? fetch;
+  const base = baseUrl.replace(/\/+$/, '');
+  const response = await doFetch(`${base}/v1/workspaces/join`, {
+    method: 'POST',
+    headers: {
+      'content-type': 'application/json',
+      authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify({ token: inviteToken }),
+  });
+  if (!response.ok) return throwControlPlaneError(response, 'join');
+  return (await response.json()) as {
+    workspaceId: string;
+    eventsUrl: string;
+    role: WorkspaceRole;
+  };
+}

@@ -3,7 +3,9 @@ import { describe, expect, it } from 'vitest';
 import {
   createWorkspace,
   getWorkspaceRoster,
+  joinWorkspaceRemote,
   listWorkspaces,
+  mintWorkspaceInvite,
 } from '../../src/adapters/sync-transport-http.js';
 
 function fakeFetch(response: {
@@ -158,5 +160,72 @@ describe('getWorkspaceRoster (GET /v1/workspaces/:id)', () => {
         fetchImpl: fakeFetch({ ok: false, status: 404, statusText: 'Not Found' }),
       }),
     ).rejects.toThrow(/404/);
+  });
+});
+
+describe('mintWorkspaceInvite (POST /v1/workspaces/:id/invites)', () => {
+  it('POSTs the policy body and returns the one-shot token + joinUrl', async () => {
+    const captured: { url?: string; init?: RequestInit } = {};
+    const invite = await mintWorkspaceInvite('https://hub.test', 'tok', 'wsp_9Abc-Def', {
+      maxUses: 2,
+      expiresAt: '2026-07-09T00:00:00Z',
+      fetchImpl: capturingFetch(captured, {
+        ok: true,
+        status: 201,
+        json: {
+          inviteId: 'inv_1',
+          token: 'join-secret',
+          joinUrl: 'https://hub.test/join?token=join-secret',
+          role: 'member',
+          maxUses: 2,
+          expiresAt: '2026-07-09T00:00:00Z',
+        },
+      }),
+    });
+    expect(captured.url).toBe('https://hub.test/v1/workspaces/wsp_9Abc-Def/invites');
+    expect(captured.init?.method).toBe('POST');
+    expect(JSON.parse(captured.init?.body as string)).toEqual({
+      maxUses: 2,
+      expiresAt: '2026-07-09T00:00:00Z',
+    });
+    expect(invite.token).toBe('join-secret');
+    expect(invite.role).toBe('member');
+  });
+
+  it('throws with the status when a non-owner mints (403)', async () => {
+    await expect(
+      mintWorkspaceInvite('https://hub.test', 'tok', 'wsp_x', {
+        fetchImpl: fakeFetch({ ok: false, status: 403, statusText: 'Forbidden' }),
+      }),
+    ).rejects.toThrow(/403/);
+  });
+});
+
+describe('joinWorkspaceRemote (POST /v1/workspaces/join)', () => {
+  it('redeems the invite token and returns the membership shape', async () => {
+    const captured: { url?: string; init?: RequestInit } = {};
+    const joined = await joinWorkspaceRemote('https://hub.test', 'tok', 'join-secret', {
+      fetchImpl: capturingFetch(captured, {
+        ok: true,
+        status: 200,
+        json: {
+          workspaceId: 'wsp_9Abc-Def',
+          eventsUrl: '/v1/projects/wsp_9Abc-Def/events',
+          role: 'member',
+        },
+      }),
+    });
+    expect(captured.url).toBe('https://hub.test/v1/workspaces/join');
+    expect(JSON.parse(captured.init?.body as string)).toEqual({ token: 'join-secret' });
+    expect(joined.workspaceId).toBe('wsp_9Abc-Def');
+    expect(joined.role).toBe('member');
+  });
+
+  it('throws with the status on a dead token (403)', async () => {
+    await expect(
+      joinWorkspaceRemote('https://hub.test', 'tok', 'stale', {
+        fetchImpl: fakeFetch({ ok: false, status: 403, statusText: 'Forbidden' }),
+      }),
+    ).rejects.toThrow(/403/);
   });
 });

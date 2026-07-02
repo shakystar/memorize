@@ -2,6 +2,8 @@ import { requireBoundProjectId } from '../../services/project-service.js';
 import {
   bindWorkspace,
   getWorkspaceBinding,
+  inviteToWorkspace,
+  joinAndBindWorkspace,
 } from '../../services/workspace-service.js';
 import type { CliContext } from '../context.js';
 import { parseFlags } from '../parse-flags.js';
@@ -9,7 +11,11 @@ import { parseFlags } from '../parse-flags.js';
 const CREATE_USAGE =
   'Usage: memorize workspace create --remote-url <hub-url> [--name <name>]';
 const STATUS_USAGE = 'Usage: memorize workspace status [--json]';
-const USAGE = `${CREATE_USAGE}\n${STATUS_USAGE}`;
+const INVITE_USAGE =
+  'Usage: memorize workspace invite [--remote-url <hub-url>] [--max-uses <N>] [--expires <ISO-8601>]';
+const JOIN_USAGE =
+  'Usage: memorize workspace join --remote-url <hub-url> --token <invite-token>';
+const USAGE = `${CREATE_USAGE}\n${STATUS_USAGE}\n${INVITE_USAGE}\n${JOIN_USAGE}`;
 
 /**
  * `memorize workspace …` — W-a identity slice. Binds the bound project (`proj_`)
@@ -31,7 +37,57 @@ export async function runWorkspaceCommand(
     await runWorkspaceStatus(args.slice(1), ctx);
     return;
   }
+  if (subcommand === 'invite') {
+    await runWorkspaceInvite(args.slice(1), ctx);
+    return;
+  }
+  if (subcommand === 'join') {
+    await runWorkspaceJoin(args.slice(1), ctx);
+    return;
+  }
   throw new Error(USAGE);
+}
+
+async function runWorkspaceInvite(
+  args: string[],
+  ctx: CliContext,
+): Promise<void> {
+  const flags = parseFlags(args, {
+    single: ['remote-url', 'max-uses', 'expires'],
+  });
+  let maxUses: number | undefined;
+  if (flags.single['max-uses'] !== undefined) {
+    maxUses = Number(flags.single['max-uses']);
+    if (!Number.isInteger(maxUses) || maxUses <= 0) {
+      throw new Error('--max-uses must be a positive integer.');
+    }
+  }
+  const projectId = await requireBoundProjectId(ctx.cwd);
+  const invite = await inviteToWorkspace(projectId, {
+    ...(flags.single['remote-url'] ? { remoteUrl: flags.single['remote-url'] } : {}),
+    ...(maxUses !== undefined ? { maxUses } : {}),
+    ...(flags.single.expires ? { expiresAt: flags.single.expires } : {}),
+  });
+  // The token/joinUrl are shown ONCE — the Hub never re-serves them.
+  console.log(JSON.stringify(invite));
+}
+
+async function runWorkspaceJoin(
+  args: string[],
+  ctx: CliContext,
+): Promise<void> {
+  const flags = parseFlags(args, { single: ['remote-url', 'token'] });
+  const remoteUrl = flags.single['remote-url'];
+  const inviteToken = flags.single.token;
+  if (!remoteUrl || !inviteToken) {
+    throw new Error(JOIN_USAGE);
+  }
+  const projectId = await requireBoundProjectId(ctx.cwd);
+  const binding = await joinAndBindWorkspace(projectId, {
+    remoteUrl,
+    inviteToken,
+  });
+  console.log(JSON.stringify(binding));
 }
 
 async function runWorkspaceCreate(
