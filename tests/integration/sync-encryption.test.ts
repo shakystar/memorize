@@ -113,8 +113,8 @@ describe('E2E payload encryption over sync (#182)', () => {
 
     // No ciphertext and no remote events leaked into the local log — their ids
     // are NOT burned, so the keyed retry below is not dropped as a duplicate.
-    // (A local sync.state.updated from the pull's "syncing" flip may exist; what
-    // must NOT exist is any encrypted payload or pulled remote event.)
+    // (pull no longer flips syncStatus for the round trip, so the failed
+    // attempt above appends no sync.state.updated either.)
     const afterFail = await readEvents(projectA.id);
     expect(afterFail.some((e) => isEncryptedEnvelope(e.payload))).toBe(false);
     expect(afterFail.some((e) => e.type === 'task.created')).toBe(false);
