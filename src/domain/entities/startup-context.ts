@@ -49,6 +49,13 @@ export interface StartupContextPayload {
     goal: string;
     createdAt: ISODateString;
   }>;
+  /** SoT-041 inbox read-side guard: count of pending inbound requests beyond
+   *  the 5-oldest cap already applied to `inboundTaskRequests` (oldest = most
+   *  escalated). This bound is independent of any write-side guard — a
+   *  malicious or buggy member project can still sync a flood of
+   *  `task.requested` events, so the read boundary caps how many ever reach a
+   *  renderer. Present only when > 0 so renderers can append "and K more". */
+  inboundTaskRequestsOmitted?: number;
   /** CLS long-term layer: consolidated decisions/rationale/progress picked
    *  by retrieval-time ranking (recency decay + salience + relevance).
    *  Already budget-trimmed by the retrieval service. */

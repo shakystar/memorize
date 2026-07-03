@@ -354,6 +354,53 @@ describe('adapter renderers', () => {
     expect(codex).not.toContain('memorize.budget-notice');
   });
 
+  it('renders the inbound task request inbox for both adapters when present', () => {
+    const payload: StartupContextPayload = {
+      ...samplePayload,
+      inboundTaskRequests: [
+        {
+          id: 'taskreq_abc_1',
+          fromProjectId: 'proj_hub_1',
+          title: 'Ship the roster endpoint',
+          goal: 'unblock slice 2',
+          createdAt: ISO,
+        },
+      ],
+      inboundTaskRequestsOmitted: 3,
+    };
+    const claude = renderClaudeStartupContext(payload);
+    const codex = renderCodexStartupContext(payload);
+
+    expect(claude).toContain('taskreq_abc_1');
+    expect(claude).toContain('proj_hub_1');
+    expect(claude).toContain('Ship the roster endpoint');
+    expect(claude).toContain('unblock slice 2');
+    expect(claude).toContain('memorize task request accept');
+    expect(claude).toContain('decline');
+    expect(claude).toContain('and 3 more');
+    expect(claude).toContain('task request list --inbound');
+    expect(claude).toContain('source="memorize.inbox"');
+
+    expect(codex).toContain('taskreq_abc_1');
+    expect(codex).toContain('proj_hub_1');
+    expect(codex).toContain('Ship the roster endpoint');
+    expect(codex).toContain('unblock slice 2');
+    expect(codex).toContain('memorize task request accept');
+    expect(codex).toContain('decline');
+    expect(codex).toContain('and 3 more');
+    expect(codex).toContain('task request list --inbound');
+    expect(codex).toContain('source="memorize.inbox"');
+  });
+
+  it('omits the inbox section when there are no inbound task requests', () => {
+    expect(renderClaudeStartupContext(samplePayload)).not.toContain(
+      'memorize.inbox',
+    );
+    expect(renderCodexStartupContext(samplePayload)).not.toContain(
+      'memorize.inbox',
+    );
+  });
+
   it('omits other active tasks section when list is empty or undefined', () => {
     const empty: StartupContextPayload = {
       ...samplePayload,

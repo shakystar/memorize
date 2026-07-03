@@ -234,4 +234,72 @@ describe('memorize task request (CLI)', () => {
     expect(payload.inboundTaskRequests?.map((r) => r.id)).toEqual([requestId]);
     expect(payload.inboundTaskRequests?.[0]?.fromProjectId).toBe(HUB);
   });
+
+  it('caps the inbox at the 5 oldest pending requests and truncates title/goal', async () => {
+    // Read-side guard (SoT-041): write-side guards only bind an honest local
+    // writer, so a malicious/buggy member syncing a flood of oversized
+    // task.requested events must still be bounded at the point the inbox is
+    // consumed for injection. Seven pending requests, oldest-first createdAt
+    // stamps, first request carrying oversized title/goal text.
+    const selfId = bindProject();
+    await appendEvent({
+      type: 'project.created',
+      projectId: selfId,
+      scopeType: 'project',
+      scopeId: HUB,
+      actor: 'test',
+      sourceProjectId: HUB,
+      payload: { id: HUB, title: 'memorize_hub' } as unknown as Project,
+    });
+
+    const total = 7;
+    const requestIds: string[] = [];
+    for (let i = 0; i < total; i++) {
+      const ts = `2026-07-01T00:00:0${i}.000Z`;
+      const request = {
+        ...createTaskRequest({
+          projectId: HUB,
+          targetProjectId: selfId,
+          title: i === 0 ? 'T'.repeat(250) : `Request ${i}`,
+          goal: i === 0 ? 'G'.repeat(600) : `goal ${i}`,
+        }),
+        createdAt: ts,
+        updatedAt: ts,
+      };
+      requestIds.push(request.id);
+      await appendEvent({
+        type: 'task.requested',
+        projectId: selfId,
+        scopeType: 'project',
+        scopeId: request.id,
+        actor: 'hub-agent',
+        writer: 'hub-agent',
+        sourceProjectId: HUB,
+        payload: request,
+      });
+    }
+    await rebuildProjectProjection(selfId);
+    closeAll();
+
+    const resume = runCli(['task', 'resume']);
+    expect(resume.status).toBe(0);
+    const payload = JSON.parse(resume.stdout) as {
+      inboundTaskRequests?: Array<{ id: string; title: string; goal: string }>;
+      inboundTaskRequestsOmitted?: number;
+    };
+
+    // The 5 OLDEST survive (deterministic; oldest = most escalated), not an
+    // arbitrary or newest-first subset.
+    expect(payload.inboundTaskRequests?.map((r) => r.id)).toEqual(
+      requestIds.slice(0, 5),
+    );
+    expect(payload.inboundTaskRequestsOmitted).toBe(2);
+
+    // title 200 chars / goal 500 chars + ellipsis at the consumption boundary.
+    const first = payload.inboundTaskRequests?.[0];
+    expect(first?.title.length).toBe(201);
+    expect(first?.title.endsWith('…')).toBe(true);
+    expect(first?.goal.length).toBe(501);
+    expect(first?.goal.endsWith('…')).toBe(true);
+  });
 });
