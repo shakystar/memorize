@@ -974,6 +974,29 @@ the final `handoff_ready -> done` transition.
 |---|---|---|
 | `--task <taskId>` | single | Overrides the auto-selected task |
 
+## Cross-project task requests (delegation)
+
+Workspace sync shares every member project's context, but the BOUNDARY rule
+is: an agent never performs work that belongs to another member project — it
+delegates. If you find work that belongs to a different repo in this
+workspace, register a request instead of doing it here:
+
+    memorize workspace sources                       # who is addressable
+    memorize task request "<title>" --to <project> \
+      --goal "<why this is their work>" [--ac "<criterion>"]…
+
+The request is pushed to the Hub immediately; the target project's next
+session sees it in its startup payload (`inboundTaskRequests`) and MUST
+resolve it explicitly:
+
+    memorize task request list --inbound
+    memorize task request accept <requestId>          # mints a LOCAL task
+    memorize task request decline <requestId> --reason "<why>"
+
+Decline reasons flow back to the requester. Do not ignore stale inbound
+requests — decline them with the reason (e.g. "already shipped in #238"), so
+the requester's outbound view (`task request list --outbound`) stops waiting.
+
 ### `memorize setup`
 
 Global onboarding for a human-run install (the `curl|sh` / `irm|iex`
