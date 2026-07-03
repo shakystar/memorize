@@ -69,6 +69,14 @@ const MIGRATIONS: ReadonlyArray<(db: Database.Database) => void> = [
         updated_at    TEXT,
         data          TEXT NOT NULL
       );
+      CREATE TABLE IF NOT EXISTS task_requests (
+        id                TEXT PRIMARY KEY,
+        status            TEXT,
+        target_project_id TEXT,
+        source_project_id TEXT,
+        created_at        TEXT,
+        data              TEXT NOT NULL
+      );
       CREATE TABLE IF NOT EXISTS handoffs (
         id   TEXT PRIMARY KEY,
         data TEXT NOT NULL
