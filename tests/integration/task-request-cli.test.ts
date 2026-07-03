@@ -118,6 +118,48 @@ describe('memorize task request (CLI)', () => {
     expect(listed.stdout).toContain('pending');
   });
 
+  it('routes a reserved-word title to create when --to is present', async () => {
+    const selfId = bindProject();
+    await seedInbound(selfId); // hub genesis makes 'memorize_hub' addressable
+
+    // 'list' is also an action word — the --to flag must disambiguate this
+    // as a create, not misroute it into the list handler.
+    const created = runCli([
+      'task', 'request', 'list', 'of', 'demands',
+      '--to', 'memorize_hub',
+    ]);
+    expect(created.status).toBe(0);
+    expect(created.stdout).toMatch(/Created task request taskreq_\S+ -> memorize_hub/);
+
+    const listed = runCli(['task', 'request', 'list', '--outbound']);
+    expect(listed.status).toBe(0);
+    expect(listed.stdout).toContain('list of demands');
+
+    // Plain `task request list` (no --to) still routes to the list handler.
+    const plainList = runCli(['task', 'request', 'list']);
+    expect(plainList.status).toBe(0);
+    expect(plainList.stdout).toContain('list of demands');
+  });
+
+  it('declines with --reason and surfaces the reason in the declined list', async () => {
+    const selfId = bindProject();
+    const requestId = await seedInbound(selfId);
+
+    const declined = runCli([
+      'task', 'request', 'decline', requestId,
+      '--reason', 'already shipped',
+    ]);
+    expect(declined.status).toBe(0);
+    expect(declined.stdout).toMatch(/Declined request/);
+
+    const listed = runCli([
+      'task', 'request', 'list', '--inbound', '--status', 'declined',
+    ]);
+    expect(listed.status).toBe(0);
+    expect(listed.stdout).toContain(requestId);
+    expect(listed.stdout).toContain('already shipped');
+  });
+
   it('accept mints a local task; decline requires --reason', async () => {
     const selfId = bindProject();
     const requestId = await seedInbound(selfId);

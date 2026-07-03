@@ -149,9 +149,20 @@ async function runTaskRequest(
   projectId: string,
 ): Promise<void> {
   const action = args[0];
-  if (action === 'list') return runTaskRequestList(args.slice(1), projectId);
-  if (action === 'accept') return runTaskRequestAccept(args.slice(1), projectId);
-  if (action === 'decline') return runTaskRequestDecline(args.slice(1), projectId);
+  // Constraint: create is the ONLY form that takes --to, so its presence
+  // unambiguously selects create. Without this, a title starting with a
+  // reserved word misroutes — `task request list of demands --to X` would
+  // land in the list handler and die with `Unknown flag --to.`.
+  const isCreate = args.includes('--to');
+  if (!isCreate && action === 'list') {
+    return runTaskRequestList(args.slice(1), projectId);
+  }
+  if (!isCreate && action === 'accept') {
+    return runTaskRequestAccept(args.slice(1), projectId);
+  }
+  if (!isCreate && action === 'decline') {
+    return runTaskRequestDecline(args.slice(1), projectId);
+  }
   return runTaskRequestCreate(args, projectId);
 }
 
