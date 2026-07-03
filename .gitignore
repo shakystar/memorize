@@ -12,6 +12,7 @@
 /docs/*
 !/docs/ARCHITECTURE.md
 !/docs/i18n/
+!/docs/functions/
 
 # Git worktrees (subagent workspaces)
 /.worktrees/

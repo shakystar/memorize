@@ -1,229 +1,200 @@
 # Memorize architecture
 
-How memorize gives N coding agents (Claude Code, Codex, and friends) one
-shared, persistent project brain. It runs locally, needs no server, and
-is modeled loosely on how biological memory actually works.
+Memorize gives coding agents one persistent project brain. It is local-first, event-sourced, and built around an optional Hub for remote coordination.
 
-This is the technical companion to the [README](../README.md). For
-command-level reference, see [AGENT_GUIDE.md](../AGENT_GUIDE.md).
+This is the technical companion to the [README](../README.md). For command behavior, read [AGENT_GUIDE.md](../AGENT_GUIDE.md).
+
+---
+
+## Current facts
+
+- What: project, personal, and workspace memories are stored as append-only events and read through derived projections.
+- Who: Claude Code is the first-class maintained harness. Other harnesses are installed on a frozen, best-effort basis.
+- When: capture happens while the agent works; consolidation happens at session boundaries; retrieval happens at session start.
+- Where: local data lives under `MEMORIZE_ROOT`, grouped by account. Hub data is used only for remote sync and control-plane state.
+- Why: startup context must work offline and must not block on a network call.
+- How: local SQLite stores hold events and projections; Hub stores route remote event sync by server-minted ids.
 
 ---
 
 ## Design principles
 
-1. **Events are the only source of truth.** Every task, decision,
-   handoff, observation, and memory is an append-only event in a
-   per-project SQLite log. Everything else (projections, search
-   indexes, startup payloads) is a cache that can be deleted and
-   rebuilt by replay.
-2. **Forgetting without deletion.** Nothing is ever deleted. Memories
-   get *invalidated* (their validity window closes) or simply lose the
-   retrieval-score competition. "What was true then" stays
-   reconstructable point-in-time.
-3. **Expensive work happens at boundaries, never per-turn.** Capture is
-   cheap rule-based filtering; the LLM runs only at session boundaries,
-   and even then it runs detached in the background, so it never blocks
-   the agent.
-4. **Zero-config first, evidence-gated complexity.** Works with no API
-   key: a host-CLI extractor runs through your existing agent
-   subscription, with a rule-based fallback below that. Architectural
-   upgrades (HLC clocks, incremental projections, retry layers) stay
-   explicitly gated on *observed* problems, not speculation.
-5. **One self per agent, one brain per project.** Vendor harness memory
-   is per-self (one agent × one machine); memorize is the shared brain.
-   The ground rule planted at install time keeps project state in the
-   shared brain and personal lessons in the agent's own memory.
+1. **Events are the source of truth.** Every task, handoff, decision, rule, observation, memory, and retraction is represented by an event. Projections, search indexes, and startup payloads are derived state.
+2. **Local startup is not network-bound.** Session start reads local stores. Sync is additive and best-effort.
+3. **Scopes are hard boundaries.** Project memory, personal memory, and workspace-shared memory are separate channels. They can be shown together, but they are not the same store.
+4. **Remote ids are server-minted.** Local projects have `proj_` ids. Hub workspace stores use `wsp_`. Hub personal stores use `psm_`.
+5. **Workspace identity is control-plane state.** `wsp_`, role, invite state, and membership come from Hub endpoints.
+6. **Deletion is a tombstone first.** Retraction hides a memory by event. Physical garbage collection is explicit and limited to un-pushed local data.
+
+Premise: the event log is authoritative. Premise: startup must work offline. Result: local stores are authoritative for startup, and remote state is synced into local stores before it can affect startup context.
 
 ---
 
-## The two-layer memory system (CLS)
+## Store types
 
-Memorize's memory pipeline borrows the complementary learning systems
-structure of the brain: a fast, cheap episodic layer and a slow,
-semantic long-term layer, connected by consolidation.
+### Project store
 
-### Short-term: observations (the hippocampus analog)
+A project store belongs to one local project identity, `proj_...`.
 
-While an agent works, PostToolUse hooks capture **observations**: which
-tool fired, why the decision-signal filter admitted it, and a locator
-into the transcript. No LLM is involved at capture time. Admission is
-rule-based (file writes, mutating shell commands, decision keywords,
-task transitions). Observations are append-only events like everything
-else.
+It contains:
 
-Functionally they decay fast: only the most recent 20 within 24 hours
-are even candidates for context injection, at a low layer weight.
-Physically they persist forever, auditable and re-consolidatable.
+- project events
+- observations
+- consolidated project memories
+- task and handoff events
+- decisions, rules, conflicts, and retractions
+- derived projections and search indexes
 
-### Consolidation: the boundary distillation
+The project store is the default source for `memorize task resume`, `memorize search`, `memorize memory list`, and startup project context.
 
-At session boundaries (SessionStart catch-up, PostCompact, SessionEnd,
-or `memorize consolidate` by hand) a **detached background child**
-distills two sources into **consolidated memories**
-(`decision | rationale | progress`, each with a salience score 1–10 and
-provenance). The two sources are the accumulated **observations** and
-the **conversation itself** since the last boundary. The conversation
-is read incrementally from the transcript, so a decision that was
-discussed but never typed into a tool is still captured. A boundary even
-fires for a session with *zero* observations when the hook hands it a
-transcript path, so pure-conversation sessions are no longer invisible
-to memory.
+### Personal store
 
-The extractor is pluggable, in priority order:
+A personal store belongs to one account, not to one project. It stores preferences and working-style facts that should follow the same user across projects.
 
-1. **HTTP**: any OpenAI-compatible endpoint (cloud or local Ollama).
-2. **Host CLI**: `claude -p` / `codex exec` through the user's
-   existing subscription auth, the highest-quality zero-setup path. A
-   recursion guard env var keeps the spawned CLI's own hooks inert.
-3. **Rule-based**: no LLM at all; modest but never worse than nothing.
+The local personal store lives beside that account's projects. When synced through the Hub, it uses a server-minted `psm_...` store id. It never crosses accounts.
 
-Correctness contract: two watermarks advance in lockstep, both only
-after events are durably appended. One is the observation watermark over
-consumed events; the other is a per-transcript **byte offset** marking
-how far the conversation has been read. A timeout, HTTP error, or
-unparseable LLM reply propagates *without* advancing either, so the next
-boundary retries the same window and failed extractions are never
-silently lost. Watermark loss itself is survivable: a dedup guard on
-observation provenance prevents re-consolidating history into
-duplicates. Every attempt (success and failure) is recorded and
-surfaced by `memorize doctor`.
+Personal memories are rendered in their own startup channel, `memorize.personal`.
 
-### Long-term: retrieval-time forgetting
+### Workspace store
 
-Injection candidates are ranked in a single pool:
+A workspace is a Hub-backed shared project surface. The Hub mints a `wsp_...` id and records membership and roles in its control plane.
 
+The shared data plane is still event sync. Members exchange project events through the `wsp_...` store. A member's original `proj_...` remains as provenance through `sourceProjectId`.
+
+Memories from other members are rendered in their own startup channel, `memorize.shared`.
+
+---
+
+## Memory pipeline
+
+### Capture
+
+During a session, hooks capture cheap observations. Examples:
+
+- file writes
+- mutating shell commands
+- decision keywords
+- task transitions
+
+No LLM runs in capture. Capture appends events and returns quickly.
+
+### Consolidation
+
+At session boundaries, a detached process reads new observations and the transcript window since the last byte offset. It writes consolidated memories with:
+
+- kind: `decision`, `rationale`, or `progress`
+- text
+- salience
+- provenance
+- optional lifecycle evidence, such as `obsoleteWhen` and tags
+
+Extractor priority:
+
+1. OpenAI-compatible HTTP endpoint
+2. Host CLI, such as `claude -p` or `codex exec`
+3. Rule-based fallback
+
+Watermarks advance only after output events are durable. If extraction fails, the same window is retried later.
+
+### Retrieval
+
+At session start, candidates are ranked by salience, recency, reuse, and relevance. Retrieval has a fixed context budget. Memories that do not fit are not deleted; they simply lose that session's ranking.
+
+The score shape is:
+
+```text
+long-term score = 0.7 * (0.5 * salience/10 + 0.5 * recency + relevance boost)
+short-term score = 0.3 * recency
 ```
-long-term score  = 0.7 × (0.5·salience/10 + 0.5·recency + relevance boost)
-short-term score = 0.3 × recency
-```
 
-- **Recency** decays exponentially with a 14-day half-life.
-- **Reinforcement**: injected memories get an access stamp that resets
-  their decay reference, so re-referenced memories live longer
-  (reactivation–reconsolidation).
-- **Relevance boost**: an FTS match against the current task title, or a
-  graded semantic-similarity boost when embeddings are configured,
-  whichever is stronger.
-- A character budget (4,000 chars inside the ~8,000-char startup
-  context) takes the best-scoring entries; everything else simply
-  doesn't make the cut *this session*. Forgetting is retrieval-time
-  only.
+### Contradiction and retraction
 
-### Contradiction: invalidate, don't delete
+When a newer memory contradicts an older memory, the older memory is superseded by event. When a user or owner retracts a memory, a `memory.retracted` event tombstones it.
 
-When consolidation finds that a new memory contradicts an old one
-(either extractor-flagged or detected semantically), the newer memory
-wins and the older one's validity window is closed by a
-`memory.superseded` event. Semantic detection uses embedding cosine as
-a *recall-only* candidate filter and an LLM judge as the only decider:
-cosine similarity is structurally blind to negation, so it is never
-trusted to judge. A `conflict.detected` event surfaces the fork to the
-agents. Deterministic winner selection (`(createdAt, id)` tuple) means
-every replica converges to the same truth after sync.
+Projection reads the events and hides invalid memories from normal list, search, and startup context. Audit data remains reconstructable.
 
 ---
 
-## Multi-agent, multi-machine
+## Multi-agent behavior
 
-### Real-time share (parallel sessions)
+Parallel sessions in the same project share local work signals:
 
-Sessions in the same project see each other mid-session: sibling
-observations (self-filtered), file-collision warnings ("a sibling
-touched the file you're editing"), and, deliberately *not*
-self-filtered, the session's **own** late boundary memories. Those land
-seconds after a boundary thanks to detached consolidation and are new
-information to the still-running session. A per-session watermark
-guarantees nothing is injected twice.
+- active session status
+- recent observations
+- file-collision warnings
+- late boundary memories from the current session
 
-### Cross-machine sync
-
-The event log is a true replica: `project sync` (file transport, or the
-HTTP relay client) merges logs, and **pure, content-keyed convergence
-rules** make every replica agree without coordination. Duplicate
-memories distilled concurrently on two machines collapse to the same
-deterministic winner everywhere; contradiction resolution picks the
-same survivor on every replica. No central server, no clocks trusted
-beyond a tie-break (a hybrid logical clock upgrade is designed and
-deliberately gated on observed skew).
+`memorize session activity` is the pull command for "what are my other sessions doing?" Startup and mid-session injection are the push paths.
 
 ---
 
-## The lifecycle-evidence program
+## Sync and Hub
 
-The memory taxonomy (`decision | rationale | progress`) is
-load-bearing: dedup keys, contradiction filtering, and injection
-priority all key on it. Real extraction batches showed force-fits, with
-standing constraints filed as `progress` and conventions as `decision`.
-The interesting discovery was that the misfits differ not by *category*
-but by **lifecycle dynamics**: conditional expiry ("until the merge
-happens") versus amendable-persistent (conventions) versus fast-decay
-(status updates).
+Hub sync is the canonical remote sync path.
 
-Rather than redesign the schema from theory, memorize instruments
-first:
+Use it when:
 
-- **Extraction-side evidence**: the extractor attaches observe-only
-  fields (`obsoleteWhen`, a free-form expiry condition; `kindMisfit`
-  plus reason; `supersedesNote`; free-form `tags`) that are persisted
-  but read by no consumer.
-- **Behavioral evidence**: per-memory telemetry, including injection
-  counts (startup and mid-session), superseded/contradicted events, and
-  age-at-invalidation, recording how memories actually *lived*.
-- `memorize consolidate --report` dumps both distributions; after a few
-  weeks of dogfooding the data decides whether `kind` becomes a set of
-  named lifecycle policies.
+- a project needs to move across machines
+- a project needs a shared workspace
+- a user wants same-account personal memory sync
 
-This observe-first loop (instrument, dogfood, decide) is how memorize
-evolves its own schema.
+The Hub has two planes:
 
----
+- Control plane: accounts, credentials, workspaces, roles, membership, invites, and server-minted store ids.
+- Data plane: opaque event sync by store id.
 
-## Adoption and the ground rule
+The relay does not parse event payloads. The client owns merge, projection, contradiction handling, and final retrieval ranking.
 
-Two composing mechanisms keep the shared brain authoritative:
-
-- **`memorize memory import`** absorbs context that predates memorize:
-  the agent (not memorize) reads its own harness memory and user-named
-  doc folders, distills them into extractor-shaped items honoring the
-  per-self/shared split, and pipes them in. Provenance-tagged,
-  idempotent, contradiction-checked. Memorize never reads outside the
-  project tree.
-- **The ground rule** is planted at install time as a marker-managed
-  block in `CLAUDE.md` / `AGENTS.md`, and echoed as one line in every
-  startup injection: project state lives in memorize; the agent's own
-  memory keeps only per-self content. Uninstall removes exactly the
-  block.
-
----
-
-## Safety and trust
-
-- **Prompt-injection containment**: all replayed content (observations,
-  memories, handoffs, anything once authored by a tool or contributor)
-  is wrapped in `<user_data>` sentinels with a trusted preamble
-  instructing the agent to treat it as data, never as instructions.
-  Sentinel-escaping prevents wrapped content from breaking out.
-- **Hook trust**: codex silently skips externally-written hooks until
-  approved once interactively; `memorize doctor` infers this gap from
-  session evidence (hooks registered + other agents recorded sessions +
-  codex never did) instead of letting the integration die silently.
-- **Local-first**: everything lives under `~/.memorize` (overridable).
-  No telemetry leaves the machine; sync targets are yours.
+File transport through `--remote-path` still exists for existing users, but it is deprecated and frozen. New remote setup should use Hub sync.
 
 ---
 
 ## Storage layout
 
-```
-<MEMORIZE_ROOT>/projects/<projectId>/
-├── memorize.db        # SQLite: events (append-only) + projections +
-│                      #   FTS5 index + embeddings + meta (watermarks)
-├── locks/             # cross-process file locks
-├── sync/              # remote sync state
-└── topics/            # imported rules as readable .md topics
+`MEMORIZE_ROOT` defaults to `<home>/.memorize`.
+
+```text
+<MEMORIZE_ROOT>/
+  profile/
+    bindings.json              # path to project binding hints
+  credentials                  # host-scoped Hub credentials
+  accounts/
+    <accountId>/
+      projects/
+        <projectId>/
+          memorize.db          # events, projections, FTS, embeddings, meta
+          sync/
+            remote.json        # remote binding, watermarks, workspace role cache
+          topics/
+            <topicId>.md       # imported rules as readable topics
+      personal/
+        memorize.db            # account personal memory store
+        sync/
+          remote.json          # psm_ binding when personal sync is enabled
+        topics/
 ```
 
-Versioned migrations (`PRAGMA user_version`) upgrade the schema in
-place; projections are derived and rebuilt by replay, so a wiped cache
-is never data loss. The event log is the unit of backup, export, and
-cross-machine cloning.
+SQLite migrations use `PRAGMA user_version`. Projections are derived and can be rebuilt from events.
+
+---
+
+## Safety and trust
+
+- Prompt-injection containment: replayed data is wrapped as data before injection.
+- Hook trust: Codex requires one interactive approval before externally written hooks run.
+- Credential locality: Hub tokens are host-scoped credentials, not project events.
+- Startup locality: startup reads local stores first and does not require Hub reachability.
+- Sync privacy boundary: personal memory sync is same-account only; workspace memory is available to workspace members by role.
+
+---
+
+## Reasoning rule
+
+Use this rule when changing sync, workspace, or memory architecture:
+
+1. Read the SoT documents first.
+2. Identify the scope: project, personal, or workspace.
+3. Identify the authority: local event log or Hub control plane.
+4. Add events only for domain facts.
+5. Use Hub endpoints for identity, membership, roles, and store routing.
+6. Keep startup local-first.

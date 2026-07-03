@@ -260,25 +260,57 @@ bundled inside the npm tarball, so it is available offline.
 ## Command index (1-line summaries)
 
 ```
-init                 one-shot: bind cwd + import + detect & wire agent(s)
-setup                detect installed agents + wire global integration
-project setup        bind cwd + import AGENTS/CLAUDE/.cursorrules
-project show         print bound project JSON
-project sync         push/pull events to a remote path
-install claude       wire hooks into .claude/settings.local.json
-install codex        wire hook entries into ~/.codex/hooks.json
-memory import        ingest agent-distilled memories (stdin JSON array)
-task create          append task.created event
-task list            list tasks with optional --status/--workstream
-task show            print task JSON
-task resume          render startup context for current task
-task checkpoint      record mid-session snapshot
-task handoff         record handoff to next agent
-doctor [--json]      diagnose project and integration state
-conflict list        list open conflicts as JSON
-events validate      verify event log integrity
-projection rebuild   re-reduce events into projections
-memory-index rebuild regenerate memory index from projection
-hook claude <Event>  internal hook entry (called by Claude Code)
-project init         low-level "create fresh project" (rarely needed)
+init                         first choice: bind cwd + import + wire agent(s)
+doctor [--json]              diagnose project and integration state
+update                       upgrade CLI + refresh integrations
+version                      print the binary version that ran
+
+memory import                ingest project memories (stdin JSON array)
+memory list                  list current valid project memories
+memory show                  print one project memory in full
+memory retract               tombstone one memory
+memory revert                retract memories from one session
+memory gc                    reclaim un-pushed retracted bytes
+
+personal import              ingest account personal memories (stdin JSON array)
+personal list                list current valid personal memories
+personal show                print one personal memory in full
+personal sync                sync personal memory via same-account psm_ Hub store
+
+session activity             show active sessions + recent captured work
+task resume                  render startup context for current or selected task
+task create                  create an explicit coordination task
+task list                    list explicit tasks
+task show                    print one task JSON
+task checkpoint              record mid-session snapshot
+task handoff                 record explicit handoff to next agent
+
+auth login                   store a Hub credential once per host
+auth status                  show Hub credential state
+workspace create             mint + bind a Hub wsp_ workspace store
+workspace invite             create an invite token/URL
+workspace join               redeem an invite into the bound project
+workspace status             show workspace binding + role
+workspace members            list workspace members + roles
+workspace promote            make a member an owner
+workspace demote             make an owner a member
+workspace remove             remove a member or leave the workspace
+
+clone                        join a Hub URL into a fresh directory
+remote                       attach this project to a Hub URL
+project sync                 push/pull through the bound Hub transport
+project setup                bind cwd + import AGENTS/CLAUDE/rules
+project init                 low-level "create fresh project" (rarely needed)
+project relocate             rebind an existing project after a path move
+project show                 print bound project JSON
+
+install claude               wire hooks into .claude/settings.local.json
+install codex                wire hook entries into ~/.codex/hooks.json
+setup                        detect installed agents + wire integration only
+conflict list                list open conflicts as JSON
+conflict resolve             resolve an open conflict
+events validate              verify event log integrity
+projection rebuild           rebuild projections from events
+memory-index rebuild         regenerate memory index from projection
+hook claude <Event>          internal hook entry (called by Claude Code)
 ```
