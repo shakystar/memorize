@@ -141,6 +141,24 @@ describe('memorize task request (CLI)', () => {
     expect(plainList.stdout).toContain('list of demands');
   });
 
+  it('routes a reserved-word title to create when the --to= equals form is used', async () => {
+    const selfId = bindProject();
+    await seedInbound(selfId); // hub genesis makes 'memorize_hub' addressable
+
+    // parseFlags also accepts `--to=<ref>`; the dispatcher must treat that
+    // spelling as create too, not misroute into the list handler.
+    const created = runCli([
+      'task', 'request', 'list', 'of', 'demands', 'two',
+      '--to=memorize_hub',
+    ]);
+    expect(created.status).toBe(0);
+    expect(created.stdout).toMatch(/Created task request taskreq_\S+ -> memorize_hub/);
+
+    const listed = runCli(['task', 'request', 'list', '--outbound']);
+    expect(listed.status).toBe(0);
+    expect(listed.stdout).toContain('list of demands two');
+  });
+
   it('declines with --reason and surfaces the reason in the declined list', async () => {
     const selfId = bindProject();
     const requestId = await seedInbound(selfId);

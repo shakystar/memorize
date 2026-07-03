@@ -152,8 +152,9 @@ async function runTaskRequest(
   // Constraint: create is the ONLY form that takes --to, so its presence
   // unambiguously selects create. Without this, a title starting with a
   // reserved word misroutes — `task request list of demands --to X` would
-  // land in the list handler and die with `Unknown flag --to.`.
-  const isCreate = args.includes('--to');
+  // land in the list handler and die with `Unknown flag --to.`. parseFlags
+  // accepts both `--to <ref>` and `--to=<ref>`, so match both spellings.
+  const isCreate = args.some((a) => a === '--to' || a.startsWith('--to='));
   if (!isCreate && action === 'list') {
     return runTaskRequestList(args.slice(1), projectId);
   }
