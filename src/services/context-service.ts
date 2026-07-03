@@ -129,6 +129,7 @@ import {
   getRule,
   getWorkstream,
   listOpenConflicts,
+  listTaskRequests,
   listValidMemories,
 } from './projection-store.js';
 import { getWorkspaceBinding } from './workspace-service.js';
@@ -260,6 +261,21 @@ export async function loadStartContext(params: {
       : undefined;
   const rules = readProjectRules(params.projectId, project.ruleIds);
 
+  // SoT-041 inbox: surface pending inbound delegation at the same boundary
+  // that surfaces everything else — no polling, just the projection read.
+  const inboundTaskRequests = (
+    await listTaskRequests(params.projectId, {
+      direction: 'inbound',
+      status: 'pending',
+    })
+  ).map((request) => ({
+    id: request.id,
+    fromProjectId: request.projectId,
+    title: request.title,
+    goal: request.goal,
+    createdAt: request.createdAt,
+  }));
+
   const otherActiveTasks = await buildOtherActiveTasks({
     projectId: params.projectId,
     sessions: activeSessions,
@@ -363,5 +379,6 @@ export async function loadStartContext(params: {
     openConflicts: listOpenConflicts(params.projectId),
     mustReadTopics: memoryIndex?.mustReadTopics ?? [],
     ...(otherActiveTasks.length > 0 ? { otherActiveTasks } : {}),
+    ...(inboundTaskRequests.length > 0 ? { inboundTaskRequests } : {}),
   };
 }

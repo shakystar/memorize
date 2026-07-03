@@ -38,6 +38,17 @@ export interface StartupContextPayload {
    *  different task and avoid duplicate work. Empty when no parallel
    *  sessions are active. */
   otherActiveTasks?: OtherActiveTask[];
+  /** SoT-041 inbox: pending task requests addressed to THIS project by other
+   *  workspace member projects. Present only when non-empty. The agent should
+   *  accept (`memorize task request accept <id>`) or decline with a reason —
+   *  silence leaves the requester waiting. */
+  inboundTaskRequests?: Array<{
+    id: string;
+    fromProjectId: string;
+    title: string;
+    goal: string;
+    createdAt: ISODateString;
+  }>;
   /** CLS long-term layer: consolidated decisions/rationale/progress picked
    *  by retrieval-time ranking (recency decay + salience + relevance).
    *  Already budget-trimmed by the retrieval service. */

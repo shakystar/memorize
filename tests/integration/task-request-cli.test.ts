@@ -221,4 +221,17 @@ describe('memorize task request (CLI)', () => {
     const parsed = JSON.parse(asJson.stdout) as Array<{ id: string; isSelf: boolean }>;
     expect(parsed.some((p) => p.id === HUB && p.isSelf === false)).toBe(true);
   });
+
+  it('task resume surfaces pending inbound requests as the inbox', async () => {
+    const selfId = bindProject();
+    const requestId = await seedInbound(selfId);
+
+    const resume = runCli(['task', 'resume']);
+    expect(resume.status).toBe(0);
+    const payload = JSON.parse(resume.stdout) as {
+      inboundTaskRequests?: Array<{ id: string; fromProjectId: string }>;
+    };
+    expect(payload.inboundTaskRequests?.map((r) => r.id)).toEqual([requestId]);
+    expect(payload.inboundTaskRequests?.[0]?.fromProjectId).toBe(HUB);
+  });
 });
