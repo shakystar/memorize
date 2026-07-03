@@ -368,4 +368,37 @@ describe('db v11 provenance columns', () => {
       fs.rmSync(tmp, { recursive: true, force: true });
     }
   });
+
+  it('an already-migrated (v12) db gains task_requests on upgrade', () => {
+    // Regression for the v13 placement: `runMigrations` replays only from the
+    // store's current user_version, so DDL added to an already-shipped
+    // migration body never reaches existing stores — the table MUST arrive as
+    // a NEW appended migration entry. A fresh-db test can't catch this (it
+    // replays everything from 0); this fixture pins a store at v12 and proves
+    // reopening creates task_requests.
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'memorize-v13-'));
+    const dbFile = path.join(tmp, 'memorize.db');
+    try {
+      // A store fully migrated through v12 — no task_requests table. v13 only
+      // CREATEs a new table, so the fixture needs no other seeded tables.
+      const seed = new Database(dbFile);
+      seed.pragma('user_version = 12'); // pre-v13; only v13 runs on open
+      seed.close();
+
+      const db = openDbAt(dbFile);
+      try {
+        expect(db.pragma('user_version', { simple: true })).toBeGreaterThanOrEqual(13);
+        // Querying the table (not just checking sqlite_master) proves the
+        // shape readers use is actually reachable on an upgraded store.
+        const rows = db
+          .prepare('SELECT id, status, target_project_id, source_project_id, created_at, data FROM task_requests')
+          .all();
+        expect(rows).toEqual([]);
+      } finally {
+        db.close();
+      }
+    } finally {
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
+  });
 });
