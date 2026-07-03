@@ -42,8 +42,10 @@ const USAGE = [
  * H030/H040): identity bind (W-a), invite/join (W-d), and roster/role
  * management (W-c). Everything here is typed gateway calls — a workspace never
  * writes domain events, and the local `proj_` identity is never rekeyed
- * (SoT-021). The shared-memory data-plane is ordinary sync over the `wsp_`
- * events route (W-b).
+ * (SoT-021). `sources` is the exception: a pure local read of the union's
+ * genesis roster (SoT-041) — no gateway call, works offline. The
+ * shared-memory data-plane is ordinary sync over the `wsp_` events route
+ * (W-b).
  */
 export async function runWorkspaceCommand(
   args: string[],
