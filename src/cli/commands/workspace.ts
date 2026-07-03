@@ -1,4 +1,5 @@
 import { requireBoundProjectId } from '../../services/project-service.js';
+import { listMemberProjects } from '../../services/task-request-service.js';
 import {
   bindWorkspace,
   changeWorkspaceMemberRole,
@@ -19,6 +20,7 @@ const INVITE_USAGE =
 const JOIN_USAGE =
   'Usage: memorize workspace join --remote-url <hub-url> --token <invite-token>';
 const MEMBERS_USAGE = 'Usage: memorize workspace members [--json]';
+const SOURCES_USAGE = 'Usage: memorize workspace sources [--json]';
 const PROMOTE_USAGE =
   'Usage: memorize workspace promote <accountId-or-email>';
 const DEMOTE_USAGE = 'Usage: memorize workspace demote <accountId-or-email>';
@@ -29,6 +31,7 @@ const USAGE = [
   INVITE_USAGE,
   JOIN_USAGE,
   MEMBERS_USAGE,
+  SOURCES_USAGE,
   PROMOTE_USAGE,
   DEMOTE_USAGE,
   REMOVE_USAGE,
@@ -67,6 +70,10 @@ export async function runWorkspaceCommand(
     await runWorkspaceMembers(args.slice(1), ctx);
     return;
   }
+  if (subcommand === 'sources') {
+    await runWorkspaceSources(args.slice(1), ctx);
+    return;
+  }
   if (subcommand === 'promote' || subcommand === 'demote') {
     await runWorkspaceRoleChange(subcommand, args.slice(1), ctx);
     return;
@@ -102,6 +109,31 @@ async function runWorkspaceMembers(
   for (const member of roster.members) {
     console.log(
       `  ${member.role.padEnd(6)} ${member.email} (${member.accountId}) joined ${member.joinedAt}`,
+    );
+  }
+}
+
+/**
+ * `memorize workspace sources [--json]` — the addressable PROJECT roster
+ * (SoT-041), as opposed to `members` (the account roster). Derived locally
+ * from union genesis events; works offline and needs no Hub call, so it also
+ * answers "which folders are actually synced into this workspace".
+ */
+async function runWorkspaceSources(
+  args: string[],
+  ctx: CliContext,
+): Promise<void> {
+  const flags = parseFlags(args, { boolean: ['json'] });
+  const projectId = await requireBoundProjectId(ctx.cwd);
+  const members = await listMemberProjects(projectId);
+  if (flags.boolean.json) {
+    console.log(JSON.stringify(members));
+    return;
+  }
+  console.log(`member projects: ${members.length}`);
+  for (const member of members) {
+    console.log(
+      `  ${member.id}  ${member.title}${member.isSelf ? '  (self)' : ''}`,
     );
   }
 }

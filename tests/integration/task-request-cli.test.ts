@@ -205,4 +205,20 @@ describe('memorize task request (CLI)', () => {
     expect(result.status).not.toBe(0);
     expect(result.stderr + result.stdout).toMatch(/--to/);
   });
+
+  it('workspace sources lists addressable member projects, marking self', async () => {
+    const selfId = bindProject();
+    await seedInbound(selfId);
+
+    const sources = runCli(['workspace', 'sources']);
+    expect(sources.status).toBe(0);
+    expect(sources.stdout).toContain(selfId);
+    expect(sources.stdout).toContain('(self)');
+    expect(sources.stdout).toContain('memorize_hub');
+
+    const asJson = runCli(['workspace', 'sources', '--json']);
+    expect(asJson.status).toBe(0);
+    const parsed = JSON.parse(asJson.stdout) as Array<{ id: string; isSelf: boolean }>;
+    expect(parsed.some((p) => p.id === HUB && p.isSelf === false)).toBe(true);
+  });
 });
