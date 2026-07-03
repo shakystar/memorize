@@ -1,0 +1,148 @@
+import { spawnSync } from 'node:child_process';
+import { mkdtemp, realpath, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+
+import { createTaskRequest } from '../../src/domain/entities.js';
+import type { Project } from '../../src/domain/entities.js';
+import { rebuildProjectProjection } from '../../src/services/projection-store.js';
+import { closeAll } from '../../src/storage/db.js';
+import { appendEvent } from '../../src/storage/event-store.js';
+
+const repoRoot = process.cwd();
+const tsxCliPath = join(repoRoot, 'node_modules', 'tsx', 'dist', 'cli.mjs');
+const cliEntryPath = join(repoRoot, 'src', 'cli', 'index.ts');
+
+const HUB = 'proj_cli_hub';
+
+let sandbox: string;
+let memorizeRoot: string;
+
+function runCli(args: string[], input?: string) {
+  return spawnSync(process.execPath, [tsxCliPath, cliEntryPath, ...args], {
+    cwd: sandbox,
+    encoding: 'utf8',
+    env: { ...process.env, MEMORIZE_ROOT: memorizeRoot },
+    ...(input !== undefined ? { input } : {}),
+  });
+}
+
+function bindProject(): string {
+  const start = runCli(
+    ['hook', 'claude', 'SessionStart'],
+    JSON.stringify({
+      cwd: sandbox,
+      hook_event_name: 'SessionStart',
+      session_id: 'taskreq-cli-uuid-1',
+    }),
+  );
+  expect(start.status).toBe(0);
+  const show = runCli(['project', 'show']);
+  expect(show.status).toBe(0);
+  return (JSON.parse(show.stdout) as { id: string }).id;
+}
+
+/** Land the hub member's genesis + an inbound request in the local union. */
+async function seedInbound(selfProjectId: string): Promise<string> {
+  await appendEvent({
+    type: 'project.created',
+    projectId: selfProjectId,
+    scopeType: 'project',
+    scopeId: HUB,
+    actor: 'test',
+    sourceProjectId: HUB,
+    payload: { id: HUB, title: 'memorize_hub' } as unknown as Project,
+  });
+  const request = createTaskRequest({
+    projectId: HUB,
+    targetProjectId: selfProjectId,
+    title: 'Inbound from hub',
+    goal: 'delegated',
+  });
+  // NOTE: `projectId` here names the PHYSICAL store `appendEvent` writes into
+  // (`getDb(input.projectId)`); `sourceProjectId` is the provenance tag
+  // `reduceProjectState`'s lane-folding actually keys off. To simulate a
+  // synced-in foreign event landing in this store's own union log, this must
+  // physically target selfProjectId (like the genesis append above) while
+  // stamping `sourceProjectId: HUB` for provenance — NOT `projectId: HUB`,
+  // which would silently write into a separate physical db that selfProjectId's
+  // `rebuildProjectProjection` never reads.
+  await appendEvent({
+    type: 'task.requested',
+    projectId: selfProjectId,
+    scopeType: 'project',
+    scopeId: request.id,
+    actor: 'hub-agent',
+    writer: 'hub-agent',
+    sourceProjectId: HUB,
+    payload: request,
+  });
+  await rebuildProjectProjection(selfProjectId);
+  closeAll(); // release the in-process handle before the CLI child opens it
+  return request.id;
+}
+
+beforeEach(async () => {
+  sandbox = await realpath(await mkdtemp(join(tmpdir(), 'memorize-taskreqcli-')));
+  memorizeRoot = join(sandbox, '.memorize-home');
+  process.env.MEMORIZE_ROOT = memorizeRoot;
+});
+
+afterEach(async () => {
+  closeAll();
+  delete process.env.MEMORIZE_ROOT;
+  await rm(sandbox, { recursive: true, force: true });
+});
+
+describe('memorize task request (CLI)', () => {
+  it('creates an outbound request addressed by member title, without sync configured', async () => {
+    const selfId = bindProject();
+    await seedInbound(selfId); // hub genesis makes 'memorize_hub' addressable
+
+    const created = runCli([
+      'task', 'request', 'Ship the roster endpoint',
+      '--to', 'memorize_hub',
+      '--goal', 'unblock slice 2',
+      '--ac', 'roster visible',
+    ]);
+    expect(created.status).toBe(0);
+    expect(created.stdout).toMatch(/Created task request taskreq_\S+ -> memorize_hub/);
+    // No transport configured: honest note, no throw (autoPush degrades).
+    expect(created.stdout).toMatch(/sync not configured/);
+
+    const listed = runCli(['task', 'request', 'list', '--outbound']);
+    expect(listed.status).toBe(0);
+    expect(listed.stdout).toContain('Ship the roster endpoint');
+    expect(listed.stdout).toContain('pending');
+  });
+
+  it('accept mints a local task; decline requires --reason', async () => {
+    const selfId = bindProject();
+    const requestId = await seedInbound(selfId);
+
+    const inbox = runCli(['task', 'request', 'list', '--inbound']);
+    expect(inbox.status).toBe(0);
+    expect(inbox.stdout).toContain(requestId);
+
+    const accepted = runCli(['task', 'request', 'accept', requestId]);
+    expect(accepted.status).toBe(0);
+    const m = accepted.stdout.match(/Created task (task_\S+) from request/);
+    expect(m).toBeTruthy();
+
+    const tasks = runCli(['task', 'list']);
+    expect(tasks.stdout).toContain('Inbound from hub');
+
+    // decline without --reason fails loud (the reason flows back, SoT-041).
+    const badDecline = runCli(['task', 'request', 'decline', requestId]);
+    expect(badDecline.status).not.toBe(0);
+  });
+
+  it('rejects a request without --to', () => {
+    bindProject();
+    const result = runCli(['task', 'request', 'No target']);
+    expect(result.status).not.toBe(0);
+    expect(result.stderr + result.stdout).toMatch(/--to/);
+  });
+});
