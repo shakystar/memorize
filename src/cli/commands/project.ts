@@ -24,6 +24,7 @@ import { inspectProject } from '../../services/repair-service.js';
 import { computeRepoIdentity } from '../../services/repo-identity.js';
 import { setupProject } from '../../services/setup-service.js';
 import {
+  tryEnsureSourceStoreRegistration,
   tryReconcileWorkspaceBinding,
   tryRefreshWorkspaceBinding,
 } from '../../services/workspace-service.js';
@@ -257,8 +258,10 @@ export async function runProjectCommand(
       syncTransport: config,
     });
     // Same convergence a manual `project sync` performs (W-b reconcile before
-    // the wire, W-c role/reachability refresh after).
+    // the wire, W-c role/reachability refresh after, member attribution
+    // declared before the first push).
     await tryReconcileWorkspaceBinding(projectId);
+    await tryEnsureSourceStoreRegistration(projectId);
     const pushed = await pushProject(projectId, transport);
     const pulled = await pullProject(projectId, transport);
     await tryRefreshWorkspaceBinding(projectId);
@@ -529,6 +532,9 @@ export async function runProjectCommand(
       const preSyncState = await readSyncState(projectId);
       if (preSyncState?.syncTransport?.type === 'http') {
         await tryReconcileWorkspaceBinding(projectId);
+        // Hub member attribution (best-effort, cached after once): declared
+        // before the push so the Timeline can name this store's events.
+        await tryEnsureSourceStoreRegistration(projectId);
       }
       if (flags.boolean.push) {
         const response = await pushProject(projectId, transport);

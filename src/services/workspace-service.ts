@@ -1,9 +1,12 @@
+import { existsSync } from 'node:fs';
+
 import {
   createWorkspace,
   getWorkspaceRoster,
   joinWorkspaceRemote,
   listWorkspaces,
   mintWorkspaceInvite,
+  registerWorkspaceSourceStore,
   removeWorkspaceMember,
   setWorkspaceMemberRole,
   type WorkspaceInvite,
@@ -15,7 +18,8 @@ import { CURRENT_SCHEMA_VERSION, nowIso } from '../domain/common.js';
 import type { ProjectSyncState } from '../domain/entities.js';
 import { readToken, resolveSyncToken } from '../storage/credentials-store.js';
 import { readJson, writeJson } from '../storage/fs-utils.js';
-import { getSyncFile } from '../storage/path-resolver.js';
+import { getProjectDbFile, getSyncFile } from '../storage/path-resolver.js';
+import { getProjectProjection } from './projection-store.js';
 
 /**
  * W-a — workspace identity binding (memorize SoT-021/022, Hub H010/H040). Binds a
@@ -83,6 +87,12 @@ export async function bindWorkspace(
     ...(params.fetchImpl ? { fetchImpl: params.fetchImpl } : {}),
   });
   await writeWorkspaceBinding(projectId, params.remoteUrl, workspace);
+  // Attribution follows the binding immediately (best-effort; sync boundaries
+  // re-try) so the Timeline can name this store's bubbles from the first push.
+  await tryEnsureSourceStoreRegistration(projectId, {
+    remoteUrl: params.remoteUrl,
+    ...(params.fetchImpl ? { fetchImpl: params.fetchImpl } : {}),
+  });
   return {
     workspaceId: workspace.workspaceId,
     role: workspace.role,
@@ -161,6 +171,11 @@ export async function joinAndBindWorkspace(
     inviteReachable: true,
   };
   await writeWorkspaceBinding(projectId, params.remoteUrl, binding);
+  // Same attribution follow-up as bindWorkspace, member side.
+  await tryEnsureSourceStoreRegistration(projectId, {
+    remoteUrl: params.remoteUrl,
+    ...(params.fetchImpl ? { fetchImpl: params.fetchImpl } : {}),
+  });
   return binding;
 }
 
@@ -276,6 +291,64 @@ export async function tryRefreshWorkspaceBinding(
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     process.stderr.write(`WARN: workspace role refresh skipped (${message})\n`);
+    return undefined;
+  }
+}
+
+/**
+ * Hub member attribution (hub workspace.md §Source stores): self-declare this
+ * project's local `proj_` id as a source store of the bound workspace, so the
+ * workspace Timeline can attribute its events to the calling ACCOUNT instead of
+ * the agent actor riding `writer`. Attribution/display metadata only — it never
+ * gates sync. Cached in the sync state (`sourceStoreRegisteredWith`, compared
+ * against the CURRENT `wsp_`) so sync boundaries pay the round-trip once per
+ * binding. The registered label is the project title — the human handle the
+ * Timeline shows instead of the raw `proj_` id.
+ */
+export async function ensureSourceStoreRegistration(
+  projectId: string,
+  params: { remoteUrl?: string; fetchImpl?: typeof fetch } = {},
+): Promise<'registered' | 'cached' | 'not-bound'> {
+  const binding = await getWorkspaceBinding(projectId);
+  if (!binding) return 'not-bound';
+  const { state, syncFile, workspaceId, remoteUrl, token } =
+    await requireWorkspaceContext(projectId, params.remoteUrl);
+  if (state.sourceStoreRegisteredWith === workspaceId) return 'cached';
+  // Label = project title, read only when the store already exists on disk —
+  // getProjectProjection would otherwise CREATE (and hold open) an empty db
+  // for a project that has none, just to derive display metadata.
+  const title = existsSync(getProjectDbFile(projectId))
+    ? getProjectProjection(projectId)?.title.trim()
+    : undefined;
+  await registerWorkspaceSourceStore(remoteUrl, token, workspaceId, {
+    sourceProjectId: projectId,
+    ...(title ? { label: title } : {}),
+    ...(params.fetchImpl ? { fetchImpl: params.fetchImpl } : {}),
+  });
+  await writeJson(syncFile, {
+    ...state,
+    sourceStoreRegisteredWith: workspaceId,
+    updatedAt: nowIso(),
+  });
+  return 'registered';
+}
+
+/**
+ * Best-effort wrapper for bind/join and sync boundaries: attribution must never
+ * break the bind or sync that triggered it — degrade to a stderr warn. A `409`
+ * (the `proj_` id is claimed by ANOTHER account in this workspace) stays
+ * uncached on purpose: it is a real cross-account collision worth re-surfacing
+ * at every boundary until resolved.
+ */
+export async function tryEnsureSourceStoreRegistration(
+  projectId: string,
+  params: { remoteUrl?: string; fetchImpl?: typeof fetch } = {},
+): Promise<'registered' | 'cached' | 'not-bound' | undefined> {
+  try {
+    return await ensureSourceStoreRegistration(projectId, params);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    process.stderr.write(`WARN: source-store registration skipped (${message})\n`);
     return undefined;
   }
 }
