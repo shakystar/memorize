@@ -504,10 +504,15 @@ function checkProjectionBuilt(projectId: string): DoctorCheck {
  * genesis events (`source_project_id` = another store) are legitimate: a
  * workspace union carries every member's `project.created` as a provenance
  * label (W-b pull), so they are excluded from the count instead of
- * false-alarming after a union pull. Self lane = provenance NULL (legacy) or
- * equal to this store's id, mirroring the projector's `laneOf`. Uses raw SQL
- * rather than `reduceProjectState` so doctor still runs on an already-diverged
- * store (the reducer would throw before we could report).
+ * false-alarming after a union pull. Self lane mirrors the projector's
+ * `laneOf`: a stamped provenance equal to this store's id, or a NULL
+ * provenance (legacy) whose event `project_id` is this store's id — a member's
+ * whole-DB push carries its pre-provenance events NULL-src as-is, and those
+ * ride in under the member's own project_id, so NULL alone must not read as
+ * self (3.0.0 dogfood: foreign legacy genesis blocks tripped this check on
+ * every workspace member). Uses raw SQL rather than `reduceProjectState` so
+ * doctor still runs on an already-diverged store (the reducer would throw
+ * before we could report).
  */
 function checkProjectIdentity(projectId: string): DoctorCheck {
   const distinct = (
@@ -515,9 +520,10 @@ function checkProjectIdentity(projectId: string): DoctorCheck {
       .prepare(
         "SELECT COUNT(DISTINCT json_extract(payload, '$.id')) AS n " +
           "FROM events WHERE type = 'project.created' " +
-          'AND (source_project_id IS NULL OR source_project_id = ?)',
+          'AND (source_project_id = ? OR ' +
+          '(source_project_id IS NULL AND project_id = ?))',
       )
-      .get(projectId) as { n: number }
+      .get(projectId, projectId) as { n: number }
   ).n;
   if (distinct > 1) {
     return {
