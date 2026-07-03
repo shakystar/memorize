@@ -22,6 +22,13 @@ export {
   isPriority,
 } from './entities/task.js';
 export {
+  type TaskRequest,
+  type TaskRequestStatus,
+  type TaskRequestAcceptedPayload,
+  type TaskRequestDeclinedPayload,
+  createTaskRequest,
+} from './entities/task-request.js';
+export {
   CONFIDENCE_VALUES,
   type Confidence,
   type Handoff,
