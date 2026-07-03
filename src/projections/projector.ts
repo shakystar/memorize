@@ -18,6 +18,9 @@ import type {
   SessionHeartbeatPayload,
   Task,
   TaskItemAppendedPayload,
+  TaskRequest,
+  TaskRequestAcceptedPayload,
+  TaskRequestDeclinedPayload,
   Workstream,
 } from '../domain/entities.js';
 
@@ -133,10 +136,21 @@ function laneOf(
   return event.projectId;
 }
 
+/** A project visible in this store's union — self or a workspace member
+ *  whose genesis arrived via whole-DB sync (SoT-040). The local roster that
+ *  `workspace sources` and `--to` resolution read; no Hub call involved. */
+export interface MemberProject {
+  id: string;
+  title: string;
+  isSelf: boolean;
+}
+
 export interface ProjectState {
   project: Project | undefined;
   workstreams: Record<string, Workstream>;
   tasks: Record<string, Task>;
+  taskRequests: Record<string, TaskRequest>;
+  memberProjects: Record<string, MemberProject>;
   handoffs: Record<string, Handoff>;
   checkpoints: Record<string, Checkpoint>;
   decisions: Record<string, Decision>;
@@ -209,6 +223,8 @@ export function reduceProjectState(
     project: undefined,
     workstreams: {},
     tasks: {},
+    taskRequests: {},
+    memberProjects: {},
     handoffs: {},
     checkpoints: {},
     decisions: {},
@@ -257,6 +273,14 @@ export function reduceProjectState(
     switch (event.type) {
       case 'project.created': {
         const incoming = event.payload as Project;
+        // SoT-041 roster: every genesis in the union names a member project.
+        // Recorded before the foreign-genesis skip so provenance labels still
+        // become addressable targets.
+        state.memberProjects[incoming.id] = {
+          id: incoming.id,
+          title: incoming.title,
+          isSelf: incoming.id === selfId,
+        };
         // Workspace union (SoT-021/022): with MULTIPLE distinct member genesis in
         // one store, only the authoritative self proj_ is identity; a non-self
         // member genesis is a PROVENANCE label — skip it (no adopt, no throw). Its
@@ -326,6 +350,40 @@ export function reduceProjectState(
           };
         }
         break;
+      case 'task.requested':
+        state.taskRequests[laneKey(eventLane, event.scopeId)] =
+          event.payload as TaskRequest;
+        break;
+      case 'task.request-accepted': {
+        // Cross-lane fold: the accept lives in the TARGET's lane but resolves
+        // a request stored under the REQUESTER's lane key — match by id.
+        const payload = event.payload as TaskRequestAcceptedPayload;
+        const key = Object.keys(state.taskRequests).find(
+          (k) => parseLaneKey(k).id === payload.requestId,
+        );
+        if (!key) break;
+        state.taskRequests[key] = {
+          ...state.taskRequests[key]!,
+          status: 'accepted',
+          resolvedByTaskId: payload.taskId,
+          updatedAt: event.createdAt,
+        };
+        break;
+      }
+      case 'task.request-declined': {
+        const payload = event.payload as TaskRequestDeclinedPayload;
+        const key = Object.keys(state.taskRequests).find(
+          (k) => parseLaneKey(k).id === payload.requestId,
+        );
+        if (!key) break;
+        state.taskRequests[key] = {
+          ...state.taskRequests[key]!,
+          status: 'declined',
+          declineReason: payload.reason,
+          updatedAt: event.createdAt,
+        };
+        break;
+      }
       case 'handoff.created':
         {
           const handoff = event.payload as Handoff;
