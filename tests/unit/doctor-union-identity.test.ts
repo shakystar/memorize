@@ -34,7 +34,11 @@ afterEach(async () => {
 
 const ts = '2026-05-01T00:00:00.000Z';
 
-function foreignGenesis(id: string, sourceProjectId?: string): DomainEvent {
+function foreignGenesis(
+  id: string,
+  sourceProjectId?: string,
+  eventProjectId?: string,
+): DomainEvent {
   const payload: Project = {
     id,
     schemaVersion: CURRENT_SCHEMA_VERSION,
@@ -57,7 +61,7 @@ function foreignGenesis(id: string, sourceProjectId?: string): DomainEvent {
     createdAt: ts,
     updatedAt: ts,
     type: 'project.created',
-    projectId: id,
+    projectId: eventProjectId ?? id,
     scopeType: 'project',
     scopeId: id,
     actor: 'test',
@@ -82,11 +86,39 @@ describe('doctor project.identity (union-aware, W-b)', () => {
     expect(identityCheck(report.checks)?.status).toBe('ok');
   });
 
-  it('still errors on a SELF-lane divergent genesis (#30 clobber)', async () => {
+  it('stays ok when a foreign member LEGACY genesis (no provenance) rides a union pull', async () => {
     const project = await createProject({ title: 'self', rootPath: cwd });
 
-    // A second genesis with NO provenance (legacy clobber) counts as self-lane.
-    await insertExternalEvents(project.id, [foreignGenesis('proj_clobber')]);
+    // The 3.0.0 dogfood regression: a member's whole-DB push carries its
+    // pre-provenance events with NULL source_project_id as-is. The event still
+    // rides under the member's own project_id, so it must not read as self.
+    await insertExternalEvents(project.id, [foreignGenesis('proj_member_legacy')]);
+
+    const report = await doctor(cwd);
+    expect(identityCheck(report.checks)?.status).toBe('ok');
+  });
+
+  it('still errors on a divergent genesis stamped with THIS store provenance', async () => {
+    const project = await createProject({ title: 'self', rootPath: cwd });
+
+    // A different identity explicitly claiming this store's lane is a genuine
+    // self-lane divergence, not union provenance.
+    await insertExternalEvents(project.id, [
+      foreignGenesis('proj_clobber', project.id),
+    ]);
+
+    const report = await doctor(cwd);
+    expect(identityCheck(report.checks)?.status).toBe('error');
+  });
+
+  it('still errors on a legacy divergent genesis riding under THIS store project_id', async () => {
+    const project = await createProject({ title: 'self', rootPath: cwd });
+
+    // NULL provenance + this store's own project_id column + a different
+    // payload id: the event claims self-lane residency for another identity.
+    await insertExternalEvents(project.id, [
+      foreignGenesis('proj_clobber', undefined, project.id),
+    ]);
 
     const report = await doctor(cwd);
     expect(identityCheck(report.checks)?.status).toBe('error');

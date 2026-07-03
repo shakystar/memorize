@@ -169,14 +169,19 @@ describe('clone-on-bind — true replica (#30)', () => {
     expect(getProjectProjection(projectA.id)?.id).toBe(projectA.id);
   });
 
-  it('doctor reports a divergent-identity error on an already-clobbered store', async () => {
+  it('doctor treats a pre-clone-on-bind clobbered store as provenance-labelled, not an error', async () => {
     const homeA = join(sandbox, 'home-a');
     const rootA = join(sandbox, 'a');
     useMachine(homeA);
     const projectA = await createProject({ title: 'Project A', rootPath: rootA });
 
-    // Simulate a pre-clone-on-bind clobbered store: a second project.created
-    // with a DIFFERENT identity lands in A's DB (bypassing the projector).
+    // A pre-clone-on-bind clobbered store: a second project.created with a
+    // DIFFERENT identity lands in A's DB (bypassing the projector). Under the
+    // SoT-021 lane semantics the foreign genesis rides under its own
+    // project_id, so it reads as a provenance label — the same shape a
+    // workspace union member's legacy genesis arrives in — not a self-lane
+    // divergence: doctor stays ok and the store keeps working. A genesis
+    // CLAIMING this store's own lane still errors (doctor-union-identity.test.ts).
     const foreign: DomainEvent = {
       id: 'evt_foreign_pc',
       schemaVersion: CURRENT_SCHEMA_VERSION,
@@ -193,7 +198,7 @@ describe('clone-on-bind — true replica (#30)', () => {
 
     const report = await doctor(rootA);
     const identity = report.checks.find((c) => c.id === 'project.identity');
-    expect(identity?.status).toBe('error');
+    expect(identity?.status).toBe('ok');
   });
 });
 

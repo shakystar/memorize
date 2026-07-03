@@ -106,14 +106,31 @@ function isSelfKey(key: string): boolean {
 }
 
 /**
- * The lane an event belongs to, relative to this store's own identity. A NULL
- * `sourceProjectId` (legacy/pre-3.0.0 events) and the store's own id both map
- * to {@link SELF_LANE}; any other origin store is a foreign lane.
+ * The lane an event belongs to, relative to this store's own identity. A
+ * stamped `sourceProjectId` is authoritative: the store's own id maps to
+ * {@link SELF_LANE}, any other origin store is a foreign lane.
+ *
+ * A NULL `sourceProjectId` (legacy, authored before Phase 0 provenance) needs
+ * `isUnion` to disambiguate. In a single-identity log it is the store's own
+ * history → self (pre-3.0.0 behavior, and the cross-dir migrate round-trip
+ * where the dir id differs from the genesis). In a workspace UNION log a
+ * member's whole-DB push carries its legacy events NULL-src as-is — nothing
+ * on the wire backfills them — so `event.projectId` is the origin proxy:
+ * a foreign member's legacy block rides in under ITS projectId and must not
+ * land in the self lane (it tripped doctor's one-SELF-identity check and
+ * misattributed foreign memories as self during the 3.0.0 dogfood).
  */
-function laneOf(event: DomainEvent, selfProjectId: string | undefined): string {
+function laneOf(
+  event: DomainEvent,
+  selfProjectId: string | undefined,
+  isUnion: boolean,
+): string {
   const source = event.sourceProjectId;
-  if (source == null || source === selfProjectId) return SELF_LANE;
-  return source;
+  if (source != null) {
+    return source === selfProjectId ? SELF_LANE : source;
+  }
+  if (!isUnion || event.projectId === selfProjectId) return SELF_LANE;
+  return event.projectId;
 }
 
 export interface ProjectState {
@@ -202,9 +219,10 @@ export function reduceProjectState(
     memories: {},
   };
 
-  // This store's own identity. Every event whose `sourceProjectId` is NULL
-  // (legacy) or equal to this belongs to SELF_LANE; anything else is a foreign
-  // origin store carried in by a workspace union.
+  // This store's own identity. Every event whose `sourceProjectId` equals this
+  // belongs to SELF_LANE; anything else is a foreign origin store carried in by
+  // a workspace union. NULL provenance (legacy) resolves via `laneOf`: self in
+  // a single-identity log, by the event's own projectId in a union log.
   //
   // AUTHORITATIVE when the caller passes `selfProjectId` — every real projection
   // path (rebuildProjectProjection, getProjectStateAtRevision) knows the store's
@@ -235,7 +253,7 @@ export function reduceProjectState(
   const selfId = selfProjectId ?? firstGenesisId;
 
   for (const event of events) {
-    const eventLane = laneOf(event, selfId);
+    const eventLane = laneOf(event, selfId, isUnion);
     switch (event.type) {
       case 'project.created': {
         const incoming = event.payload as Project;

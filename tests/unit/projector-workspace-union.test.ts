@@ -155,4 +155,74 @@ describe('projector workspace union (W-a, SoT-021/022)', () => {
       ),
     ).not.toThrow();
   });
+
+  it('routes a foreign member LEGACY block (no provenance) to its own lane in a union log', () => {
+    // The 3.0.0 dogfood regression: a member's whole-DB push carries its
+    // pre-provenance events with NULL sourceProjectId as-is. In a union log the
+    // event's own projectId is the origin proxy — the block must land in the
+    // member's lane, not self.
+    const legacyForeignTask = evt({
+      id: 'evt_tb_legacy',
+      type: 'task.created',
+      scopeType: 'task',
+      scopeId: 'task_bob_legacy',
+      projectId: FOREIGN,
+      payload: {
+        id: 'task_bob_legacy',
+        schemaVersion: CURRENT_SCHEMA_VERSION,
+        createdAt: ts,
+        updatedAt: ts,
+        projectId: FOREIGN,
+        workstreamId: 'ws_1',
+        title: 'legacy foreign task',
+        description: 'x',
+        status: 'in_progress',
+        priority: 'high',
+        ownerType: 'unassigned',
+        goal: 'x',
+        acceptanceCriteria: [],
+        dependsOn: [],
+        contextRefIds: [],
+        decisionRefIds: [],
+        ruleRefIds: [],
+        openQuestions: [],
+        riskNotes: [],
+      } as never,
+    });
+
+    const state = reduceProjectState(
+      [
+        projectCreated(SELF),
+        // Legacy foreign genesis: NULL provenance, rides under its own projectId.
+        projectCreated(FOREIGN),
+        legacyForeignTask,
+        taskCreated('evt_ts', 'task_self', undefined),
+      ],
+      SELF,
+    );
+
+    // No divergent-identity throw; self identity holds.
+    expect(state.project?.id).toBe(SELF);
+    // The legacy foreign task lands in the FOREIGN lane, not self.
+    const laneOfLegacy = Object.keys(state.tasks)
+      .map(parseLaneKey)
+      .find((k) => k.id === 'task_bob_legacy');
+    expect(laneOfLegacy?.lane).toBe(FOREIGN);
+    // Only the self task is "current".
+    expect(state.project?.activeTaskIds).toEqual(['task_self']);
+  });
+
+  it('keeps NULL-provenance events in the self lane when the log is NOT a union', () => {
+    // Single-genesis log where the authoritative dir id differs from the
+    // genesis (cross-dir migrate round-trip): the projectId-as-origin proxy is
+    // gated on isUnion, so the store's own legacy history must stay self even
+    // though its projectId matches neither the genesis anchor nor the dir id.
+    const state = reduceProjectState(
+      [projectCreated(SELF), taskCreated('evt_ts', 'task_self', undefined)],
+      'proj_migrated_dir',
+    );
+    expect(state.project?.id).toBe(SELF);
+    expect(state.project?.activeTaskIds).toEqual(['task_self']);
+    expect(state.tasks['task_self']).toBeDefined();
+  });
 });
