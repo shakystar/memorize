@@ -658,11 +658,16 @@ const handleSessionEnd: HookHandler = async (ctx) => {
     transcriptPathFromPayload(ctx.rawPayload),
   );
 
-  // P3-b: final push of the session's events before it exits. The subprocess
-  // may be reaped mid-push — fine, push is watermark-idempotent and the next
-  // boundary / sibling SessionStart pull converges. (Codex has no SessionEnd;
-  // its PostCompact + next SessionStart pull cover the same ground.)
-  await autoPush(ctx.projectId);
+  // P3-b: the session's final push rides the DETACHED consolidate child
+  // above — `memorize consolidate` autoPushes unconditionally after its
+  // extraction attempt, so an in-process push here is pure duplication.
+  // It was also actively harmful: awaiting a network push kept this hook
+  // alive past Claude's shutdown grace, so every exit with an HTTP
+  // transport surfaced "SessionEnd hook failed: Hook cancelled" to the
+  // user. If the child dies before its push lands, the next boundary /
+  // sibling SessionStart pull converges (push is watermark-idempotent).
+  // (Codex has no SessionEnd; its PostCompact + next SessionStart pull
+  // cover the same ground.)
 
   return JSON.stringify({
     systemMessage: 'memorize: session paused (resumable)',
