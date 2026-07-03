@@ -483,6 +483,44 @@ export async function joinWorkspaceRemote(
 }
 
 /**
+ * Self-declare this client's local store as a source of the workspace, so the
+ * Hub Timeline can attribute its events to the calling ACCOUNT (bubble unit =
+ * member; hub workspace.md §Source stores). Display/attribution metadata only —
+ * sync works identically without it. Idempotent for the same account (label
+ * updates); a `proj_` already claimed by ANOTHER account is a Hub-side `409`.
+ * `POST /v1/workspaces/:id/source-stores`.
+ */
+export async function registerWorkspaceSourceStore(
+  baseUrl: string,
+  token: string,
+  workspaceId: string,
+  options: { sourceProjectId: string; label?: string; fetchImpl?: typeof fetch },
+): Promise<{ sourceProjectId: string; accountId: string; label: string | null }> {
+  const doFetch = options.fetchImpl ?? fetch;
+  const base = baseUrl.replace(/\/+$/, '');
+  const response = await doFetch(
+    `${base}/v1/workspaces/${encodeURIComponent(workspaceId)}/source-stores`,
+    {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify({
+        sourceProjectId: options.sourceProjectId,
+        ...(options.label ? { label: options.label } : {}),
+      }),
+    },
+  );
+  if (!response.ok) return throwControlPlaneError(response, 'source-store registration');
+  return (await response.json()) as {
+    sourceProjectId: string;
+    accountId: string;
+    label: string | null;
+  };
+}
+
+/**
  * Owner changes a member's role (W-c) — promote `member` -> `owner` (also how
  * ownership is transferred), or demote. Demoting the sole remaining owner is a
  * Hub-side `409` (last-owner invariant). `PATCH /v1/workspaces/:id/members/:accountId`.

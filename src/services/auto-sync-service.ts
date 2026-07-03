@@ -7,6 +7,7 @@ import { resolveSyncToken } from '../storage/credentials-store.js';
 import { readSyncState } from './project-service.js';
 import { pullProject, pushProject } from './sync-service.js';
 import {
+  tryEnsureSourceStoreRegistration,
   tryReconcileWorkspaceBinding,
   tryRefreshWorkspaceBinding,
 } from './workspace-service.js';
@@ -70,6 +71,9 @@ export async function autoPush(projectId: string): Promise<AutoSyncResult> {
     if (state?.syncTransport?.type === 'http') {
       const outcome = await tryReconcileWorkspaceBinding(projectId);
       if (outcome && outcome.action !== 'none') state = await readSyncState(projectId);
+      // Hub member attribution: make sure this store is a declared source of
+      // its workspace BEFORE its events land (best-effort, cached after once).
+      await tryEnsureSourceStoreRegistration(projectId);
     }
     if (!isConfigured(state)) return { ran: false, reason: 'not-configured' };
     // Reentrancy guard: a push already in flight. (autoPull does NOT gate on
@@ -97,6 +101,9 @@ export async function autoPull(projectId: string): Promise<AutoSyncResult> {
     if (state?.syncTransport?.type === 'http') {
       const outcome = await tryReconcileWorkspaceBinding(projectId);
       if (outcome && outcome.action !== 'none') state = await readSyncState(projectId);
+      // Session start is how bindings that predate source-store attribution
+      // heal without any manual step (best-effort, cached after once).
+      await tryEnsureSourceStoreRegistration(projectId);
     }
     if (!isConfigured(state)) return { ran: false, reason: 'not-configured' };
     const transport = await resolveTransport(state);

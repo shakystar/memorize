@@ -33,6 +33,14 @@ export interface ProjectSyncState extends BaseEntity {
   workspaceRole?: 'owner' | 'member';
   inviteReachable?: boolean;
   /**
+   * The `wsp_` this project's `proj_` id was last registered into as a source
+   * store (Hub member attribution, hub workspace.md §Source stores). A cache
+   * like the role fields: it skips the re-register call at sync boundaries and
+   * self-invalidates by comparison against `remoteProjectId` when the binding
+   * changes. Absent = not yet registered (healed at the next sync boundary).
+   */
+  sourceStoreRegisteredWith?: string;
+  /**
    * base64 AES-256 key for client-side E2E encryption of synced event payloads
    * (#182). When present, the sync push/pull boundary encrypts each event's
    * `payload` before it leaves the machine and decrypts it on arrival; absent =
