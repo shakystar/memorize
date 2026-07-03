@@ -34,18 +34,46 @@ export function getCurrentVersion(): string {
 }
 
 /**
- * Minimal semver compare — numeric per segment, prerelease suffix ignored
- * (v1 scope: we only ever compare published registry versions).
+ * Minimal semver compare, prerelease-aware. Ignoring the prerelease suffix
+ * made `3.0.0-dev.N` compare equal to `3.0.0`, so a dev-channel install
+ * reported "Already up to date" forever once the matching stable shipped.
+ * Per semver: equal cores rank a release above any prerelease; two
+ * prereleases compare identifier-by-identifier (numeric < alphanumeric).
  */
 export function isNewerVersion(latest: string, current: string): boolean {
-  const seg = (v: string): number[] =>
-    (v.split('-')[0] ?? '').split('.').map((n) => Number(n) || 0);
-  const a = seg(latest);
-  const b = seg(current);
+  const parse = (v: string): { core: number[]; pre: string[] } => {
+    const [core = '', ...preParts] = v.split('-');
+    return {
+      core: core.split('.').map((n) => Number(n) || 0),
+      pre: preParts.length > 0 ? preParts.join('-').split('.') : [],
+    };
+  };
+  const a = parse(latest);
+  const b = parse(current);
   for (let i = 0; i < 3; i += 1) {
-    const left = a[i] ?? 0;
-    const right = b[i] ?? 0;
+    const left = a.core[i] ?? 0;
+    const right = b.core[i] ?? 0;
     if (left !== right) return left > right;
+  }
+  // Equal cores: a release outranks any prerelease of the same version.
+  if (a.pre.length === 0) return b.pre.length > 0;
+  if (b.pre.length === 0) return false;
+  for (let i = 0; i < Math.max(a.pre.length, b.pre.length); i += 1) {
+    const left = a.pre[i];
+    const right = b.pre[i];
+    // Identifiers exhausted on one side: the longer prerelease is newer.
+    if (left === undefined) return false;
+    if (right === undefined) return true;
+    const leftNum = /^\d+$/.test(left) ? Number(left) : undefined;
+    const rightNum = /^\d+$/.test(right) ? Number(right) : undefined;
+    if (leftNum !== undefined && rightNum !== undefined) {
+      if (leftNum !== rightNum) return leftNum > rightNum;
+    } else if (leftNum !== undefined || rightNum !== undefined) {
+      // Numeric identifiers rank below alphanumeric ones.
+      return leftNum === undefined;
+    } else if (left !== right) {
+      return left > right;
+    }
   }
   return false;
 }
