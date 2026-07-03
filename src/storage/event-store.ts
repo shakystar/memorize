@@ -296,6 +296,19 @@ export async function readEventsSince(
   return rows.map(rowToEvent);
 }
 
+/** The id of the newest event (max `seq`), or undefined for an empty log.
+ *  Cheap local head probe — the watcher's push gate (SoT-043) compares this
+ *  against the persisted push watermark so an idle tick never builds the
+ *  full event array just to learn nothing changed. */
+export async function readHeadEventId(
+  projectId: string,
+): Promise<string | undefined> {
+  const row = getDb(projectId)
+    .prepare('SELECT id FROM events ORDER BY seq DESC LIMIT 1')
+    .get() as { id: string } | undefined;
+  return row?.id;
+}
+
 /**
  * Events up to AND INCLUDING the revision identified by `upToEventId`, in `seq`
  * order — state-as-of-revision (foundation for #19 revert / checkout). Mirrors

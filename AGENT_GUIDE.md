@@ -258,6 +258,23 @@ memory (`obsoleteWhen`, `kindMisfit` + `kindMisfitReason`,
 contradiction detection key on `kind` exactly as before, and a missing
 or malformed field never fails an extraction.
 
+### `memorize watcher run`
+
+Runs the session-bound watcher-sync loop (SoT-042/043) for the project
+bound to cwd: every poll interval (default 30s) it does a watermark-gated
+pull — writing a local inbound marker when events actually arrived — and a
+watermark-gated push of self-lane events, so mid-session work propagates to
+the workspace Hub without waiting for a session boundary. Internal surface:
+SessionStart spawns it as a detached child whenever sync is configured;
+running it by hand is only useful for debugging a stuck sync. A
+pid-carrying lockfile guarantees one instance per project (a second `run`
+exits immediately with `{"ran":false,"reason":"already-running"}`), and the
+loop exits on its own once no session in the cwd has shown activity within
+the heartbeat staleness threshold (`MEMORIZE_STALE_SESSION_MS`, default
+30 min) — no OS service, no boot autostart. Tuning:
+`MEMORIZE_WATCHER_POLL_MS` (default 30000), `MEMORIZE_WATCHER_DISABLED=1`
+(never spawn; sync falls back to boundary-only cadence).
+
 ### `memorize session list` / `memorize session activity [--limit N] [--json]`
 
 #83: the on-demand answer when the user asks **"what are my other

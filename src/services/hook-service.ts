@@ -49,6 +49,7 @@ import {
 } from './session-service.js';
 import { createCheckpoint } from './task-service.js';
 import { getUpdateNotice } from './update-service.js';
+import { spawnDetachedWatcher } from './watcher-service.js';
 
 interface HookContext {
   projectId: string;
@@ -385,6 +386,14 @@ const handleSessionStart: HookHandler = async (ctx) => {
   // injected memories/tasks reflect the latest remote state. No-op + silent
   // unless this project has a persisted syncTransport; never throws.
   await autoPull(ctx.projectId);
+
+  // SoT-042/043: spawn the session-bound watcher — the detached loop that
+  // gives sync its mid-session cadence (watermark pull + push every ~30s)
+  // and exits on its own when this cwd's sessions go heartbeat-stale.
+  // No-spawn when sync is unconfigured or a live watcher already holds the
+  // project lock; failure degrades to boundary-only sync, never breaks
+  // startup.
+  await spawnDetachedWatcher({ projectId: ctx.projectId, cwd: ctx.cwd });
 
   const identity = parseIdentityPayload(ctx.rawPayload);
   // Walk up from this hook subprocess to find the agent's pid. Stored
