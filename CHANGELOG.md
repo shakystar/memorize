@@ -14,6 +14,36 @@ log layout or the public CLI surface.
 > entries by hand. See
 > [CONTRIBUTING.md](.github/CONTRIBUTING.md#releasing).
 
+## [3.0.0](https://github.com/shakystar/memorize/compare/v2.5.0...v3.0.0) (2026-07-03)
+
+
+### Features
+
+* **3.0.0:** M1 local accounts + per-account personal store; W1 personal cross-device sync ([#221](https://github.com/shakystar/memorize/issues/221)) ([e53b5cc](https://github.com/shakystar/memorize/commit/e53b5cc15aadef38c7a51c2d0d9a12067bb1d891))
+* **auth:** browser device-auth login (RFC 8628), replacing BYO-token ([#231](https://github.com/shakystar/memorize/issues/231)) ([4c294a5](https://github.com/shakystar/memorize/commit/4c294a5627946a28fd9e08e3a718cd49aa87fa18))
+* **cli:** git-style onboarding — clone/remote accept Hub URLs ([#238](https://github.com/shakystar/memorize/issues/238)) ([98d9f18](https://github.com/shakystar/memorize/commit/98d9f1809d09aaf333f904ec95b490b0e984d4a3))
+* **memory:** memory gc — physical reclamation of un-pushed retracted memories (3.0.0 M3-b, SoT-050) ([#228](https://github.com/shakystar/memorize/issues/228)) ([9e13860](https://github.com/shakystar/memorize/commit/9e13860f6eb5146e9957f6179ea7b4af0931b9b0))
+* **memory:** memory revert --session — consolidated revert (3.0.0 M3-c, SoT-050) ([#229](https://github.com/shakystar/memorize/issues/229)) ([0988b79](https://github.com/shakystar/memorize/commit/0988b796e392035125b07678c568037a123c288b))
+* **memory:** memory.retracted tombstone (3.0.0 M3-a, SoT-050) ([#227](https://github.com/shakystar/memorize/issues/227)) ([10959c1](https://github.com/shakystar/memorize/commit/10959c13b5b5ed7e0fa58f1e44d794d58eb289df))
+* **projection:** source-keyed (entity,writer) lane projection (3.0.0 M2) ([#222](https://github.com/shakystar/memorize/issues/222)) ([5458663](https://github.com/shakystar/memorize/commit/5458663e176099aa3af2cbe9123d64bb47a5292e))
+* **sync:** W-b full reconcile — legacy proj_ bindings converge to canonical wsp_ (3.0.0 M4-b, SoT-031) ([#235](https://github.com/shakystar/memorize/issues/235)) ([54bd2b3](https://github.com/shakystar/memorize/commit/54bd2b312d127af1694522021c56e5b966a3e0cb))
+* **task:** fill-path for task fields — create flags, task.item-appended, honest empty defaults ([#236](https://github.com/shakystar/memorize/issues/236)) ([b3e21c8](https://github.com/shakystar/memorize/commit/b3e21c851aa1f72c25673c8dba88bb00d1ba0337))
+* **workspace:** 3.0.0 M4 — workspace identity + union sync + invite/join (W-a/b/d) ([#232](https://github.com/shakystar/memorize/issues/232)) ([cde51f0](https://github.com/shakystar/memorize/commit/cde51f01ebc03645baa7bb595fb3666f75897c18))
+* **workspace:** 3.0.0 M4 W-c — owner global retract gate, role-cache refresh, role management CLI ([#234](https://github.com/shakystar/memorize/issues/234)) ([9661b87](https://github.com/shakystar/memorize/commit/9661b87b7614f14b634d4aeb7b7229bc256b9be2))
+* **workspace:** W3 shared memory channel — union-lane sharedMemories injection with its own budget pool ([#237](https://github.com/shakystar/memorize/issues/237)) ([c113c0f](https://github.com/shakystar/memorize/commit/c113c0f209353503e15bf75e35c015d1d5fb8603))
+
+
+### Bug Fixes
+
+* **cli:** force fatal CLI errors to exit ([#241](https://github.com/shakystar/memorize/issues/241)) ([833858c](https://github.com/shakystar/memorize/commit/833858cfffd23bd794634d778f3f5b541dc6fe24))
+* **cli:** harden WSL interop and sync push output ([#240](https://github.com/shakystar/memorize/issues/240)) ([31027ec](https://github.com/shakystar/memorize/commit/31027ec22dacd9ca74f17e312487e7a6ba5f1041))
+* **genesis:** self-heal missing project.created at SessionStart ([#230](https://github.com/shakystar/memorize/issues/230)) ([d80c68a](https://github.com/shakystar/memorize/commit/d80c68a4504fd3c152e51e4bad1b79b810ff36c4))
+
+
+### Miscellaneous Chores
+
+* pin next release line to 3.0.0 ([e716d99](https://github.com/shakystar/memorize/commit/e716d99dd86007aa7ef92f5d5d9554a2d1aff0c1))
+
 ## [2.5.0](https://github.com/shakystar/memorize/compare/v2.4.0...v2.5.0) (2026-06-30)
 
 
