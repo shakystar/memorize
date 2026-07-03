@@ -387,14 +387,6 @@ const handleSessionStart: HookHandler = async (ctx) => {
   // unless this project has a persisted syncTransport; never throws.
   await autoPull(ctx.projectId);
 
-  // SoT-042/043: spawn the session-bound watcher — the detached loop that
-  // gives sync its mid-session cadence (watermark pull + push every ~30s)
-  // and exits on its own when this cwd's sessions go heartbeat-stale.
-  // No-spawn when sync is unconfigured or a live watcher already holds the
-  // project lock; failure degrades to boundary-only sync, never breaks
-  // startup.
-  await spawnDetachedWatcher({ projectId: ctx.projectId, cwd: ctx.cwd });
-
   const identity = parseIdentityPayload(ctx.rawPayload);
   // Walk up from this hook subprocess to find the agent's pid. Stored
   // on the pointer so the picker can later detect "agent process
@@ -507,6 +499,21 @@ const handleSessionStart: HookHandler = async (ctx) => {
     sessionId = claimed.sessionId;
     additionalContext = claimed.startupContext;
   }
+
+  // SoT-042/043: spawn the session-bound watcher — the detached loop that
+  // gives sync its mid-session cadence (watermark pull + push every ~30s)
+  // and exits on its own when this cwd's sessions go heartbeat-stale.
+  // Critical-1 fix: this MUST run AFTER the cwd session pointer is written
+  // above (both the resume path's resumeSession and the new-session path's
+  // startSession write it) — watcherShouldExit's liveness probe reads that
+  // pointer, and a watcher child that boots before the pointer lands sees
+  // zero live sessions and exits at birth, with nothing to respawn it until
+  // the next SessionStart. (runWatcherLoop also carries a startup grace as
+  // defense in depth, but this ordering is the primary fix.)
+  // No-spawn when sync is unconfigured or a live watcher already holds the
+  // project lock; failure degrades to boundary-only sync, never breaks
+  // startup.
+  await spawnDetachedWatcher({ projectId: ctx.projectId, cwd: ctx.cwd });
 
   // Claude Code passes a writable env-file path so memorize can hand
   // back the new session id. Codex has no equivalent — only Claude
