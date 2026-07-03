@@ -42,6 +42,21 @@ function guardField(
   collected.push(...detectInjectionMarkers(value, field));
 }
 
+// A blank list item is "filled-looking empty" data — the same pathology
+// task-service rejects. It must be rejected HERE, before the event is
+// appended: acceptTaskRequest feeds these criteria into createTask, whose
+// own blank-item guard throws, so a persisted request carrying a blank item
+// would be durably stuck — pending forever, every accept failing.
+function assertNoBlankItems(
+  values: string[] | undefined,
+  field: string,
+): void {
+  if (!values) return;
+  if (values.some((value) => value.trim() === '')) {
+    throw new MemorizeError(`${field} items must be non-empty.`);
+  }
+}
+
 /**
  * The addressable roster (SoT-041): every genesis in the local union — self
  * plus each workspace member whose whole-DB push has landed. Derived from the
@@ -101,6 +116,7 @@ export async function requestTask(
     input.acceptanceCriteria.forEach((value, index) =>
       guardField(value, `taskRequest.acceptanceCriteria[${index}]`, markers),
     );
+    assertNoBlankItems(input.acceptanceCriteria, 'taskRequest.acceptanceCriteria');
   }
   warnInjectionMarkers(markers);
 

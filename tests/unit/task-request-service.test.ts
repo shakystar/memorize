@@ -108,6 +108,22 @@ describe('requestTask', () => {
     expect(outbound.map((r) => r.id)).toEqual([request.id]);
   });
 
+  it('rejects blank acceptance-criteria items before anything is persisted', async () => {
+    // A blank item would strand the request: acceptTaskRequest feeds the
+    // criteria into createTask, whose blank-item guard throws — so a pending
+    // request carrying one could never be accepted. Reject at request time.
+    await expect(
+      requestTask({
+        projectId: SELF,
+        targetRef: 'memorize_hub',
+        title: 'Blank AC',
+        acceptanceCriteria: ['ok', '   '],
+      }),
+    ).rejects.toThrow(/non-empty/);
+    const outbound = await listTaskRequests(SELF, { direction: 'outbound', status: 'pending' });
+    expect(outbound).toHaveLength(0);
+  });
+
   it('rejects addressing the request to this project itself', async () => {
     await expect(
       requestTask({ projectId: SELF, targetRef: 'memorize', title: 'Nope' }),
