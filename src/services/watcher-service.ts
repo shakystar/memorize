@@ -7,6 +7,7 @@ import { nowIso } from '../domain/common.js';
 import { isPersonalStoreId } from '../domain/identity/personal-store.js';
 import { listCwdPointers } from '../storage/cwd-session-store.js';
 import { readEventsSince, readHeadEventId } from '../storage/event-store.js';
+import { writeJson } from '../storage/fs-utils.js';
 import { getProjectRoot } from '../storage/path-resolver.js';
 import { autoPull, autoPush } from './auto-sync-service.js';
 import { readSyncState } from './project-service.js';
@@ -60,6 +61,10 @@ function maxTicksFromEnv(): number | undefined {
 interface WatcherLockInfo {
   pid: number;
   startedAt: string;
+  /** Important-A lease: refreshed every tick by renewWatcherLock. Falls back
+   *  to startedAt for a lock written before this field existed, or by a
+   *  process that dies before its first renew. */
+  renewedAt?: string;
 }
 
 export function watcherLockPath(projectId: string): string {
@@ -89,12 +94,25 @@ async function readWatcherLock(
   }
 }
 
+/** Important-A: a lock is stale — regardless of pid liveness — once its
+ *  lease (renewedAt, falling back to startedAt for a lock never renewed)
+ *  is older than 2x the poll interval. This is what reclaims a watcher
+ *  that crashed without releasing its lock on a Windows host where the pid
+ *  has since been reused by an unrelated process: pid-liveness alone would
+ *  read that lock as "alive" forever and no watcher would ever run again. */
+function isLeaseStale(holder: WatcherLockInfo): boolean {
+  const renewedAtMs = Date.parse(holder.renewedAt ?? holder.startedAt);
+  if (Number.isNaN(renewedAtMs)) return true; // corrupt timestamp — treat as stale
+  return Date.now() - renewedAtMs > 2 * pollMsFromEnv();
+}
+
 /**
  * Atomic acquire (`wx` create) with stale-holder takeover: a lock whose pid
- * is dead is unlinked and re-contended once. Two racers both seeing a dead
- * holder is safe — both unlink (one ENOENTs), and `wx` lets exactly one win
- * the re-create. Returns false when a LIVE holder exists (the SoT-042
- * "two SessionStarts race, one watcher" guarantee).
+ * is dead, OR whose lease has expired (Important-A — see isLeaseStale), is
+ * unlinked and re-contended once. Two racers both seeing a stale holder is
+ * safe — both unlink (one ENOENTs), and `wx` lets exactly one win the
+ * re-create. Returns false when a LIVE, in-lease holder exists (the
+ * SoT-042 "two SessionStarts race, one watcher" guarantee).
  */
 export async function acquireWatcherLock(
   projectId: string,
@@ -102,7 +120,10 @@ export async function acquireWatcherLock(
 ): Promise<boolean> {
   const lockPath = watcherLockPath(projectId);
   await mkdir(path.dirname(lockPath), { recursive: true });
-  const body = JSON.stringify({ pid, startedAt: nowIso() } satisfies WatcherLockInfo);
+  const now = nowIso();
+  const body = JSON.stringify(
+    { pid, startedAt: now, renewedAt: now } satisfies WatcherLockInfo,
+  );
   for (let attempt = 0; attempt < 2; attempt += 1) {
     try {
       await writeFile(lockPath, body, { flag: 'wx' });
@@ -110,7 +131,8 @@ export async function acquireWatcherLock(
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== 'EEXIST') return false;
       const holder = await readWatcherLock(projectId);
-      if (holder && isPidAlive(holder.pid)) return false;
+      const stale = !holder || isLeaseStale(holder) || !isPidAlive(holder.pid);
+      if (!stale) return false;
       try {
         await unlink(lockPath);
       } catch {
@@ -119,6 +141,25 @@ export async function acquireWatcherLock(
     }
   }
   return false;
+}
+
+/** Important-A per-tick lease renewal: rewrites the lock file with a fresh
+ *  `renewedAt`, and reports whether we still hold it. Combines the
+ *  self-verification and the lease-refresh the finding asks for into one
+ *  call: if a racer's stale-takeover already double-acquired (pid mismatch),
+ *  this returns false so runWatcherLoop exits within one tick instead of
+ *  continuing to poll a project another watcher now owns. */
+export async function renewWatcherLock(
+  projectId: string,
+  pid: number = process.pid,
+): Promise<boolean> {
+  const holder = await readWatcherLock(projectId);
+  if (!holder || holder.pid !== pid) return false;
+  const body = JSON.stringify(
+    { pid, startedAt: holder.startedAt, renewedAt: nowIso() } satisfies WatcherLockInfo,
+  );
+  await writeFile(watcherLockPath(projectId), body, 'utf8');
+  return true;
 }
 
 /** Releases only our own lock — a takeover by a newer watcher (possible if
@@ -153,9 +194,10 @@ export async function writeInboundMarker(
   projectId: string,
   pulled: number,
 ): Promise<void> {
-  const markerPath = watcherMarkerPath(projectId);
-  await mkdir(path.dirname(markerPath), { recursive: true });
-  await writeFile(markerPath, JSON.stringify({ at: nowIso(), pulled }), 'utf8');
+  // Minor fix: atomic write (fs-utils' writeJson → write-file-atomic) instead
+  // of a raw writeFile — a hook reading this file mid-write must never see a
+  // truncated/partial JSON body.
+  await writeJson(watcherMarkerPath(projectId), { at: nowIso(), pulled });
 }
 
 // --- loop --------------------------------------------------------------------
@@ -167,6 +209,13 @@ export interface WatcherTickResult {
   pushed: number;
 }
 
+/** Injectable seams for tests (mirrors WatcherLoopDeps); production callers
+ *  pass nothing. */
+export interface WatcherTickDeps {
+  pull?: typeof autoPull;
+  push?: typeof autoPush;
+}
+
 /**
  * One watcher-sync tick: watermark pull, marker on delivery, then push —
  * but only when the local delta past the persisted push watermark contains
@@ -176,14 +225,23 @@ export interface WatcherTickResult {
  * The gate is a local DB read; with no push watermark yet it degrades to a
  * full scan, which self-heals as soon as the first push lands.
  */
-export async function watcherTick(projectId: string): Promise<WatcherTickResult> {
+export async function watcherTick(
+  projectId: string,
+  deps: WatcherTickDeps = {},
+): Promise<WatcherTickResult> {
+  const pull = deps.pull ?? autoPull;
+  const push = deps.push ?? autoPush;
   const state = await readSyncState(projectId);
-  if (!state?.syncEnabled || !state.syncTransport) {
+  // Minor fix: align with auto-sync-service's isConfigured — a project with
+  // syncEnabled+syncTransport but no remoteProjectId yet (half-configured)
+  // has no remote to talk to. Without this check the watcher polls forever
+  // instead of exiting 'not-configured'.
+  if (!state?.syncEnabled || !state.syncTransport || !state.remoteProjectId) {
     return { configured: false, pulled: 0, pushed: 0 };
   }
 
-  const pull = await autoPull(projectId);
-  const pulled = pull.pulled ?? 0;
+  const pullResult = await pull(projectId);
+  const pulled = pullResult.pulled ?? 0;
   if (pulled > 0) await writeInboundMarker(projectId, pulled);
 
   const head = await readHeadEventId(projectId);
@@ -192,13 +250,20 @@ export async function watcherTick(projectId: string): Promise<WatcherTickResult>
   const watermark = (await readSyncState(projectId))?.lastPushedEventId;
   if (head === watermark) return { configured: true, pulled, pushed: 0 };
   const delta = await readEventsSince(projectId, watermark);
+  // Critical-2b: exclude sync.state.updated — same filter buildPushPayload
+  // applies to the actual push payload. Without it, a pull's own watermark
+  // bookkeeping event (or, pre-fix, its per-tick 'syncing'/'idle' churn)
+  // always reads as a self-lane delta, so the gate never gates — every
+  // foreign-only pull still triggers a (wasted) push attempt.
   const hasSelfLaneEvents = delta.some(
-    (event) => !event.sourceProjectId || event.sourceProjectId === projectId,
+    (event) =>
+      event.type !== 'sync.state.updated' &&
+      (!event.sourceProjectId || event.sourceProjectId === projectId),
   );
   if (!hasSelfLaneEvents) return { configured: true, pulled, pushed: 0 };
 
-  const push = await autoPush(projectId);
-  return { configured: true, pulled, pushed: push.pushed ?? 0 };
+  const pushResult = await push(projectId);
+  return { configured: true, pulled, pushed: pushResult.pushed ?? 0 };
 }
 
 /**
@@ -211,11 +276,36 @@ export async function watcherTick(projectId: string): Promise<WatcherTickResult>
  * anchoring immediately, so the watcher dies within one poll of the agent
  * exiting; `claude --resume` respawns it via SessionStart.
  */
+export interface WatcherShouldExitOpts {
+  /** Critical-1b startup grace: when set together with graceMs, a cwd with
+   *  ZERO session pointers is treated as alive (not exit) until this many ms
+   *  have elapsed since startedAtMs. Defense in depth for the spawn-ordering
+   *  race (hook-service now spawns the watcher AFTER the session pointer
+   *  write, but this covers any future caller that gets the order wrong, or
+   *  a filesystem write that lands late under contention): a watcher child
+   *  that boots before its own session's pointer is written must not read
+   *  that transient zero-pointer state as "no session ever existed" and
+   *  exit at birth with nothing left to respawn it. Pointers that DO exist
+   *  (even stale ones) are judged normally — the grace only overrides the
+   *  "nothing here yet" case. */
+  startedAtMs?: number;
+  graceMs?: number;
+}
+
 export async function watcherShouldExit(
   cwd: string,
   projectId: string,
+  opts: WatcherShouldExitOpts = {},
 ): Promise<boolean> {
   const pointers = await listCwdPointers(cwd);
+  if (
+    pointers.length === 0 &&
+    opts.startedAtMs !== undefined &&
+    opts.graceMs !== undefined &&
+    Date.now() - opts.startedAtMs < opts.graceMs
+  ) {
+    return false;
+  }
   const now = Date.now();
   const threshold = staleThresholdMs();
   for (const pointer of pointers) {
@@ -243,7 +333,12 @@ export async function watcherShouldExit(
 
 export interface WatcherLoopResult {
   ticks: number;
-  exit: 'idle-sessions' | 'not-configured' | 'max-ticks';
+  exit:
+    | 'idle-sessions'
+    | 'not-configured'
+    | 'max-ticks'
+    | 'lock-lost'
+    | 'tick-failures';
 }
 
 /** Injectable seams for tests; production callers pass nothing. */
@@ -251,10 +346,19 @@ export interface WatcherLoopDeps {
   tick?: typeof watcherTick;
   shouldExit?: typeof watcherShouldExit;
   sleep?: (ms: number) => Promise<void>;
+  /** Important-A: per-tick lease self-verify + renew. Defaults to
+   *  renewWatcherLock(projectId) (own pid). Returns false when we no
+   *  longer hold the lock. */
+  renewLock?: (projectId: string) => Promise<boolean>;
 }
 
 const defaultSleep = (ms: number): Promise<void> =>
   new Promise((resolve) => setTimeout(resolve, ms));
+
+/** Important-B: a tick that throws (FS/DB hiccup — Windows AV EBUSY/EPERM,
+ *  SQLITE_BUSY) must not kill the daemon for the rest of the session; only
+ *  sustained failure should. */
+const MAX_CONSECUTIVE_TICK_FAILURES = 5;
 
 export async function runWatcherLoop(
   options: { cwd: string; projectId: string },
@@ -263,15 +367,55 @@ export async function runWatcherLoop(
   const tick = deps.tick ?? watcherTick;
   const shouldExit = deps.shouldExit ?? watcherShouldExit;
   const sleep = deps.sleep ?? defaultSleep;
+  const renewLock = deps.renewLock ?? renewWatcherLock;
   const pollMs = pollMsFromEnv();
   const maxTicks = maxTicksFromEnv();
+  // Critical-1b: the grace window is exactly one poll interval, timed from
+  // loop start — see WatcherShouldExitOpts.
+  const loopStartedAt = Date.now();
 
   let ticks = 0;
+  let consecutiveFailures = 0;
   for (;;) {
-    if (await shouldExit(options.cwd, options.projectId)) {
+    if (
+      await shouldExit(options.cwd, options.projectId, {
+        startedAtMs: loopStartedAt,
+        graceMs: pollMs,
+      })
+    ) {
       return { ticks, exit: 'idle-sessions' };
     }
-    const result = await tick(options.projectId);
+
+    // Important-A: re-verify + renew our lease BEFORE doing any sync work
+    // this tick. A racer that judged us dead and took over stale (the
+    // double-acquire the finding describes), or a foreign pid that reused
+    // ours (Windows PID reuse after a crash), both show up here as "not us
+    // anymore" — exit immediately instead of continuing to poll a project
+    // another watcher now owns. Self-heals a double-acquire within one tick.
+    if (!(await renewLock(options.projectId))) {
+      process.stderr.write(
+        `WARN: watcher lock-lost for ${options.projectId}; exiting\n`,
+      );
+      return { ticks, exit: 'lock-lost' };
+    }
+
+    let result: WatcherTickResult;
+    try {
+      result = await tick(options.projectId);
+      consecutiveFailures = 0;
+    } catch (error) {
+      consecutiveFailures += 1;
+      const message = error instanceof Error ? error.message : String(error);
+      process.stderr.write(
+        `WARN: watcher tick failed (${consecutiveFailures}/${MAX_CONSECUTIVE_TICK_FAILURES}): ${message}\n`,
+      );
+      if (consecutiveFailures >= MAX_CONSECUTIVE_TICK_FAILURES) {
+        return { ticks, exit: 'tick-failures' };
+      }
+      await sleep(pollMs);
+      continue;
+    }
+
     ticks += 1;
     if (!result.configured) return { ticks, exit: 'not-configured' };
     if (maxTicks !== undefined && ticks >= maxTicks) {
