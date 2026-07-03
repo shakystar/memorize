@@ -38,6 +38,24 @@ export interface StartupContextPayload {
    *  different task and avoid duplicate work. Empty when no parallel
    *  sessions are active. */
   otherActiveTasks?: OtherActiveTask[];
+  /** SoT-041 inbox: pending task requests addressed to THIS project by other
+   *  workspace member projects. Present only when non-empty. The agent should
+   *  accept (`memorize task request accept <id>`) or decline with a reason —
+   *  silence leaves the requester waiting. */
+  inboundTaskRequests?: Array<{
+    id: string;
+    fromProjectId: string;
+    title: string;
+    goal: string;
+    createdAt: ISODateString;
+  }>;
+  /** SoT-041 inbox read-side guard: count of pending inbound requests beyond
+   *  the 5-oldest cap already applied to `inboundTaskRequests` (oldest = most
+   *  escalated). This bound is independent of any write-side guard — a
+   *  malicious or buggy member project can still sync a flood of
+   *  `task.requested` events, so the read boundary caps how many ever reach a
+   *  renderer. Present only when > 0 so renderers can append "and K more". */
+  inboundTaskRequestsOmitted?: number;
   /** CLS long-term layer: consolidated decisions/rationale/progress picked
    *  by retrieval-time ranking (recency decay + salience + relevance).
    *  Already budget-trimmed by the retrieval service. */

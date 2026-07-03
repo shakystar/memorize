@@ -1,4 +1,5 @@
 import { requireBoundProjectId } from '../../services/project-service.js';
+import { listMemberProjects } from '../../services/task-request-service.js';
 import {
   bindWorkspace,
   changeWorkspaceMemberRole,
@@ -19,6 +20,7 @@ const INVITE_USAGE =
 const JOIN_USAGE =
   'Usage: memorize workspace join --remote-url <hub-url> --token <invite-token>';
 const MEMBERS_USAGE = 'Usage: memorize workspace members [--json]';
+const SOURCES_USAGE = 'Usage: memorize workspace sources [--json]';
 const PROMOTE_USAGE =
   'Usage: memorize workspace promote <accountId-or-email>';
 const DEMOTE_USAGE = 'Usage: memorize workspace demote <accountId-or-email>';
@@ -29,6 +31,7 @@ const USAGE = [
   INVITE_USAGE,
   JOIN_USAGE,
   MEMBERS_USAGE,
+  SOURCES_USAGE,
   PROMOTE_USAGE,
   DEMOTE_USAGE,
   REMOVE_USAGE,
@@ -39,8 +42,10 @@ const USAGE = [
  * H030/H040): identity bind (W-a), invite/join (W-d), and roster/role
  * management (W-c). Everything here is typed gateway calls — a workspace never
  * writes domain events, and the local `proj_` identity is never rekeyed
- * (SoT-021). The shared-memory data-plane is ordinary sync over the `wsp_`
- * events route (W-b).
+ * (SoT-021). `sources` is the exception: a pure local read of the union's
+ * genesis roster (SoT-041) — no gateway call, works offline. The
+ * shared-memory data-plane is ordinary sync over the `wsp_` events route
+ * (W-b).
  */
 export async function runWorkspaceCommand(
   args: string[],
@@ -65,6 +70,10 @@ export async function runWorkspaceCommand(
   }
   if (subcommand === 'members') {
     await runWorkspaceMembers(args.slice(1), ctx);
+    return;
+  }
+  if (subcommand === 'sources') {
+    await runWorkspaceSources(args.slice(1), ctx);
     return;
   }
   if (subcommand === 'promote' || subcommand === 'demote') {
@@ -102,6 +111,31 @@ async function runWorkspaceMembers(
   for (const member of roster.members) {
     console.log(
       `  ${member.role.padEnd(6)} ${member.email} (${member.accountId}) joined ${member.joinedAt}`,
+    );
+  }
+}
+
+/**
+ * `memorize workspace sources [--json]` — the addressable PROJECT roster
+ * (SoT-041), as opposed to `members` (the account roster). Derived locally
+ * from union genesis events; works offline and needs no Hub call, so it also
+ * answers "which folders are actually synced into this workspace".
+ */
+async function runWorkspaceSources(
+  args: string[],
+  ctx: CliContext,
+): Promise<void> {
+  const flags = parseFlags(args, { boolean: ['json'] });
+  const projectId = await requireBoundProjectId(ctx.cwd);
+  const members = await listMemberProjects(projectId);
+  if (flags.boolean.json) {
+    console.log(JSON.stringify(members));
+    return;
+  }
+  console.log(`member projects: ${members.length}`);
+  for (const member of members) {
+    console.log(
+      `  ${member.id}  ${member.title}${member.isSelf ? '  (self)' : ''}`,
     );
   }
 }

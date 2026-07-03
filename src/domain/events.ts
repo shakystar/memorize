@@ -16,6 +16,9 @@ import type {
   SessionHeartbeatPayload,
   Task,
   TaskItemAppendedPayload,
+  TaskRequest,
+  TaskRequestAcceptedPayload,
+  TaskRequestDeclinedPayload,
   Workstream,
 } from './entities.js';
 
@@ -30,6 +33,14 @@ export type DomainEventType =
   // (SoT-030): concurrent writers union cleanly, where a whole-array
   // `task.updated` patch would last-writer-wins away the other's items.
   | 'task.item-appended'
+  // Cross-project delegation (SoT-041). `task.requested` is authored in the
+  // REQUESTER's store and addresses a member project via payload
+  // targetProjectId; accept/decline are authored by the TARGET's local writer
+  // and reference the request by id. Propose-accept keeps task minting local:
+  // a request never becomes a task without a local `task.created`.
+  | 'task.requested'
+  | 'task.request-accepted'
+  | 'task.request-declined'
   | 'handoff.created'
   | 'checkpoint.created'
   | 'decision.proposed'
@@ -83,6 +94,9 @@ export type DomainEventPayload =
   | Task
   | Partial<Task>
   | TaskItemAppendedPayload
+  | TaskRequest
+  | TaskRequestAcceptedPayload
+  | TaskRequestDeclinedPayload
   | Handoff
   | Checkpoint
   | Decision

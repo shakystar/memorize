@@ -11,6 +11,8 @@ import type {
   Rule,
   Session,
   Task,
+  TaskRequest,
+  TaskRequestStatus,
   Workstream,
 } from '../domain/entities.js';
 import {
@@ -93,6 +95,7 @@ const SINGLETON_TABLES = ['projects', 'memory_index'] as const;
 const ENTITY_TABLES = [
   'workstreams',
   'tasks',
+  'task_requests',
   'handoffs',
   'checkpoints',
   'decisions',
@@ -310,6 +313,21 @@ export async function rebuildProjectProjection(
         ]),
         sourceProjectId,
       );
+    }
+
+    const insertTaskRequest = db.prepare(
+      `INSERT INTO task_requests (id, status, target_project_id, source_project_id, created_at, data)
+       VALUES (@id, @status, @targetProjectId, @sourceProjectId, @createdAt, @data)`,
+    );
+    for (const [key, request] of Object.entries(state.taskRequests)) {
+      insertTaskRequest.run({
+        id: request.id,
+        status: request.status,
+        targetProjectId: request.targetProjectId,
+        sourceProjectId: laneColumn(key),
+        createdAt: request.createdAt ?? null,
+        data: JSON.stringify(request),
+      });
     }
 
     const insertHandoff = db.prepare(
@@ -585,6 +603,49 @@ export function listTasks(
     .prepare(`SELECT data FROM tasks${where} ORDER BY created_at ASC`)
     .all(...params) as Array<{ data: string }>;
   return parseAll<Task>(rows);
+}
+
+export async function getTaskRequest(
+  projectId: string,
+  requestId: string,
+): Promise<TaskRequest | undefined> {
+  const row = db(projectId)
+    .prepare('SELECT data FROM task_requests WHERE id = ?')
+    .get(requestId) as { data: string } | undefined;
+  return parse<TaskRequest>(row);
+}
+
+export interface ListTaskRequestsFilters {
+  direction?: 'inbound' | 'outbound';
+  status?: TaskRequestStatus;
+}
+
+/**
+ * SoT-041 addressing is a union filter, not routing: inbound = any lane's
+ * request addressed to THIS store; outbound = the self lane's own requests
+ * (self-targeting is rejected at creation, so the two sets are disjoint).
+ */
+export async function listTaskRequests(
+  projectId: string,
+  filters: ListTaskRequestsFilters = {},
+): Promise<TaskRequest[]> {
+  const clauses: string[] = [];
+  const params: Record<string, string> = {};
+  if (filters.direction === 'inbound') {
+    clauses.push('target_project_id = @self');
+    params.self = projectId;
+  } else if (filters.direction === 'outbound') {
+    clauses.push('source_project_id IS NULL');
+  }
+  if (filters.status) {
+    clauses.push('status = @status');
+    params.status = filters.status;
+  }
+  const where = clauses.length > 0 ? ` WHERE ${clauses.join(' AND ')}` : '';
+  const rows = db(projectId)
+    .prepare(`SELECT data FROM task_requests${where} ORDER BY created_at ASC`)
+    .all(params) as Array<{ data: string }>;
+  return parseAll<TaskRequest>(rows);
 }
 
 export function getHandoff(

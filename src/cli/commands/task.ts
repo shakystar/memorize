@@ -5,7 +5,9 @@ import {
   PRIORITY_VALUES,
   type Confidence,
   type Task,
+  type TaskRequestStatus,
 } from '../../domain/entities.js';
+import { autoPush } from '../../services/auto-sync-service.js';
 import { loadStartContext } from '../../services/context-service.js';
 import {
   requireBoundProjectId,
@@ -22,6 +24,12 @@ import {
   readTask,
   updateTask,
 } from '../../services/task-service.js';
+import {
+  acceptTaskRequest,
+  declineTaskRequest,
+  listTaskRequests,
+  requestTask,
+} from '../../services/task-request-service.js';
 import type { CliContext } from '../context.js';
 import { parseFlags } from '../parse-flags.js';
 import { renderScaffoldUsage } from '../usage.js';
@@ -114,6 +122,147 @@ async function runListTasks(
   for (const task of tasks) {
     console.log(`${task.id}\t${task.status}\t${task.priority}\t${task.title}`);
   }
+}
+
+const REQUEST_USAGE = [
+  'Usage:',
+  '  memorize task request <title…> --to <proj_id|project-title> [--description <t>] [--goal <t>] [--ac <item>]…',
+  '  memorize task request list [--inbound|--outbound] [--status pending|accepted|declined]',
+  '  memorize task request accept <requestId>',
+  '  memorize task request decline <requestId> --reason <text>',
+].join('\n');
+
+/** SoT-042 sender half: a delegation mutation must not wait for SessionEnd.
+ *  autoPush never throws; an unconfigured transport degrades to a note. */
+async function pushRequestBoundary(projectId: string): Promise<void> {
+  const result = await autoPush(projectId);
+  if (result.ran) {
+    console.log('Pushed to the workspace hub — the request is delivered.');
+  } else if (result.reason === 'not-configured') {
+    console.log('Note: remote sync not configured — the request stays local until sync is set up.');
+  }
+}
+
+async function runTaskRequest(
+  args: string[],
+  _ctx: CliContext,
+  projectId: string,
+): Promise<void> {
+  const action = args[0];
+  // Constraint: create is the ONLY form that takes --to, so its presence
+  // unambiguously selects create. Without this, a title starting with a
+  // reserved word misroutes — `task request list of demands --to X` would
+  // land in the list handler and die with `Unknown flag --to.`. parseFlags
+  // accepts both `--to <ref>` and `--to=<ref>`, so match both spellings.
+  const isCreate = args.some((a) => a === '--to' || a.startsWith('--to='));
+  if (!isCreate && action === 'list') {
+    return runTaskRequestList(args.slice(1), projectId);
+  }
+  if (!isCreate && action === 'accept') {
+    return runTaskRequestAccept(args.slice(1), projectId);
+  }
+  if (!isCreate && action === 'decline') {
+    return runTaskRequestDecline(args.slice(1), projectId);
+  }
+  return runTaskRequestCreate(args, projectId);
+}
+
+async function runTaskRequestCreate(
+  args: string[],
+  projectId: string,
+): Promise<void> {
+  const flags = parseFlags(args, {
+    single: ['to', 'description', 'goal'],
+    multi: ['ac'],
+  });
+  const title = flags.positional.join(' ').trim();
+  if (!title) throw new Error(`Task request title is required.\n${REQUEST_USAGE}`);
+  const targetRef = flags.single.to?.trim();
+  if (!targetRef) throw new Error(`--to <project> is required.\n${REQUEST_USAGE}`);
+  const request = await requestTask({
+    projectId,
+    targetRef,
+    title,
+    ...(flags.single.description ? { description: flags.single.description } : {}),
+    ...(flags.single.goal ? { goal: flags.single.goal } : {}),
+    ...(flags.multi.ac ? { acceptanceCriteria: flags.multi.ac } : {}),
+    actor: ACTOR_USER,
+  });
+  console.log(`Created task request ${request.id} -> ${targetRef}`);
+  await pushRequestBoundary(projectId);
+}
+
+const REQUEST_STATUSES: TaskRequestStatus[] = ['pending', 'accepted', 'declined'];
+
+async function runTaskRequestList(
+  args: string[],
+  projectId: string,
+): Promise<void> {
+  const flags = parseFlags(args, {
+    boolean: ['inbound', 'outbound'],
+    single: ['status'],
+  });
+  if (flags.boolean.inbound && flags.boolean.outbound) {
+    throw new Error('Pass at most one of --inbound/--outbound.');
+  }
+  const status = flags.single.status as TaskRequestStatus | undefined;
+  if (status && !REQUEST_STATUSES.includes(status)) {
+    throw new Error(`--status must be one of ${REQUEST_STATUSES.join('|')}.`);
+  }
+  const direction = flags.boolean.inbound
+    ? ('inbound' as const)
+    : flags.boolean.outbound
+      ? ('outbound' as const)
+      : undefined;
+  const requests = await listTaskRequests(projectId, {
+    ...(direction ? { direction } : {}),
+    ...(status ? { status } : {}),
+  });
+  if (requests.length === 0) {
+    console.log('No task requests found.');
+    return;
+  }
+  for (const request of requests) {
+    const arrow =
+      request.targetProjectId === projectId
+        ? `from ${request.projectId}`
+        : `to ${request.targetProjectId}`;
+    console.log(
+      `${request.id}\t${request.status}\t${arrow}\t${request.title}` +
+        (request.declineReason ? `\t(declined: ${request.declineReason})` : ''),
+    );
+  }
+}
+
+async function runTaskRequestAccept(
+  args: string[],
+  projectId: string,
+): Promise<void> {
+  const requestId = args[0]?.trim();
+  if (!requestId) throw new Error(`Request id is required.\n${REQUEST_USAGE}`);
+  const { task } = await acceptTaskRequest({
+    projectId,
+    requestId,
+    actor: ACTOR_USER,
+  });
+  console.log(`Created task ${task.id} from request ${requestId}`);
+  await pushRequestBoundary(projectId);
+}
+
+async function runTaskRequestDecline(
+  args: string[],
+  projectId: string,
+): Promise<void> {
+  const flags = parseFlags(args, { single: ['reason'] });
+  const requestId = flags.positional[0]?.trim();
+  if (!requestId) throw new Error(`Request id is required.\n${REQUEST_USAGE}`);
+  const reason = flags.single.reason?.trim();
+  if (!reason) {
+    throw new Error(`--reason is required — it flows back to the requester.\n${REQUEST_USAGE}`);
+  }
+  await declineTaskRequest({ projectId, requestId, reason, actor: ACTOR_USER });
+  console.log(`Declined request ${requestId}: ${reason}`);
+  await pushRequestBoundary(projectId);
 }
 
 async function runResumeTask(
@@ -392,6 +541,7 @@ const taskHandlers: Record<string, TaskHandler> = {
   create: runCreateTask,
   show: runShowTask,
   list: runListTasks,
+  request: runTaskRequest,
   resume: runResumeTask,
   start: runResumeTask,
   checkpoint: runCheckpointTask,

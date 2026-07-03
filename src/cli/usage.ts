@@ -23,6 +23,8 @@ export function renderScaffoldUsage(): string {
     '  memorize task handoff ...    Record a handoff to the next agent',
     '  memorize task update ...     Correct a task title/note (append-only)',
     '  memorize task done ...       Mark a task complete (handoff_ready -> done)',
+    '  memorize task request ...    Delegate work to another workspace project (SoT-041)',
+    '  memorize workspace sources   List addressable member projects (folders synced here)',
     '  memorize task cancel ...     Cancel a task (terminal, append-only)',
     '  memorize project decision list   List project decisions (accepted; --all for superseded)',
     '  memorize project decision show <id>  Print a single decision in full',

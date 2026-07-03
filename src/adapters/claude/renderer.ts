@@ -224,6 +224,36 @@ export function renderClaudeStartupContext(
     });
   }
 
+  if (payload.inboundTaskRequests && payload.inboundTaskRequests.length > 0) {
+    const inboxLines: string[] = [
+      'Inbound task requests (delegated by other workspace member projects):',
+    ];
+    for (const request of payload.inboundTaskRequests) {
+      inboxLines.push(
+        `- ${request.id} from ${request.fromProjectId}: "${request.title}" — ${request.goal}`,
+      );
+    }
+    if (payload.inboundTaskRequestsOmitted) {
+      inboxLines.push(
+        `...and ${payload.inboundTaskRequestsOmitted} more — run \`memorize task request list --inbound\`.`,
+      );
+    }
+    inboxLines.push(
+      'Resolve each: `memorize task request accept <id>` or ' +
+        '`memorize task request decline <id> --reason <text>` — silence leaves the requester waiting.',
+    );
+    // Priority 5.7: adjacent to otherActiveTasks (6) — pending delegation
+    // needs a response, so it ranks just below open conflicts (5.5) and
+    // above the parallel-session visibility block.
+    blocks.push({
+      priority: 5.7,
+      source: 'memorize.inbox',
+      content: wrapUntrusted(inboxLines.join('\n'), {
+        source: 'memorize.inbox',
+      }),
+    });
+  }
+
   if (payload.otherActiveTasks && payload.otherActiveTasks.length > 0) {
     const otherLines: string[] = ['Other active tasks:'];
     for (const entry of payload.otherActiveTasks) {

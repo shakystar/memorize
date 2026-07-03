@@ -297,6 +297,26 @@ const MIGRATIONS: ReadonlyArray<(db: Database.Database) => void> = [
       ALTER TABLE search_fts_new RENAME TO search_fts;
     `);
   },
+  // v13 — task_requests projection table (3.0.0 slice 1, SoT-041 cross-project
+  // delegation). A replace-all sink for `state.taskRequests`, same grade as the
+  // v3 entity tables: `data` holds the full entity JSON; the extra columns exist
+  // only where a reader filters or sorts (`target_project_id` = inbound
+  // addressing, `source_project_id` = provenance lane with NULL = self,
+  // `created_at` = list order). A NEW entry — NOT folded into the v3 body —
+  // because runMigrations replays only from the store's current user_version,
+  // so DDL added to an already-shipped migration never reaches existing stores.
+  (db) => {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS task_requests (
+        id                TEXT PRIMARY KEY,
+        status            TEXT,
+        target_project_id TEXT,
+        source_project_id TEXT,
+        created_at        TEXT,
+        data              TEXT NOT NULL
+      );
+    `);
+  },
 ];
 
 function runMigrations(db: Database.Database): void {

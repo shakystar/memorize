@@ -40,6 +40,24 @@ const SHARED_MEMORY_BUDGET_CHARS = 2000;
 const SHARED_MEMORY_ENTRY_CHARS_OVERHEAD = 24;
 
 /**
+ * SoT-041 inbox READ-side guard — independent of the write-side guard
+ * (`assertContentLength` in task-request-service, which only binds an honest
+ * local writer). A synced-in `task.requested` event from a malicious or buggy
+ * member project can still flood the union log or carry oversized title/goal
+ * text, so this consumption boundary caps volume and truncates text before it
+ * ever reaches a renderer. `listTaskRequests` already orders oldest-first
+ * (created_at ASC), so a plain slice keeps the OLDEST pending requests — the
+ * most escalated — rather than an arbitrary/newest subset.
+ */
+const INBOUND_TASK_REQUEST_CAP = 5;
+const INBOUND_TASK_REQUEST_TITLE_MAX = 200;
+const INBOUND_TASK_REQUEST_GOAL_MAX = 500;
+
+function truncateInboxField(value: string, max: number): string {
+  return value.length > max ? `${value.slice(0, max)}…` : value;
+}
+
+/**
  * Top personal memories for the startup channel. Best-effort and never-throw:
  * a missing/unreadable personal store yields []. Guarded by personalStoreExists
  * so a user who has never captured personal memory does not get an empty store
@@ -129,6 +147,7 @@ import {
   getRule,
   getWorkstream,
   listOpenConflicts,
+  listTaskRequests,
   listValidMemories,
 } from './projection-store.js';
 import { getWorkspaceBinding } from './workspace-service.js';
@@ -260,6 +279,29 @@ export async function loadStartContext(params: {
       : undefined;
   const rules = readProjectRules(params.projectId, project.ruleIds);
 
+  // SoT-041 inbox: surface pending inbound delegation at the same boundary
+  // that surfaces everything else — no polling, just the projection read.
+  // Capped + truncated at this read boundary (see INBOUND_TASK_REQUEST_CAP
+  // above) so a foreign member project can never flood or bloat the startup
+  // payload regardless of what the write-side guard let through.
+  const allInboundTaskRequests = await listTaskRequests(params.projectId, {
+    direction: 'inbound',
+    status: 'pending',
+  });
+  const inboundTaskRequestsOmitted = Math.max(
+    0,
+    allInboundTaskRequests.length - INBOUND_TASK_REQUEST_CAP,
+  );
+  const inboundTaskRequests = allInboundTaskRequests
+    .slice(0, INBOUND_TASK_REQUEST_CAP)
+    .map((request) => ({
+      id: request.id,
+      fromProjectId: request.projectId,
+      title: truncateInboxField(request.title, INBOUND_TASK_REQUEST_TITLE_MAX),
+      goal: truncateInboxField(request.goal, INBOUND_TASK_REQUEST_GOAL_MAX),
+      createdAt: request.createdAt,
+    }));
+
   const otherActiveTasks = await buildOtherActiveTasks({
     projectId: params.projectId,
     sessions: activeSessions,
@@ -363,5 +405,7 @@ export async function loadStartContext(params: {
     openConflicts: listOpenConflicts(params.projectId),
     mustReadTopics: memoryIndex?.mustReadTopics ?? [],
     ...(otherActiveTasks.length > 0 ? { otherActiveTasks } : {}),
+    ...(inboundTaskRequests.length > 0 ? { inboundTaskRequests } : {}),
+    ...(inboundTaskRequestsOmitted > 0 ? { inboundTaskRequestsOmitted } : {}),
   };
 }
