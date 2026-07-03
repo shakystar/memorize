@@ -21,10 +21,12 @@ import {
   watcherTick,
   writeInboundMarker,
 } from '../../src/services/watcher-service.js';
+import { createFileSyncTransport } from '../../src/adapters/sync-transport-file.js';
 import { createProject } from '../../src/services/project-service.js';
 import { updateSyncState } from '../../src/services/sync-service.js';
 import { createTask } from '../../src/services/task-service.js';
 import { getSyncFile } from '../../src/storage/path-resolver.js';
+import { readEvents } from '../../src/storage/event-store.js';
 import { closeAll } from '../../src/storage/db.js';
 
 const PROJECT = 'proj_watcher_test';
@@ -405,6 +407,92 @@ describe('watcherTick', () => {
     });
     expect(pushCalls).toBe(1);
     expect(result.pushed).toBe(1);
+  });
+});
+
+describe('watcherTick — real transport, end-to-end (SoT-043)', () => {
+  it('pulls foreign events with a marker, gates a foreign-only delta, and pushes real self work', async () => {
+    const remote = join(sandbox, 'remote');
+    const project = await createProject({ title: 'Watcher E2E', rootPath: sandbox });
+    await updateSyncState(project.id, {
+      remoteProjectId: project.id,
+      syncEnabled: true,
+      syncTransport: { type: 'file', location: remote },
+    });
+    const transport = createFileSyncTransport(remote);
+
+    // Baseline: converge the project's own creation events to the remote so
+    // the scenario below starts from a caught-up watermark.
+    await watcherTick(project.id);
+    await rm(watcherMarkerPath(project.id), { force: true }).catch(() => {});
+
+    // 1. Seed the remote with a FOREIGN event directly over the real
+    //    transport (bypassing pushProject, which would stamp our own
+    //    projectId as sourceProjectId) — simulates a sibling contributor's
+    //    event landing in the shared union lane.
+    const foreignEvent = {
+      id: 'evt_foreign_1',
+      schemaVersion: '1.0.0',
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      type: 'task.created' as const,
+      projectId: project.id,
+      scopeType: 'task' as const,
+      scopeId: 'task_foreign_1',
+      actor: 'remote-user',
+      sourceProjectId: 'proj_foreign_other',
+      payload: { id: 'task_foreign_1', title: 'Foreign task' } as never,
+    };
+    await transport.push({
+      projectId: project.id,
+      remoteProjectId: project.id,
+      events: [foreignEvent],
+    });
+
+    const tick1 = await watcherTick(project.id);
+    expect(tick1.pulled).toBe(1);
+    expect(tick1.pushed).toBe(0); // gate: the only new delta is foreign
+    const marker1 = JSON.parse(
+      await readFile(watcherMarkerPath(project.id), 'utf8'),
+    ) as { pulled: number };
+    expect(marker1.pulled).toBe(1);
+    const afterTick1 = await readEvents(project.id);
+    expect(afterTick1.some((e) => e.id === 'evt_foreign_1')).toBe(true);
+
+    // 2. Empty remote (nothing new) → tick → NO new marker.
+    await rm(watcherMarkerPath(project.id), { force: true });
+    const tick2 = await watcherTick(project.id);
+    expect(tick2.pulled).toBe(0);
+    await expect(stat(watcherMarkerPath(project.id))).rejects.toThrow();
+
+    // 3. A genuine self event → tick → push happens, remote gains it.
+    await createTask({ projectId: project.id, title: 'Local work', actor: 'user' });
+    const tick3 = await watcherTick(project.id);
+    expect(tick3.pushed).toBeGreaterThan(0);
+    const remoteAfterPush = await transport.pull({
+      projectId: project.id,
+      remoteProjectId: project.id,
+    });
+    expect(
+      remoteAfterPush.events.some((e) => e.scopeType === 'task' && e.actor === 'user'),
+    ).toBe(true);
+
+    // 4. Foreign-only delta after pull → tick → no push (gate).
+    await transport.push({
+      projectId: project.id,
+      remoteProjectId: project.id,
+      events: [
+        {
+          ...foreignEvent,
+          id: 'evt_foreign_2',
+          scopeId: 'task_foreign_2',
+          payload: { id: 'task_foreign_2', title: 'Foreign task 2' } as never,
+        },
+      ],
+    });
+    const tick4 = await watcherTick(project.id);
+    expect(tick4.pulled).toBe(1);
+    expect(tick4.pushed).toBe(0);
   });
 });
 
