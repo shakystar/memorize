@@ -76,8 +76,28 @@ describe('isNewerVersion', () => {
     expect(isNewerVersion('3.0.0', '2.99.99')).toBe(true);
   });
 
-  it('ignores prerelease suffixes (v1 scope)', () => {
+  it('ranks a stable release above a prerelease of the same version', () => {
+    // The 3.0.0 dogfood regression: a dev-channel install must upgrade to
+    // the matching stable instead of reporting "Already up to date".
+    expect(isNewerVersion('3.0.0', '3.0.0-dev.72')).toBe(true);
+    expect(isNewerVersion('3.0.0-dev.72', '3.0.0')).toBe(false);
+  });
+
+  it('compares prerelease identifiers per semver', () => {
+    expect(isNewerVersion('3.0.0-dev.77', '3.0.0-dev.64')).toBe(true);
+    expect(isNewerVersion('3.0.0-dev.64', '3.0.0-dev.77')).toBe(false);
+    expect(isNewerVersion('3.0.0-dev.9', '3.0.0-dev.10')).toBe(false);
+    expect(isNewerVersion('3.0.0-dev.1', '3.0.0-dev.1')).toBe(false);
+    // Numeric identifiers rank below alphanumeric ones.
+    expect(isNewerVersion('3.0.0-rc.1', '3.0.0-1.1')).toBe(true);
+    // A longer prerelease is newer when the shared prefix matches.
+    expect(isNewerVersion('3.0.0-dev.1.1', '3.0.0-dev.1')).toBe(true);
+  });
+
+  it('still compares across different cores with prereleases attached', () => {
     expect(isNewerVersion('2.4.0-rc.1', '2.3.0')).toBe(true);
+    expect(isNewerVersion('3.0.1-dev.1', '3.0.0')).toBe(true);
+    expect(isNewerVersion('3.0.0-dev.99', '3.0.1')).toBe(false);
   });
 });
 
