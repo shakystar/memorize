@@ -100,6 +100,20 @@ describe('isNewerVersion', () => {
     expect(isNewerVersion('3.0.1-dev.1', '3.0.0')).toBe(true);
     expect(isNewerVersion('3.0.0-dev.99', '3.0.1')).toBe(false);
   });
+
+  it('ignores SemVer build metadata for precedence', () => {
+    // Per semver §10, build metadata (+…) MUST NOT affect precedence. The old
+    // parser left `+sha` glued to the last prerelease identifier, so
+    // `dev.1+sha` read as alphanumeric and outranked the numeric `dev.2`,
+    // making `memorize update` skip a real upgrade.
+    expect(isNewerVersion('3.0.0-dev.2', '3.0.0-dev.1+sha')).toBe(true);
+    expect(isNewerVersion('3.0.0-dev.1+sha', '3.0.0-dev.2')).toBe(false);
+    // Build metadata alone is not an upgrade.
+    expect(isNewerVersion('3.0.0+build.5', '3.0.0+build.1')).toBe(false);
+    // Build metadata on the core must not corrupt the numeric core compare.
+    expect(isNewerVersion('3.0.1+sha', '3.0.0')).toBe(true);
+    expect(isNewerVersion('3.0.0', '3.0.1+sha')).toBe(false);
+  });
 });
 
 describe('runSelfUpdate', () => {
