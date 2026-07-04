@@ -192,8 +192,8 @@ export async function createHandoff(input: CreateHandoffInput): Promise<Handoff>
   }
   // Route the status change through the state machine instead of the old
   // direct-append bypass: a handoff from `todo` is rejected (start first),
-  // while a re-handoff (already handoff_ready) is an idempotent no-op that
-  // only refreshes the snapshot pointer.
+  // while a re-handoff (already handoff_ready) is allowed and simply
+  // refreshes the snapshot pointer.
   if (existing.status !== 'handoff_ready') {
     assertTaskStatusTransition(existing.status, 'handoff_ready');
   }

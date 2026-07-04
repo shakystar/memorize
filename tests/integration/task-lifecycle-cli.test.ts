@@ -57,6 +57,23 @@ describe('memorize task start (status transition to in_progress)', () => {
     expect(result.status).toBe(0);
     const task = await readTask(projectId, taskId);
     expect(task?.status).toBe('in_progress');
+    const parsed = JSON.parse(result.stdout);
+    expect(parsed.task.status).toBe('in_progress');
+  });
+
+  it('re-grabs the baton: start on a handoff_ready task returns it to in_progress', async () => {
+    const { projectId, taskId } = await seedTask();
+    expect(runCli(['task', 'start', taskId]).status).toBe(0);
+    expect(
+      runCli([
+        'task', 'handoff', '--task', taskId,
+        '--summary', 'x', '--next', 'y',
+      ]).status,
+    ).toBe(0);
+    expect((await readTask(projectId, taskId))?.status).toBe('handoff_ready');
+    const result = runCli(['task', 'start', taskId]);
+    expect(result.status).toBe(0);
+    expect((await readTask(projectId, taskId))?.status).toBe('in_progress');
   });
 
   it('is an idempotent no-op when already in_progress (no extra event)', async () => {
