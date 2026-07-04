@@ -20,7 +20,12 @@ export default defineConfig({
       // default; force it off suite-wide so hook tests never spawn real
       // children or touch the network. update-notice tests re-enable it
       // by deleting this var explicitly.
-      MEMORIZE_UPDATE_CHECK_DISABLED: '1'
+      MEMORIZE_UPDATE_CHECK_DISABLED: '1',
+      // SessionStart spawns the detached watcher-sync loop (SoT-042/043) by
+      // default; force it off suite-wide so hook tests never leave a live
+      // polling child behind. watcher tests exercise spawnDetachedWatcher
+      // with an injected spawnImpl and delete this var explicitly.
+      MEMORIZE_WATCHER_DISABLED: '1'
     }
   }
 });

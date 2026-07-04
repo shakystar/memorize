@@ -13,11 +13,12 @@ import {
 } from './workspace-service.js';
 
 /**
- * P3-b — background auto-sync. Agents never call sync; boundary hooks invoke
- * these wrappers, which propagate events over the persisted transport. The
- * "no expensive per-turn work" rule (rc.0-4) is respected by wiring these to
- * BOUNDARIES only (PostCompact/SessionEnd push, SessionStart pull) — never
- * PostToolUse.
+ * P3-b — background auto-sync. Agents never call sync; boundary hooks and the
+ * session-bound watcher (SoT-042/043) invoke these wrappers, which propagate
+ * events over the persisted transport. The "no expensive per-turn work" rule
+ * (rc.0-4) still holds: callers are boundaries (PostCompact push, SessionStart
+ * pull, delegation-command inline push) and the DETACHED watcher's poll ticks
+ * — never PostToolUse, which stays network-free.
  *
  * Both helpers are watermark-gated (push/pull are incremental; a no-op is
  * cheap) and NEVER throw — a failure degrades to a stderr warn and a no-op,

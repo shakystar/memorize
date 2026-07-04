@@ -51,7 +51,10 @@ export type { CwdSessionPointer } from '../storage/cwd-session-store.js';
  * workflows.
  */
 const DEFAULT_STALE_SESSION_MS = 30 * 60 * 1000;
-function staleThresholdMs(): number {
+// Exported for the watcher's session-idle exit test (SoT-042/043): the
+// watcher lives exactly as long as the reap sweep would consider some
+// session alive — one knob, one meaning of "this session is gone".
+export function staleThresholdMs(): number {
   const raw = process.env.MEMORIZE_STALE_SESSION_MS;
   if (raw === undefined || raw === '') return DEFAULT_STALE_SESSION_MS;
   const parsed = Number(raw);

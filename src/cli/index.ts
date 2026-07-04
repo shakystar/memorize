@@ -24,6 +24,7 @@ import { runSetupCommand } from './commands/setup.js';
 import { runTaskCommand } from './commands/task.js';
 import { runUninstallCommand } from './commands/uninstall.js';
 import { runUpdateCommand } from './commands/update.js';
+import { runWatcherCommand } from './commands/watcher.js';
 import { runWorkspaceCommand } from './commands/workspace.js';
 import type { CliContext, CommandHandler } from './context.js';
 import { writeFatalErrorAndExit } from './fatal-error.js';
@@ -61,6 +62,7 @@ const handlers: Record<string, CommandHandler> = {
   task: runTaskCommand,
   conflict: runConflictCommand,
   consolidate: runConsolidateCommand,
+  watcher: runWatcherCommand,
   session: runSessionCommand,
   setup: runSetupCommand,
   mcp: runMcpCommand,
@@ -81,6 +83,10 @@ const SESSION_MANAGING_COMMANDS = new Set([
   'session',
   'setup',
   'consolidate',
+  // `watcher` is the long-lived detached sync loop (SoT-042/043); it EXITS on
+  // heartbeat staleness, so a heartbeat from it would keep itself alive
+  // forever through the very signal it polls.
+  'watcher',
   // `update` is machine-wide maintenance that may run outside any bound
   // project (and re-execs itself); a heartbeat from it would be wrong.
   'update',

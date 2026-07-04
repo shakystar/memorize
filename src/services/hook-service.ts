@@ -49,6 +49,7 @@ import {
 } from './session-service.js';
 import { createCheckpoint } from './task-service.js';
 import { getUpdateNotice } from './update-service.js';
+import { spawnDetachedWatcher } from './watcher-service.js';
 
 interface HookContext {
   projectId: string;
@@ -386,6 +387,14 @@ const handleSessionStart: HookHandler = async (ctx) => {
   // unless this project has a persisted syncTransport; never throws.
   await autoPull(ctx.projectId);
 
+  // SoT-042/043: spawn the session-bound watcher — the detached loop that
+  // gives sync its mid-session cadence (watermark pull + push every ~30s)
+  // and exits on its own when this cwd's sessions go heartbeat-stale.
+  // No-spawn when sync is unconfigured or a live watcher already holds the
+  // project lock; failure degrades to boundary-only sync, never breaks
+  // startup.
+  await spawnDetachedWatcher({ projectId: ctx.projectId, cwd: ctx.cwd });
+
   const identity = parseIdentityPayload(ctx.rawPayload);
   // Walk up from this hook subprocess to find the agent's pid. Stored
   // on the pointer so the picker can later detect "agent process
@@ -658,11 +667,16 @@ const handleSessionEnd: HookHandler = async (ctx) => {
     transcriptPathFromPayload(ctx.rawPayload),
   );
 
-  // P3-b: final push of the session's events before it exits. The subprocess
-  // may be reaped mid-push — fine, push is watermark-idempotent and the next
-  // boundary / sibling SessionStart pull converges. (Codex has no SessionEnd;
-  // its PostCompact + next SessionStart pull cover the same ground.)
-  await autoPush(ctx.projectId);
+  // P3-b: the session's final push rides the DETACHED consolidate child
+  // above — `memorize consolidate` autoPushes unconditionally after its
+  // extraction attempt, so an in-process push here is pure duplication.
+  // It was also actively harmful: awaiting a network push kept this hook
+  // alive past Claude's shutdown grace, so every exit with an HTTP
+  // transport surfaced "SessionEnd hook failed: Hook cancelled" to the
+  // user. If the child dies before its push lands, the next boundary /
+  // sibling SessionStart pull converges (push is watermark-idempotent).
+  // (Codex has no SessionEnd; its PostCompact + next SessionStart pull
+  // cover the same ground.)
 
   return JSON.stringify({
     systemMessage: 'memorize: session paused (resumable)',
