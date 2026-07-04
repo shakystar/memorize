@@ -119,6 +119,77 @@ function redactSyncStateForDisplay(state: ProjectSyncState): Record<string, unkn
   return out;
 }
 
+/**
+ * Adopt a remote project into a FRESH dir (true-replica clone, #30). Caller has
+ * already resolved the remote id + put `--remote-url` (etc.) into `flagArgs`.
+ */
+async function doClone(
+  cwd: string,
+  remoteProjectId: string,
+  flagArgs: string[],
+): Promise<void> {
+  const flags = parseFlags(flagArgs, {
+    single: ['remote-path', 'remote-url', 'token', 'encryption-key'],
+  });
+  const { transport, config } = await resolveTransportFlags(flags.single);
+  const encryptionKey = flags.single['encryption-key'];
+  if (encryptionKey) {
+    keyId(encryptionKey);
+  }
+  const result = await cloneProject(
+    cwd,
+    remoteProjectId,
+    transport,
+    config,
+    encryptionKey,
+  );
+  const encNote = encryptionKey
+    ? ` E2E encryption is on (kid ${keyId(encryptionKey)}).`
+    : '';
+  console.log(
+    result.pulled > 0
+      ? `Cloned project ${result.projectId} (${result.pulled} events pulled).${encNote}`
+      : `Bound to remote project ${result.projectId}; no events yet. ` +
+          'Run `memorize project sync --pull --remote-path <path>` after the source pushes.' +
+          encNote,
+  );
+}
+
+/**
+ * Attach a Hub remote to the EXISTING bound project + run the first push/pull
+ * (git-remote analog). Requires a bound project in `cwd`.
+ */
+async function doRemote(
+  cwd: string,
+  target: string,
+  flagArgs: string[],
+): Promise<void> {
+  const projectId = await requireBoundProjectId(cwd);
+  const flags = parseFlags(flagArgs, { single: ['token'] });
+  const hub = parseHubUrl(target);
+  const { transport, config } = await resolveTransportFlags({
+    'remote-url': hub.remoteUrl,
+    ...(flags.single.token ? { token: flags.single.token } : {}),
+  });
+  await updateSyncState(projectId, {
+    remoteProjectId: hub.remoteProjectId,
+    syncEnabled: true,
+    syncTransport: config,
+  });
+  await tryReconcileWorkspaceBinding(projectId);
+  await tryEnsureSourceStoreRegistration(projectId);
+  const pushed = await pushProject(projectId, transport);
+  const pulled = await pullProject(projectId, transport);
+  await tryRefreshWorkspaceBinding(projectId);
+  const dupes = pulled.total - pulled.inserted;
+  console.log(
+    `Attached remote ${hub.remoteProjectId} (${hub.remoteUrl}).\n` +
+      `First sync: pushed ${pushed.accepted.length} events, pulled ` +
+      `${pulled.total} (${pulled.inserted} new, ${dupes} duplicates ` +
+      `skipped). Session boundaries auto-sync from here on.`,
+  );
+}
+
 export async function runProjectCommand(
   args: string[],
   ctx: CliContext,
@@ -171,13 +242,11 @@ export async function runProjectCommand(
   }
 
   if (subcommand === 'clone') {
-    // True-replica join (#30): adopt the remote projectId in a FRESH dir so the
-    // same project has one identity on every machine (git-clone analog).
+    // True-replica join (#30): adopt the remote projectId in a FRESH dir.
     let remoteProjectId = args[1];
     let flagArgs = args.slice(2);
-    // Git-style positional: `memorize clone https://hub/<anything>/<id>`
-    // carries the remote and the id in one copy-pasteable arg (Hub URL
-    // contract) — expand it to the canonical `<id> --remote-url <origin>`.
+    // Git-style positional: `memorize clone https://hub/<anything>/<id>` carries
+    // the remote + id in one copy-pasteable arg — expand to `<id> --remote-url`.
     if (remoteProjectId && isHttpUrl(remoteProjectId)) {
       const hub = parseHubUrl(remoteProjectId);
       remoteProjectId = hub.remoteProjectId;
@@ -191,49 +260,15 @@ export async function runProjectCommand(
           '[--encryption-key <b64>]',
       );
     }
-    const flags = parseFlags(flagArgs, {
-      single: ['remote-path', 'remote-url', 'token', 'encryption-key'],
-    });
-    // Persist the location so later boundaries auto-sync with no flag (P3-b).
-    const { transport, config } = await resolveTransportFlags(flags.single);
-    // #182 — out-of-band E2E key for an encrypted replica. Validate it up front
-    // (keyId throws a clear length error) so a typo fails here rather than as an
-    // opaque GCM/kid error on the clone-time pull. Seeded into the sync state
-    // BEFORE that pull so it can decrypt the remote's ciphertext payloads.
-    const encryptionKey = flags.single['encryption-key'];
-    if (encryptionKey) {
-      keyId(encryptionKey);
-    }
-    const result = await cloneProject(
-      cwd,
-      remoteProjectId,
-      transport,
-      config,
-      encryptionKey,
-    );
-    const encNote = encryptionKey
-      ? ` E2E encryption is on (kid ${keyId(encryptionKey)}).`
-      : '';
-    console.log(
-      result.pulled > 0
-        ? `Cloned project ${result.projectId} (${result.pulled} events pulled).${encNote}`
-        : `Bound to remote project ${result.projectId}; no events yet. ` +
-            'Run `memorize project sync --pull --remote-path <path>` after the source pushes.' +
-            encNote,
-    );
+    await doClone(cwd, remoteProjectId, flagArgs);
     return;
   }
 
   if (subcommand === 'remote') {
-    // Git-remote analog for an EXISTING bound project: persist the Hub
-    // location + remote id, then run the first push/pull right here so
-    // `remote` leaves the project synced the same way `clone` does — after
-    // this, boundary auto-sync (P3-b) takes over and onboarding never shows a
-    // manual sync command.
-    const projectId = await requireBoundProjectId(cwd);
     const target = args[1];
     if (!target) {
       // `git remote -v` analog: no arg prints the attached remote, if any.
+      const projectId = await requireBoundProjectId(cwd);
       const state = await readSyncState(projectId);
       if (state?.syncTransport?.type === 'http') {
         console.log(
@@ -246,32 +281,7 @@ export async function runProjectCommand(
           '(no remote is attached yet)',
       );
     }
-    const flags = parseFlags(args.slice(2), { single: ['token'] });
-    const hub = parseHubUrl(target);
-    const { transport, config } = await resolveTransportFlags({
-      'remote-url': hub.remoteUrl,
-      ...(flags.single.token ? { token: flags.single.token } : {}),
-    });
-    await updateSyncState(projectId, {
-      remoteProjectId: hub.remoteProjectId,
-      syncEnabled: true,
-      syncTransport: config,
-    });
-    // Same convergence a manual `project sync` performs (W-b reconcile before
-    // the wire, W-c role/reachability refresh after, member attribution
-    // declared before the first push).
-    await tryReconcileWorkspaceBinding(projectId);
-    await tryEnsureSourceStoreRegistration(projectId);
-    const pushed = await pushProject(projectId, transport);
-    const pulled = await pullProject(projectId, transport);
-    await tryRefreshWorkspaceBinding(projectId);
-    const dupes = pulled.total - pulled.inserted;
-    console.log(
-      `Attached remote ${hub.remoteProjectId} (${hub.remoteUrl}).\n` +
-        `First sync: pushed ${pushed.accepted.length} events, pulled ` +
-        `${pulled.total} (${pulled.inserted} new, ${dupes} duplicates ` +
-        `skipped). Session boundaries auto-sync from here on.`,
-    );
+    await doRemote(cwd, target, args.slice(2));
     return;
   }
 
