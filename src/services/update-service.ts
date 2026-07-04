@@ -86,6 +86,27 @@ export interface RefreshResult {
   failures: Array<{ target: string; message: string }>;
 }
 
+export interface NpmInheritResult {
+  code: number;
+  stderr: string;
+}
+
+/** True when npm's failure text is the Windows locked-native-addon case
+ *  (a running memorize process pinned better_sqlite3.node). */
+export function isNativeAddonLockError(text: string): boolean {
+  // npm prints the code and the offending path on ONE line, e.g.
+  //   EBUSY: resource busy or locked, copyfile '...\better_sqlite3.node'
+  //   EPERM: operation not permitted, unlink '...better_sqlite3.node'
+  // Require both on the same line so an unrelated EBUSY elsewhere in npm's
+  // (addon-name-heavy) install log doesn't false-match.
+  return text
+    .split('\n')
+    .some(
+      (line) =>
+        /(EBUSY|EPERM)/i.test(line) && /better_sqlite3\.node/i.test(line),
+    );
+}
+
 /**
  * External-process seams for the self-update flow. Injectable so unit
  * tests never touch npm or spawn real binaries (same pattern as
@@ -94,8 +115,8 @@ export interface RefreshResult {
 export interface UpdateDeps {
   /** `npm <args>` capturing stdout — registry version lookup. */
   npmCapture(args: string[]): Promise<string>;
-  /** `npm <args>` with stdio inherit — the global install. Resolves exit code. */
-  npmInherit(args: string[]): Promise<number>;
+  /** `npm <args>` teeing stderr — the global install. Resolves {code, stderr}. */
+  npmInherit(args: string[]): Promise<NpmInheritResult>;
   /** Resolve the global memorize binary; null when not on PATH. */
   whichMemorize(): string | null;
   /** Run the (freshly installed) memorize binary, stdio inherit. */
@@ -134,9 +155,19 @@ export function defaultUpdateDeps(spawnImpl: SpawnFn = spawn): UpdateDeps {
       }),
     npmInherit: (args) =>
       new Promise((resolve, reject) => {
-        const child = spawnImpl('npm', args, { stdio: 'inherit' });
+        // stdout/stdin inherit so npm's progress shows live; stderr is piped so
+        // we can BOTH show it and scan it for the locked-addon signature.
+        const child = spawnImpl('npm', args, {
+          stdio: ['inherit', 'inherit', 'pipe'],
+        });
+        let stderr = '';
+        child.stderr?.on('data', (chunk) => {
+          const text = String(chunk);
+          stderr += text;
+          process.stderr.write(text);
+        });
         child.on('error', reject);
-        child.on('close', (code) => resolve(code ?? 1));
+        child.on('close', (code) => resolve({ code: code ?? 1, stderr }));
       }),
     whichMemorize: () => which.sync('memorize', { nothrow: true }),
     runMemorize: (args) =>
@@ -210,14 +241,22 @@ export async function runSelfUpdate(
   }
 
   log(`Upgrading ${PACKAGE_NAME} v${current} -> v${latest} ...`);
-  const installCode = await deps.npmInherit([
+  const install = await deps.npmInherit([
     'install',
     '-g',
     `${PACKAGE_NAME}@latest`,
   ]);
-  if (installCode !== 0) {
+  if (install.code !== 0) {
+    if (isNativeAddonLockError(install.stderr)) {
+      log('');
+      log('The upgrade could not replace the native SQLite addon because an');
+      log('older memorize process is still using it (a watcher or MCP server');
+      log('from a running session). This is expected once while upgrading to');
+      log('this version — close other memorize sessions and re-run');
+      log('`memorize update`, and it will apply cleanly.');
+    }
     log('npm install failed; refresh skipped (nothing was changed).');
-    return installCode;
+    return install.code;
   }
   log(`Upgraded to v${latest}. Refreshing integrations with the new binary ...`);
   // The refresh must run NEW code — re-exec the freshly installed binary.

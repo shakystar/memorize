@@ -4,6 +4,7 @@ import path from 'node:path';
 import Database from 'better-sqlite3';
 
 import { getMemorizeRoot, getProjectDbFile } from './path-resolver.js';
+import { resolveNativeBinding } from './native-addon.js';
 
 /**
  * Ordered DDL migrations applied via `PRAGMA user_version`. The user_version
@@ -401,7 +402,10 @@ export function unwritableDataDirError(dbFile: string, cause: Error): Error {
 function open(dbFile: string): Database.Database {
   try {
     fs.mkdirSync(path.dirname(dbFile), { recursive: true });
-    const db = new Database(dbFile);
+    const nativeBinding = resolveNativeBinding();
+    const db = nativeBinding
+      ? new Database(dbFile, { nativeBinding })
+      : new Database(dbFile);
     // Set busy_timeout first so ordinary statements + the IMMEDIATE migration
     // lock wait rather than error; the WAL switch needs its own retry (above).
     db.pragma('busy_timeout = 5000');
