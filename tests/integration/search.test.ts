@@ -276,4 +276,16 @@ describe('search (CLI smoke)', () => {
     expect(none.status).toBe(0);
     expect(none.stdout).toContain('No matches found.');
   });
+
+  it('accepts --union and leaves self-hit output untagged', { timeout: 30_000 }, () => {
+    expect(runCli(['project', 'init']).status).toBe(0);
+    expect(runCli(['task', 'create', 'distinctivewombat', 'pipeline']).status).toBe(0);
+
+    const union = runCli(['search', 'distinctivewombat', '--union']);
+    expect(union.status).toBe(0);
+    // Only self rows exist here, so union output is identical to default —
+    // no bracket provenance tag.
+    expect(union.stdout).toContain('task\t');
+    expect(union.stdout).not.toContain('[proj_');
+  });
 });
