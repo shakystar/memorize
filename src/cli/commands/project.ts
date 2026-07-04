@@ -5,6 +5,7 @@ import { createHttpSyncTransport } from '../../adapters/sync-transport-http.js';
 import type { ProjectSyncState, SyncTransportConfig } from '../../domain/entities.js';
 import type { SyncTransport } from '../../domain/sync-transport.js';
 import { ACTOR_USER } from '../../domain/common.js';
+import type { BindingMatch } from '../../storage/bindings-store.js';
 import { resolveSyncToken, setToken } from '../../storage/credentials-store.js';
 import { generateProjectKey, keyId } from '../../services/encryption-service.js';
 import {
@@ -190,6 +191,26 @@ async function doRemote(
   );
 }
 
+/**
+ * Decide which existing verb `connect` dispatches to, from the cwd binding:
+ * an EXACT binding (this dir IS a project) attaches a remote; no binding is a
+ * fresh replica clone. An ANCESTOR binding (nested subdir) is ambiguous —
+ * clone-a-nested-replica vs attach-the-parent — so refuse and let the user pick.
+ */
+export function resolveConnectRoute(
+  binding: BindingMatch | undefined,
+): 'clone' | 'remote' {
+  if (binding?.kind === 'ancestor') {
+    throw new Error(
+      `Directory is nested inside project ${binding.projectId} ` +
+        `(bound at ${binding.matchedPath}). \`connect\` won't guess here. ` +
+        'Run `memorize clone <url>` in a fresh directory to join as a separate ' +
+        'replica, or `memorize remote <url>` to attach THIS project to the remote.',
+    );
+  }
+  return binding?.kind === 'exact' ? 'remote' : 'clone';
+}
+
 export async function runProjectCommand(
   args: string[],
   ctx: CliContext,
@@ -237,6 +258,29 @@ export async function runProjectCommand(
     );
     for (const warning of result.warnings) {
       console.warn(`\n⚠️  ${warning}`);
+    }
+    return;
+  }
+
+  if (subcommand === 'connect') {
+    const target = args[1];
+    if (!target) {
+      throw new Error(
+        'Usage: memorize connect <hub-url-ending-in-id> [--token <t>]',
+      );
+    }
+    // Validate the URL up front (throws on non-URL / missing store id) so a typo
+    // fails before we touch the binding store.
+    const hub = parseHubUrl(target);
+    const route = resolveConnectRoute(await getBindingForPath(cwd));
+    if (route === 'remote') {
+      await doRemote(cwd, target, args.slice(2));
+    } else {
+      await doClone(cwd, hub.remoteProjectId, [
+        '--remote-url',
+        hub.remoteUrl,
+        ...args.slice(2),
+      ]);
     }
     return;
   }
