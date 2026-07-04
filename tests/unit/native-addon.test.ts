@@ -93,8 +93,34 @@ describe('resolveNativeBinding', () => {
 });
 
 describe('defaultNativeAddonDeps', () => {
+  let savedEnv: string | undefined;
+
+  beforeEach(() => {
+    savedEnv = process.env.MEMORIZE_NATIVE_SHADOW_DISABLED;
+  });
+
+  afterEach(() => {
+    if (savedEnv === undefined) {
+      delete process.env.MEMORIZE_NATIVE_SHADOW_DISABLED;
+    } else {
+      process.env.MEMORIZE_NATIVE_SHADOW_DISABLED = savedEnv;
+    }
+  });
+
   it('is disabled off win32 regardless of env', () => {
     if (process.platform === 'win32') return; // asserted on non-win32 hosts
+    expect(defaultNativeAddonDeps().enabled).toBe(false);
+  });
+
+  it('is enabled on win32 when the disable env var is unset', () => {
+    if (process.platform !== 'win32') return; // asserted on win32 hosts
+    delete process.env.MEMORIZE_NATIVE_SHADOW_DISABLED;
+    expect(defaultNativeAddonDeps().enabled).toBe(true);
+  });
+
+  it('is disabled on win32 when the disable env var is "1"', () => {
+    if (process.platform !== 'win32') return; // asserted on win32 hosts
+    process.env.MEMORIZE_NATIVE_SHADOW_DISABLED = '1';
     expect(defaultNativeAddonDeps().enabled).toBe(false);
   });
 });

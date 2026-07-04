@@ -14,7 +14,7 @@ const require = createRequire(import.meta.url);
  * a version-stamped shadow copy under ~/.memorize/runtime leaves the installed
  * file unlocked, so the update can overwrite it. win32-only; every other
  * platform (incl. WSL, which reports 'linux') allows unlink-replace and needs
- * nothing. See docs/superpowers/specs/2026-07-04-mid-session-self-update-design.md.
+ * nothing. See the mid-session self-update design spec.
  */
 
 export const NATIVE_SHADOW_DISABLED_ENV_VAR = 'MEMORIZE_NATIVE_SHADOW_DISABLED';
