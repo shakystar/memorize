@@ -20,19 +20,58 @@ const realSleep = (ms: number): Promise<void> =>
   new Promise((resolve) => setTimeout(resolve, ms));
 
 /**
+ * Resolve the OS command that opens `url` in the default browser, or `null`
+ * when the URL should not be launched at all.
+ *
+ * Security: the URL is Hub-provided, so a compromised or mistyped Hub is part
+ * of the threat model. Two guards:
+ *  - Only ever launch `http(s)` — an unparseable URL or a special scheme
+ *    (`file:`, `javascript:`, …) returns `null` and falls back to the printed
+ *    copy-paste URL.
+ *  - On Windows, use `rundll32 url.dll,FileProtocolHandler <url>` rather than
+ *    `cmd /c start "" <url>`. `spawn` hands the URL to rundll32 as a single
+ *    argv element with no shell in between, so query separators like `&`, `|`,
+ *    `^`, and `%` in the URL are never re-parsed by `cmd.exe` as command
+ *    syntax — closing the shell-injection path in the old `start` form.
+ */
+export function resolveOpenCommand(
+  platform: NodeJS.Platform,
+  url: string,
+): { command: string; args: string[] } | null {
+  let parsed: URL;
+  try {
+    parsed = new URL(url);
+  } catch {
+    return null;
+  }
+  if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+    return null;
+  }
+  switch (platform) {
+    case 'win32':
+      return {
+        command: 'rundll32',
+        args: ['url.dll,FileProtocolHandler', url],
+      };
+    case 'darwin':
+      return { command: 'open', args: [url] };
+    default:
+      return { command: 'xdg-open', args: [url] };
+  }
+}
+
+/**
  * Best-effort: open the approval URL in the user's default browser. Never throws
  * and never blocks — the URL is always printed too, so a headless/locked-down
  * box just falls back to copy-paste.
  */
 export function openBrowser(url: string): void {
   try {
-    const [command, args] =
-      process.platform === 'win32'
-        ? (['cmd', ['/c', 'start', '', url]] as const)
-        : process.platform === 'darwin'
-          ? (['open', [url]] as const)
-          : (['xdg-open', [url]] as const);
-    const child = spawn(command, [...args], {
+    const resolved = resolveOpenCommand(process.platform, url);
+    // Non-http(s) or unparseable — do not hand it to the OS; the printed URL
+    // is the fallback.
+    if (!resolved) return;
+    const child = spawn(resolved.command, resolved.args, {
       stdio: 'ignore',
       detached: true,
       windowsHide: true,

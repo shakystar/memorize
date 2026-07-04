@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 
-import { deviceLogin } from '../../src/cli/device-login.js';
+import { deviceLogin, resolveOpenCommand } from '../../src/cli/device-login.js';
 
 const BASE = 'https://hub.example.com';
 
@@ -47,6 +47,33 @@ function makeFetch(pollQueue: Response[]): {
 }
 
 const inert = { sleep: async () => {}, open: () => {}, log: () => {} };
+
+describe('resolveOpenCommand', () => {
+  it('does not route Windows URLs through cmd/start (no shell re-parse of & etc.)', () => {
+    const url = 'https://hub.example.com/device?code=FN2W-ZEHU&next=%2Fapp';
+    const resolved = resolveOpenCommand('win32', url);
+
+    // The Hub-provided URL must reach the OS opener as a single, un-reparsed
+    // argv element — never as an argument to `cmd /c start`, whose parser
+    // treats `&`, `|`, `^`, `%` as command syntax.
+    expect(resolved).not.toBeNull();
+    expect(resolved!.command).not.toBe('cmd');
+    expect(resolved!.args).not.toContain('start');
+    expect(resolved!.args).toContain(url);
+  });
+
+  it('refuses non-http(s) schemes so a hostile Hub URL is never launched', () => {
+    expect(resolveOpenCommand('win32', 'file:///C:/Windows/System32/calc.exe')).toBeNull();
+    expect(resolveOpenCommand('win32', 'javascript:alert(1)')).toBeNull();
+    expect(resolveOpenCommand('darwin', 'not a url')).toBeNull();
+  });
+
+  it('passes the URL as a lone argv element on macOS and Linux', () => {
+    const url = 'https://hub.example.com/device?a=1&b=2';
+    expect(resolveOpenCommand('darwin', url)).toEqual({ command: 'open', args: [url] });
+    expect(resolveOpenCommand('linux', url)).toEqual({ command: 'xdg-open', args: [url] });
+  });
+});
 
 describe('deviceLogin', () => {
   it('polls through authorization_pending and stores the token on approval', async () => {
