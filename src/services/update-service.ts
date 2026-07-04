@@ -94,7 +94,17 @@ export interface NpmInheritResult {
 /** True when npm's failure text is the Windows locked-native-addon case
  *  (a running memorize process pinned better_sqlite3.node). */
 export function isNativeAddonLockError(text: string): boolean {
-  return /(EBUSY|EPERM)[\s\S]*better_sqlite3\.node/i.test(text);
+  // npm prints the code and the offending path on ONE line, e.g.
+  //   EBUSY: resource busy or locked, copyfile '...\better_sqlite3.node'
+  //   EPERM: operation not permitted, unlink '...better_sqlite3.node'
+  // Require both on the same line so an unrelated EBUSY elsewhere in npm's
+  // (addon-name-heavy) install log doesn't false-match.
+  return text
+    .split('\n')
+    .some(
+      (line) =>
+        /(EBUSY|EPERM)/i.test(line) && /better_sqlite3\.node/i.test(line),
+    );
 }
 
 /**

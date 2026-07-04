@@ -207,6 +207,13 @@ describe('isNativeAddonLockError', () => {
     expect(isNativeAddonLockError("EBUSY: ... 'some-other-file.dll'")).toBe(false);
     expect(isNativeAddonLockError('')).toBe(false);
   });
+  it('does not false-match an unrelated lock line + an incidental addon mention on another line', () => {
+    expect(
+      isNativeAddonLockError(
+        "npm error EPERM: operation not permitted, unlink 'C:/npm-cache/_cacache/tmp/xyz'\nnpm http fetch better_sqlite3.node prebuild",
+      ),
+    ).toBe(false);
+  });
 });
 
 // --- defaultUpdateDeps spawn seams (DEP0190 guard, #96) ----------------------
@@ -284,17 +291,26 @@ describe('defaultUpdateDeps spawn seams (#96 DEP0190 guard)', () => {
   });
 
   it('npmInherit: no shell:true, tees stderr, args preserved, resolves {code, stderr}', async () => {
-    const { spawnImpl, calls } = fakeSpawn((child) => {
-      child.stderr.emit('data', 'some npm noise\n');
-      child.emit('close', 0);
-    });
-    const deps = defaultUpdateDeps(spawnImpl);
-    const result = await deps.npmInherit(['install', '-g', '@shakystar/memorize@latest']);
-    expect(result).toEqual({ code: 0, stderr: 'some npm noise\n' });
-    expect(calls[0]!.command).toBe('npm');
-    expect(calls[0]!.args).toEqual(['install', '-g', '@shakystar/memorize@latest']);
-    expect(calls[0]!.options).not.toHaveProperty('shell');
-    expect(calls[0]!.options.stdio).toEqual(['inherit', 'inherit', 'pipe']);
+    // The impl tees piped stderr to the real process.stderr; silence that
+    // write so the piped test data doesn't leak into the suite's output.
+    const stderrWrite = vi
+      .spyOn(process.stderr, 'write')
+      .mockImplementation(() => true);
+    try {
+      const { spawnImpl, calls } = fakeSpawn((child) => {
+        child.stderr.emit('data', 'some npm noise\n');
+        child.emit('close', 0);
+      });
+      const deps = defaultUpdateDeps(spawnImpl);
+      const result = await deps.npmInherit(['install', '-g', '@shakystar/memorize@latest']);
+      expect(result).toEqual({ code: 0, stderr: 'some npm noise\n' });
+      expect(calls[0]!.command).toBe('npm');
+      expect(calls[0]!.args).toEqual(['install', '-g', '@shakystar/memorize@latest']);
+      expect(calls[0]!.options).not.toHaveProperty('shell');
+      expect(calls[0]!.options.stdio).toEqual(['inherit', 'inherit', 'pipe']);
+    } finally {
+      stderrWrite.mockRestore();
+    }
   });
 
   it('runMemorize: no shell:true, stdio inherit (binary resolved via which)', async () => {
