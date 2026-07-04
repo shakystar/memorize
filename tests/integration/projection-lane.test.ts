@@ -175,4 +175,17 @@ describe('projection lane selector (M2)', () => {
       .sort();
     expect(union).toEqual(['mem_bob', 'mem_self', 'task_bob', 'task_self']);
   });
+
+  it('union hits carry sourceProjectId for foreign rows and omit it for self', () => {
+    const hits = searchProject(projectId, 'alpha', 20, 'union');
+    const byId = new Map(hits.map((h) => [h.entityId, h]));
+
+    // Foreign hits carry their origin store id.
+    expect(byId.get('task_bob')!.sourceProjectId).toBe(FOREIGN);
+    expect(byId.get('mem_bob')!.sourceProjectId).toBe(FOREIGN);
+
+    // Self hits omit the field entirely (absence = self, never null).
+    expect('sourceProjectId' in byId.get('task_self')!).toBe(false);
+    expect('sourceProjectId' in byId.get('mem_self')!).toBe(false);
+  });
 });

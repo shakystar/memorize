@@ -22,6 +22,12 @@ export interface SearchHit {
   score: number;
   /** FTS5 snippet of the matched `text` column with `[`…`]` highlights. */
   snippet: string;
+  /**
+   * Origin store id for a foreign (union-lane) hit; ABSENT for a self hit.
+   * Absence — not null — encodes "self" (SoT-040: group by writer, never fold
+   * a foreign row into local truth).
+   */
+  sourceProjectId?: string;
 }
 
 export const DEFAULT_SEARCH_LIMIT = 20;
@@ -66,10 +72,11 @@ export function searchProject(
 
   const rows = getDb(projectId)
     .prepare(
-      `SELECT entity_id   AS entityId,
-              kind        AS kind,
+      `SELECT entity_id         AS entityId,
+              kind              AS kind,
               snippet(search_fts, 2, '[', ']', '…', 10) AS snippet,
-              bm25(search_fts) AS score
+              bm25(search_fts)  AS score,
+              source_project_id AS sourceProjectId
          FROM search_fts
         WHERE search_fts MATCH ? AND ${laneWhere(lane)}
         ORDER BY bm25(search_fts)
@@ -80,9 +87,12 @@ export function searchProject(
     kind: SearchKind;
     snippet: string;
     score: number;
+    sourceProjectId: string | null;
   }>;
 
-  return rows;
+  return rows.map(({ sourceProjectId, ...hit }) =>
+    sourceProjectId === null ? hit : { ...hit, sourceProjectId },
+  );
 }
 
 /** Resolve the project bound to `cwd`, then search it. */
@@ -230,18 +240,29 @@ export function searchByKind(
 ): SearchHit[] {
   const match = toFtsMatch(query);
   if (!match) return [];
-  return getDb(projectId)
+  const rows = getDb(projectId)
     .prepare(
-      `SELECT entity_id   AS entityId,
-              kind        AS kind,
+      `SELECT entity_id         AS entityId,
+              kind              AS kind,
               snippet(search_fts, 2, '[', ']', '…', 10) AS snippet,
-              bm25(search_fts) AS score
+              bm25(search_fts)  AS score,
+              source_project_id AS sourceProjectId
          FROM search_fts
         WHERE search_fts MATCH ? AND kind = ? AND ${laneWhere(lane)}
         ORDER BY bm25(search_fts)
         LIMIT ?`,
     )
-    .all(match, kind, limit) as SearchHit[];
+    .all(match, kind, limit) as Array<{
+    entityId: string;
+    kind: SearchKind;
+    snippet: string;
+    score: number;
+    sourceProjectId: string | null;
+  }>;
+
+  return rows.map(({ sourceProjectId, ...hit }) =>
+    sourceProjectId === null ? hit : { ...hit, sourceProjectId },
+  );
 }
 
 /**
