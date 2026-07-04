@@ -13,6 +13,7 @@ import {
   createCheckpoint,
   createHandoff,
   createTask,
+  updateTask,
 } from '../../src/services/task-service.js';
 
 const ID_PATTERN =
@@ -67,6 +68,7 @@ describe('handoff and checkpoint golden outputs', () => {
       title: 'Golden task',
       actor: 'user',
     });
+    await updateTask(project.id, task.id, { status: 'in_progress' }, 'user');
     const handoff = await createHandoff({
       projectId: project.id,
       taskId: task.id,
@@ -170,6 +172,7 @@ describe('handoff and checkpoint golden outputs', () => {
       title: 'Golden task',
       actor: 'user',
     });
+    await updateTask(project.id, task.id, { status: 'in_progress' }, 'user');
     await createHandoff({
       projectId: project.id,
       taskId: task.id,

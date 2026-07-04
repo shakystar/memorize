@@ -1,4 +1,4 @@
-import { createTask, createHandoff } from '../../src/services/task-service.js';
+import { createTask, createHandoff, updateTask } from '../../src/services/task-service.js';
 import { setupProject } from '../../src/services/setup-service.js';
 import { getBoundProjectId } from '../../src/services/project-service.js';
 import { withFixture } from './shared.js';
@@ -28,6 +28,7 @@ const result = await withFixture(fixtureName, async (ctx) => {
     title: 'Benchmark handoff task',
     actor: 'benchmark',
   });
+  await updateTask(projectId, task.id, { status: 'in_progress' }, 'benchmark');
   const handoff = await createHandoff({
     projectId,
     taskId: task.id,

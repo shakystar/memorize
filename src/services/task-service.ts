@@ -184,6 +184,20 @@ export async function createHandoff(input: CreateHandoffInput): Promise<Handoff>
   );
   warnInjectionMarkers(markers);
 
+  const existing = await getTask(input.projectId, input.taskId);
+  if (!existing) {
+    throw new MemorizeError(
+      `Task ${input.taskId} not found in project ${input.projectId}`,
+    );
+  }
+  // Route the status change through the state machine instead of the old
+  // direct-append bypass: a handoff from `todo` is rejected (start first),
+  // while a re-handoff (already handoff_ready) is allowed and simply
+  // refreshes the snapshot pointer.
+  if (existing.status !== 'handoff_ready') {
+    assertTaskStatusTransition(existing.status, 'handoff_ready');
+  }
+
   const handoff = createHandoffEntity(input);
   const events: Parameters<typeof appendEvents>[1] = [
     {

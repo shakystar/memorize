@@ -16,6 +16,9 @@ describe('domain state machines', () => {
     expect(() =>
       assertTaskStatusTransition('handoff_ready', 'done'),
     ).not.toThrow();
+    expect(() =>
+      assertTaskStatusTransition('in_progress', 'done'),
+    ).not.toThrow();
   });
 
   it('rejects invalid task transitions', () => {

@@ -15,6 +15,7 @@ import {
   createCheckpoint,
   createHandoff,
   createTask,
+  updateTask,
 } from '../../src/services/task-service.js';
 import {
   cloneProject,
@@ -95,6 +96,7 @@ describe('sync golden — true-replica baseline', () => {
         sessionId: 'session_test_a',
         summary: 'Mid-session snapshot for golden test',
       });
+      await updateTask(projectId, task.id, { status: 'in_progress' }, 'user');
       await createHandoff({
         projectId,
         taskId: task.id,

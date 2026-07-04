@@ -160,6 +160,8 @@ describe('phase 2 services and cli', () => {
     expect(checkpoint.status).toBe(0);
     expect(checkpoint.stdout).toContain('Created checkpoint');
 
+    expect(runCli(['task', 'start']).status).toBe(0);
+
     const handoff = runCli([
       'task',
       'handoff',
@@ -223,6 +225,21 @@ describe('phase 2 services and cli', () => {
       actor: 'codex',
     });
     delete process.env[SESSION_ENV_VAR];
+
+    const startResult = spawnSync(
+      'node',
+      [tsxCliPath, cliEntryPath, 'task', 'start'],
+      {
+        cwd: sandbox,
+        encoding: 'utf8',
+        env: {
+          ...process.env,
+          MEMORIZE_ROOT: memorizeRoot,
+          [SESSION_ENV_VAR]: sessionId,
+        },
+      },
+    );
+    expect(startResult.status).toBe(0);
 
     const handoffResult = spawnSync(
       'node',
@@ -334,6 +351,8 @@ describe('phase 2 services and cli', () => {
           },
         });
       }
+
+      expect(runSessionCli(['task', 'start']).status).toBe(0);
 
       const handoff = runSessionCli([
         'task',

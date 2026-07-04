@@ -16,6 +16,7 @@ import {
 import {
   createHandoff,
   createTask,
+  updateTask,
 } from '../../src/services/task-service.js';
 import { closeAll, getDb } from '../../src/storage/db.js';
 import { appendEvent } from '../../src/storage/event-store.js';
@@ -124,6 +125,7 @@ describe('search (FTS5)', () => {
       title: 'Carrier task',
       actor: 'test',
     });
+    await updateTask(projectId, task.id, { status: 'in_progress' }, 'test');
     const handoff = await createHandoff({
       projectId,
       taskId: task.id,

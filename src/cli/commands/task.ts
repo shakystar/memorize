@@ -312,6 +312,53 @@ async function runResumeTask(
   console.log(JSON.stringify(payload, null, 2));
 }
 
+async function runStartTask(
+  args: string[],
+  ctx: CliContext,
+  projectId: string,
+): Promise<void> {
+  const flags = parseFlags(args, { single: ['task'] });
+  if (flags.positional.length > 1) {
+    throw new Error('task start accepts at most one taskId.');
+  }
+  const sessionCtx = await resolveSessionContext(ctx.cwd, {
+    debugLabel: 'task-start',
+  });
+  const taskId =
+    flags.positional[0]?.trim() ||
+    flags.single.task?.trim() ||
+    sessionCtx.taskId ||
+    (await resolveActiveTaskId(projectId));
+  if (!taskId) {
+    throw new Error(
+      'Start requires a taskId (pass it positionally or via --task, or ensure an active task exists).',
+    );
+  }
+  const existing = await readTask(projectId, taskId);
+  if (!existing) {
+    throw new Error(
+      `No task ${taskId} in this project. Run \`memorize task list\` to see valid task ids.`,
+    );
+  }
+  if (existing.status === 'done' || existing.status === 'cancelled') {
+    throw new Error(
+      `Task ${taskId} is already ${existing.status}; cannot start.`,
+    );
+  }
+  // Idempotent: starting an already-in-progress task is a no-op — don't
+  // append a redundant task.updated event, just reload context below.
+  if (existing.status !== 'in_progress') {
+    const actor = sessionCtx.actor ?? ACTOR_USER;
+    await updateTask(projectId, taskId, { status: 'in_progress' }, actor);
+  }
+  const payload = await loadStartContext({
+    projectId,
+    taskId,
+    ...(sessionCtx.sessionId ? { selfSessionId: sessionCtx.sessionId } : {}),
+  });
+  console.log(JSON.stringify(payload, null, 2));
+}
+
 async function runCheckpointTask(
   args: string[],
   ctx: CliContext,
@@ -551,7 +598,7 @@ const taskHandlers: Record<string, TaskHandler> = {
   list: runListTasks,
   request: runTaskRequest,
   resume: runResumeTask,
-  start: runResumeTask,
+  start: runStartTask,
   checkpoint: runCheckpointTask,
   handoff: runHandoffTask,
   done: runDoneTask,
