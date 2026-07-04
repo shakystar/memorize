@@ -10,7 +10,7 @@ import {
   listValidMemories,
   rebuildProjectProjection,
 } from '../../src/services/projection-store.js';
-import { searchProject } from '../../src/services/search-service.js';
+import { hybridSearch, searchProject } from '../../src/services/search-service.js';
 import { closeAll, getDb } from '../../src/storage/db.js';
 import { appendEvent } from '../../src/storage/event-store.js';
 
@@ -187,5 +187,17 @@ describe('projection lane selector (M2)', () => {
     // Self hits omit the field entirely (absence = self, never null).
     expect('sourceProjectId' in byId.get('task_self')!).toBe(false);
     expect('sourceProjectId' in byId.get('mem_self')!).toBe(false);
+  });
+
+  it('hybridSearch defaults to self; union surfaces foreign hits with provenance', async () => {
+    const self = (await hybridSearch(projectId, 'alpha'))
+      .map((h) => h.entityId)
+      .sort();
+    expect(self).toEqual(['mem_self', 'task_self']);
+
+    const union = await hybridSearch(projectId, 'alpha', 20, undefined, 'union');
+    const bob = union.find((h) => h.entityId === 'task_bob');
+    expect(bob).toBeDefined();
+    expect(bob!.sourceProjectId).toBe(FOREIGN);
   });
 });

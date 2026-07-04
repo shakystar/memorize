@@ -100,9 +100,10 @@ export async function searchFromCwd(
   cwd: string,
   query: string,
   limit?: number,
+  lane: ProjectionLane = 'self',
 ): Promise<SearchHit[]> {
   const projectId = await requireBoundProjectId(cwd);
-  return searchProject(projectId, query, limit ?? DEFAULT_SEARCH_LIMIT);
+  return searchProject(projectId, query, limit ?? DEFAULT_SEARCH_LIMIT, lane);
 }
 
 // --- P3-c semantic + hybrid search ------------------------------------------
@@ -196,10 +197,11 @@ export async function hybridSearch(
   query: string,
   limit: number = DEFAULT_SEARCH_LIMIT,
   embedder: Embedder | undefined = getEmbedder(),
+  lane: ProjectionLane = 'self',
 ): Promise<SearchHit[]> {
   // Pull a wider slice from each ranker so fusion has overlap to reward.
   const poolSize = Math.max(limit * 2, DEFAULT_SEARCH_LIMIT);
-  const ftsHits = searchProject(projectId, query, poolSize);
+  const ftsHits = searchProject(projectId, query, poolSize, lane);
   const semantic = await semanticSearch(projectId, query, poolSize, embedder);
   if (semantic.length === 0) return ftsHits.slice(0, limit);
 
@@ -223,9 +225,10 @@ export async function hybridSearchFromCwd(
   cwd: string,
   query: string,
   limit?: number,
+  lane: ProjectionLane = 'self',
 ): Promise<SearchHit[]> {
   const projectId = await requireBoundProjectId(cwd);
-  return hybridSearch(projectId, query, limit ?? DEFAULT_SEARCH_LIMIT);
+  return hybridSearch(projectId, query, limit ?? DEFAULT_SEARCH_LIMIT, getEmbedder(), lane);
 }
 
 // --- v10 raw-segment retrieval ----------------------------------------------
