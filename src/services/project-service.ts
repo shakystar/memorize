@@ -7,6 +7,7 @@ import {
   appendEvents,
   ensureProjectDirectories,
   getEarliestEventCreatedAt,
+  hasGenesisEvent,
 } from '../storage/event-store.js';
 import {
   bindProject,
@@ -102,7 +103,14 @@ export async function createProject(input: CreateProjectInput): Promise<Project>
  * reads as the store's true start, not repair time (SoT-021: the local
  * `project.created` is the always-present local identity).
  *
- * Returns true if it backfilled, false if it was a no-op.
+ * When the log ALREADY holds a real `project.created` but the projection is
+ * unbuilt (dropped tables / interrupted migration — the `memorize projection
+ * rebuild` case), recover by rebuilding, never by appending a second synthetic
+ * genesis: same-id `project.created` events let the reducer's later-wins rule
+ * overwrite the real title/summary/goals/rootPath with reconstructed defaults.
+ *
+ * Returns true if it repaired the projection (synthetic backfill or rebuild),
+ * false if it was a no-op.
  */
 export async function ensureProjectGenesis(
   projectId: string,
@@ -111,6 +119,13 @@ export async function ensureProjectGenesis(
   if (getProjectProjection(projectId)) return false;
   const earliest = getEarliestEventCreatedAt(projectId);
   if (!earliest) return false;
+
+  // Genesis present but projection unbuilt → rebuild from the real event
+  // rather than clobbering it with a synthetic default-metadata genesis.
+  if (hasGenesisEvent(projectId)) {
+    await rebuildProjectProjection(projectId);
+    return true;
+  }
 
   const rootPath =
     opts?.rootPath ?? (await getPathForProject(projectId)) ?? '';
