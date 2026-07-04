@@ -9,7 +9,7 @@ import type {
 
 const taskTransitions: Record<TaskStatus, TaskStatus[]> = {
   todo: ['in_progress', 'blocked', 'cancelled'],
-  in_progress: ['handoff_ready', 'blocked', 'cancelled'],
+  in_progress: ['handoff_ready', 'done', 'blocked', 'cancelled'],
   handoff_ready: ['in_progress', 'done', 'cancelled'],
   blocked: ['in_progress', 'handoff_ready', 'cancelled'],
   done: [],
