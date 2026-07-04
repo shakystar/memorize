@@ -25,7 +25,13 @@ export default defineConfig({
       // default; force it off suite-wide so hook tests never leave a live
       // polling child behind. watcher tests exercise spawnDetachedWatcher
       // with an injected spawnImpl and delete this var explicitly.
-      MEMORIZE_WATCHER_DISABLED: '1'
+      MEMORIZE_WATCHER_DISABLED: '1',
+      // win32 shadow-loads better_sqlite3.node from ~/.memorize/runtime so a
+      // running process can't lock the global install (mid-session update).
+      // Force it off suite-wide so the general suite stays byte-identical and
+      // skips the per-open addon copy; native-addon tests inject deps or delete
+      // this var explicitly.
+      MEMORIZE_NATIVE_SHADOW_DISABLED: '1'
     }
   }
 });
