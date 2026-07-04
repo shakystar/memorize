@@ -693,6 +693,26 @@ session boundaries auto-sync from there (P3-b). With no argument it
 prints the attached remote id + URL, `git remote -v` style. Requires a
 host credential (`memorize login <hub-url>`) or `--token`.
 
+### `memorize connect <hub-url> [--token <t>]` (experimental)
+
+The **recommended one-verb onboarding** for a Hub share URL: `connect`
+inspects the current directory and dispatches automatically, so you do not
+have to know whether to `clone` or `remote` —
+
+- **fresh / unbound directory** → clones a replica (the `memorize clone`
+  path above);
+- **directory already bound to a project** → attaches the remote to it
+  (the `memorize remote` path above);
+- **a subdirectory nested inside another project** → refuses with an
+  actionable error instead of guessing, telling you to run `memorize clone`
+  in a fresh directory to join as a separate replica, or `memorize remote`
+  to attach THIS project.
+
+Parses `<hub-url>` with the same origin-plus-last-segment rule as `clone`,
+validating it **before** touching the binding store. `clone` and `remote`
+stay as explicit aliases when you want to force one branch. Requires a host
+credential (`memorize login <hub-url>`) or `--token`.
+
 ### `memorize project encryption (enable [--key <b64>] [--force] | show | disable)` (experimental)
 
 Provisions the per-project **E2E payload key** (#182) on the origin

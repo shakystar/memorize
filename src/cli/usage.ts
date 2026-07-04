@@ -41,6 +41,7 @@ export function renderScaffoldUsage(): string {
     '',
     'Joining a shared project (paste the URL from the Hub page):',
     '  memorize login <hub-url>     Authenticate this host to a Hub (once per host)',
+    '  memorize connect <url>       Onboard from a Hub URL — clones a fresh dir or attaches this project (auto)',
     '  memorize clone <url>         Join a shared project into a fresh dir (remote + first pull)',
     '  memorize remote <url>        Attach THIS project to a Hub remote + first push/pull',
     '',
