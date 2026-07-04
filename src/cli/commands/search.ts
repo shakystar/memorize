@@ -2,9 +2,20 @@ import {
   DEFAULT_SEARCH_LIMIT,
   hybridSearchFromCwd,
   searchFromCwd,
+  type SearchHit,
 } from '../../services/search-service.js';
 import type { CliContext } from '../context.js';
 import { parseFlags } from '../parse-flags.js';
+
+/**
+ * One human-output line per hit. A foreign (union-lane) hit is prefixed with
+ * its writer id in brackets; a self hit keeps the exact legacy format so the
+ * default `search` output is unchanged.
+ */
+export function formatHitLine(hit: SearchHit): string {
+  const base = `${hit.kind}\t${hit.entityId}\t${hit.snippet}`;
+  return hit.sourceProjectId ? `[${hit.sourceProjectId}] ${base}` : base;
+}
 
 export async function runSearchCommand(
   args: string[],
@@ -12,7 +23,7 @@ export async function runSearchCommand(
 ): Promise<void> {
   const flags = parseFlags(args, {
     single: ['limit'],
-    boolean: ['json', 'lexical'],
+    boolean: ['json', 'lexical', 'union'],
   });
   const query = flags.positional.join(' ').trim();
   if (!query) {
@@ -27,11 +38,13 @@ export async function runSearchCommand(
     }
   }
 
+  const lane = flags.boolean.union ? 'union' : 'self';
+
   // Hybrid (lexical + semantic) by default; --lexical forces pure FTS. With no
   // embeddings endpoint configured, hybrid already degrades to lexical.
   const hits = flags.boolean.lexical
-    ? await searchFromCwd(ctx.cwd, query, limit)
-    : await hybridSearchFromCwd(ctx.cwd, query, limit);
+    ? await searchFromCwd(ctx.cwd, query, limit, lane)
+    : await hybridSearchFromCwd(ctx.cwd, query, limit, lane);
 
   if (flags.boolean.json) {
     console.log(JSON.stringify(hits, null, 2));
@@ -43,6 +56,6 @@ export async function runSearchCommand(
     return;
   }
   for (const hit of hits) {
-    console.log(`${hit.kind}\t${hit.entityId}\t${hit.snippet}`);
+    console.log(formatHitLine(hit));
   }
 }
