@@ -84,6 +84,18 @@ describe('resolveNativeBinding', () => {
     expect(fs.existsSync(path.join(tmp, 'runtime', '9.9.9'))).toBe(true);
   });
 
+  it('sweeps orphaned .tmp files in the current runtime dir but keeps the target', () => {
+    const runtimeDir = path.join(tmp, 'runtime', '9.9.9');
+    fs.mkdirSync(runtimeDir, { recursive: true });
+    // simulate a crash between copyFileSync and renameSync
+    const orphan = path.join(runtimeDir, '.better_sqlite3.node.4242.tmp');
+    fs.writeFileSync(orphan, Buffer.from('half-copied-multi-MB-addon'));
+    const target = resolveNativeBinding(deps())!;
+    expect(fs.existsSync(orphan)).toBe(false); // stray tmp swept
+    expect(fs.existsSync(target)).toBe(true); // real addon untouched
+    expect(sha(target)).toBe(sha(source));
+  });
+
   it('returns null (never throws) when the runtime dir cannot be created', () => {
     // root points UNDER a regular file → mkdirSync fails with ENOTDIR/EEXIST
     const asFile = path.join(tmp, 'not-a-dir');

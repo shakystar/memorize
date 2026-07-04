@@ -101,9 +101,17 @@ export function resolveNativeBinding(
 }
 
 /**
- * Best-effort GC of sibling runtime/<other-version> dirs. A dir still locked by
- * an older running process can't be removed on Windows — swallow and leave it
- * for a later run once that process exits.
+ * Best-effort GC of sibling runtime/<other-version> dirs plus any orphaned
+ * temp files left in the current dir by a crash between copy and rename. A dir
+ * still locked by an older running process can't be removed on Windows —
+ * swallow and leave it for a later run once that process exits.
+ *
+ * Cross-version prune race (accepted): during an upgrade an old-version process
+ * could delete runtime/<new-version> in the tiny gap after the new process
+ * created it but before its `new Database` maps and OS-locks the addon, making
+ * the new open throw ENOENT. The window is vanishingly small and the next open
+ * self-heals via re-copy, so we deliberately don't guard it here — a "fix"
+ * (e.g. locking the whole runtime root) would trade this for worse contention.
  */
 function pruneStaleRuntime(currentDir: string): void {
   try {
@@ -119,5 +127,22 @@ function pruneStaleRuntime(currentDir: string): void {
     }
   } catch {
     // runtime root missing/unreadable — nothing to prune
+  }
+
+  // Sweep orphaned copy-in-progress temp files (a crash between copyFileSync
+  // and renameSync leaves a multi-MB .better_sqlite3.node.<pid>.tmp behind).
+  try {
+    for (const entry of fs.readdirSync(currentDir)) {
+      if (!entry.startsWith('.better_sqlite3.node.') || !entry.endsWith('.tmp')) {
+        continue;
+      }
+      try {
+        fs.rmSync(path.join(currentDir, entry), { force: true });
+      } catch {
+        // a concurrent process's in-flight tmp being renamed away is harmless
+      }
+    }
+  } catch {
+    // current dir missing/unreadable — nothing to sweep
   }
 }
