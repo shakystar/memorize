@@ -10,6 +10,7 @@ import {
   getCurrentVersion,
   getUpdateCheckFile,
   getUpdateNotice,
+  isNativeAddonLockError,
   isNewerVersion,
   recordUpdateCheck,
   runRefresh,
@@ -52,7 +53,7 @@ function fakeDeps(overrides: Partial<UpdateDeps> = {}): {
     },
     npmInherit: async (args) => {
       calls.npmInherit.push(args);
-      return 0;
+      return { code: 0, stderr: '' };
     },
     whichMemorize: () => 'C:/fake/memorize',
     runMemorize: async (args) => {
@@ -148,10 +149,35 @@ describe('runSelfUpdate', () => {
   });
 
   it('npm install failure: propagates exit code and never re-execs', async () => {
-    const { deps, calls } = fakeDeps({ npmInherit: async () => 7 });
+    const { deps, calls } = fakeDeps({
+      npmInherit: async () => ({ code: 7, stderr: '' }),
+    });
     const code = await runSelfUpdate(deps, () => {});
     expect(code).toBe(7);
     expect(calls.runMemorize).toHaveLength(0);
+  });
+
+  it('prints native-addon lock guidance on an EBUSY install failure', async () => {
+    const lines: string[] = [];
+    const { deps } = fakeDeps({
+      npmInherit: async () => ({
+        code: 1,
+        stderr:
+          "npm error EBUSY: resource busy or locked, copyfile '...better_sqlite3.node'",
+      }),
+    });
+    const code = await runSelfUpdate(deps, (l) => lines.push(l));
+    expect(code).toBe(1);
+    expect(lines.join('\n')).toMatch(/older memorize process/i);
+  });
+
+  it('does NOT print lock guidance on an unrelated install failure', async () => {
+    const lines: string[] = [];
+    const { deps } = fakeDeps({
+      npmInherit: async () => ({ code: 1, stderr: 'npm error ENOTFOUND registry' }),
+    });
+    await runSelfUpdate(deps, (l) => lines.push(l));
+    expect(lines.join('\n')).not.toMatch(/older memorize process/i);
   });
 
   it('refresh failures make the up-to-date path exit 1', async () => {
@@ -167,10 +193,27 @@ describe('runSelfUpdate', () => {
   });
 });
 
+describe('isNativeAddonLockError', () => {
+  it('matches EBUSY/EPERM on the sqlite addon', () => {
+    expect(
+      isNativeAddonLockError("EBUSY: ... copyfile '...\\better_sqlite3.node'"),
+    ).toBe(true);
+    expect(
+      isNativeAddonLockError("EPERM: operation not permitted, unlink '...better_sqlite3.node'"),
+    ).toBe(true);
+  });
+  it('ignores unrelated errors and unrelated EBUSY targets', () => {
+    expect(isNativeAddonLockError('ENOTFOUND registry.npmjs.org')).toBe(false);
+    expect(isNativeAddonLockError("EBUSY: ... 'some-other-file.dll'")).toBe(false);
+    expect(isNativeAddonLockError('')).toBe(false);
+  });
+});
+
 // --- defaultUpdateDeps spawn seams (DEP0190 guard, #96) ----------------------
 
 class FakeChild extends EventEmitter {
   stdout = new EventEmitter();
+  stderr = new EventEmitter();
   killed = false;
   kill(): boolean {
     this.killed = true;
@@ -240,17 +283,18 @@ describe('defaultUpdateDeps spawn seams (#96 DEP0190 guard)', () => {
     }
   });
 
-  it('npmInherit: no shell:true, stdio inherit, args preserved, resolves exit code', async () => {
+  it('npmInherit: no shell:true, tees stderr, args preserved, resolves {code, stderr}', async () => {
     const { spawnImpl, calls } = fakeSpawn((child) => {
+      child.stderr.emit('data', 'some npm noise\n');
       child.emit('close', 0);
     });
     const deps = defaultUpdateDeps(spawnImpl);
-    const code = await deps.npmInherit(['install', '-g', '@shakystar/memorize@latest']);
-    expect(code).toBe(0);
+    const result = await deps.npmInherit(['install', '-g', '@shakystar/memorize@latest']);
+    expect(result).toEqual({ code: 0, stderr: 'some npm noise\n' });
     expect(calls[0]!.command).toBe('npm');
     expect(calls[0]!.args).toEqual(['install', '-g', '@shakystar/memorize@latest']);
     expect(calls[0]!.options).not.toHaveProperty('shell');
-    expect(calls[0]!.options.stdio).toBe('inherit');
+    expect(calls[0]!.options.stdio).toEqual(['inherit', 'inherit', 'pipe']);
   });
 
   it('runMemorize: no shell:true, stdio inherit (binary resolved via which)', async () => {
