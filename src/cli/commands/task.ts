@@ -372,13 +372,17 @@ async function runHandoffTask(
   const sessionCtx = await resolveSessionContext(ctx.cwd, {
     debugLabel: 'task-handoff',
   });
+  // A positional taskId is as explicit as --task; honour it above the
+  // session fallback so `task handoff <id>` targets <id>, not whatever
+  // task this session happens to have active (matches update/cancel).
   const resolvedTaskId =
+    flags.positional[0]?.trim() ??
     flags.single.task?.trim() ??
     sessionCtx.taskId ??
     (await resolveActiveTaskId(projectId));
   if (!resolvedTaskId) {
     throw new Error(
-      'Handoff requires a taskId (pass --task or ensure an active task exists).',
+      'Handoff requires a taskId (pass it positionally or via --task, or ensure an active task exists).',
     );
   }
   const summary = flags.single.summary;
@@ -421,13 +425,17 @@ async function runDoneTask(
   const sessionCtx = await resolveSessionContext(ctx.cwd, {
     debugLabel: 'task-done',
   });
+  // A positional taskId is as explicit as --task; honour it above the
+  // session fallback so `task done <id>` completes <id>, not whatever
+  // task this session happens to have active (matches update/cancel).
   const resolvedTaskId =
+    flags.positional[0]?.trim() ??
     flags.single.task?.trim() ??
     sessionCtx.taskId ??
     (await resolveActiveTaskId(projectId));
   if (!resolvedTaskId) {
     throw new Error(
-      'Done requires a taskId (pass --task or ensure an active task exists).',
+      'Done requires a taskId (pass it positionally or via --task, or ensure an active task exists).',
     );
   }
   const actor = sessionCtx.actor ?? ACTOR_USER;

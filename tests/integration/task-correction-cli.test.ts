@@ -6,7 +6,11 @@ import { spawnSync } from 'node:child_process';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { createProject } from '../../src/services/project-service.js';
-import { createTask, readTask } from '../../src/services/task-service.js';
+import {
+  createTask,
+  readTask,
+  updateTask,
+} from '../../src/services/task-service.js';
 import { getProjectProjection } from '../../src/services/projection-store.js';
 import { readEvents } from '../../src/storage/event-store.js';
 import { closeAll } from '../../src/storage/db.js';
@@ -238,7 +242,6 @@ describe('memorize task cancel (append-only tombstone)', () => {
     // Drive to done via the legal path.
     expect(runCli(['task', 'update', taskId, '--title', 'x']).status).toBe(0);
     // status path: todo -> in_progress -> handoff_ready -> done
-    const { updateTask } = await import('../../src/services/task-service.js');
     await updateTask(projectId, taskId, { status: 'in_progress' }, 'user');
     await updateTask(projectId, taskId, { status: 'handoff_ready' }, 'user');
     await updateTask(projectId, taskId, { status: 'done' }, 'user');
@@ -246,5 +249,71 @@ describe('memorize task cancel (append-only tombstone)', () => {
     const result = runCli(['task', 'cancel', taskId]);
     expect(result.status).toBe(1);
     expect(result.stderr).toMatch(/invalid task status transition|done -> cancelled/i);
+  });
+});
+
+describe('memorize task done / handoff (honor positional taskId)', () => {
+  // The first-created non-terminal task is project.activeTaskIds[0], the
+  // fallback a session-less CLI resolves to. `target` is created second so it
+  // is NEVER the fallback — proving the positional id, not the fallback, wins.
+  async function seedActiveAndTarget(): Promise<{
+    projectId: string;
+    activeId: string;
+    targetId: string;
+  }> {
+    const project = await createProject({
+      title: 'Lifecycle project',
+      rootPath: sandbox,
+    });
+    const active = await createTask({
+      projectId: project.id,
+      title: 'Session-active fallback task',
+      actor: 'user',
+    });
+    const target = await createTask({
+      projectId: project.id,
+      title: 'Explicit positional target',
+      actor: 'user',
+    });
+    return { projectId: project.id, activeId: active.id, targetId: target.id };
+  }
+
+  it('applies `task done <id>` to the positional task, not the active fallback', async () => {
+    const { projectId, activeId, targetId } = await seedActiveAndTarget();
+    // done is only legal from handoff_ready; drive both there.
+    for (const id of [activeId, targetId]) {
+      await updateTask(projectId, id, { status: 'in_progress' }, 'user');
+      await updateTask(projectId, id, { status: 'handoff_ready' }, 'user');
+    }
+
+    const result = runCli(['task', 'done', targetId]);
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain(targetId);
+
+    expect((await readTask(projectId, targetId))?.status).toBe('done');
+    // The activeTaskIds[0] fallback must be left untouched.
+    expect((await readTask(projectId, activeId))?.status).toBe('handoff_ready');
+  });
+
+  it('applies `task handoff <id>` to the positional task, not the active fallback', async () => {
+    const { projectId, activeId, targetId } = await seedActiveAndTarget();
+    for (const id of [activeId, targetId]) {
+      await updateTask(projectId, id, { status: 'in_progress' }, 'user');
+    }
+
+    const result = runCli([
+      'task',
+      'handoff',
+      targetId,
+      '--summary',
+      'did the thing',
+      '--next',
+      'review it',
+    ]);
+    expect(result.status).toBe(0);
+
+    expect((await readTask(projectId, targetId))?.status).toBe('handoff_ready');
+    // The fallback must remain in_progress, not be handed off in its place.
+    expect((await readTask(projectId, activeId))?.status).toBe('in_progress');
   });
 });
