@@ -7,7 +7,7 @@ export function renderScaffoldUsage(): string {
     '  memorize update              Upgrade the CLI + refresh integrations machine-wide',
     '  memorize session activity    Show active sessions + their recent work',
     '  memorize consolidate         Run one memory-consolidation boundary now',
-    '  memorize search <query>      Search project memory',
+    '  memorize search <query>      Search project memory (--union for workspace-wide)',
     '  memorize memory list         List the project current (valid) memories',
     '  memorize memory show <id>    Print a memory full text + metadata',
     '  memorize memory retract <id> Retract (tombstone) a memory (append-only, reversible)',
