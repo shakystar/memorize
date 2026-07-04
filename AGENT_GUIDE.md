@@ -879,21 +879,29 @@ Output: tab-separated `id\tstatus\tpriority\ttitle`, sorted by
 
 Prints the task JSON.
 
-### `memorize task resume [<taskId>]` (alias `start`)
+### `memorize task start [<taskId>]`
 
-Loads the startup context payload and prints it as JSON. This is what an
-agent reads on `SessionStart`.
+Transitions the task to `in_progress` and prints the startup context
+payload. Resolves the target like `handoff`/`done` (`--task` → the
+session's claimed task → the active task). Idempotent when already
+`in_progress` (no redundant event). Rejected on a terminal task
+(`done`/`cancelled`). This is how an agent *claims* a task so a parallel
+agent sees it is being worked on.
+
+### `memorize task resume [<taskId>]`
+
+Loads the startup context payload and prints it as JSON — a **pure read
+that never changes status** (so reading another task's handoff with
+`--task <id>` cannot flip its state). This is what an agent reads on
+`SessionStart`.
 
 - With no argument: targets the calling session's claimed task; if the
   session has none, the task is auto-selected (in_progress →
   handoff_ready → first).
 - `<taskId>` (positional) or `--task <taskId>` (single): load the
-  startup context for an explicit task instead — e.g. to read another
-  task's handoff. Mirrors the `--task` override on
-  `handoff` / `done` / `checkpoint`.
+  startup context for an explicit task instead.
 
-Unknown flags are rejected (a stray `--task` is no longer silently
-ignored).
+Unknown flags are rejected on both verbs.
 
 ### `memorize task checkpoint --summary "<text>" [flags]`
 
@@ -915,8 +923,10 @@ would not preserve verbatim.
 
 ### `memorize task handoff --summary "<text>" --next "<text>" [flags]`
 
-Records a handoff intent to the next agent. The handoff forces the
-task status to `handoff_ready`.
+Records a handoff intent to the next agent. The handoff transitions the
+task `in_progress → handoff_ready` through the state machine. A handoff
+from `todo` is **rejected** — `start` the task first. A re-handoff of an
+already-`handoff_ready` task is allowed (it refreshes the snapshot).
 
 | Flag | Shape | Purpose |
 |---|---|---|
@@ -983,9 +993,10 @@ success).
 
 #118: drives a task to the terminal `done` state. Resolves the target
 the same way `handoff` does (`--task` → the session's claimed task →
-the active task) and fails if none resolves. Typically the close-out
-after `task handoff` moved the task to `handoff_ready`; `done` records
-the final `handoff_ready -> done` transition.
+the active task) and fails if none resolves. Valid from `in_progress`
+(a solo `start → done` finish, no handoff needed) or from `handoff_ready`
+(the close-out after `task handoff`). Rejected from `todo` (nothing was
+started).
 
 | Flag | Shape | Purpose |
 |---|---|---|
