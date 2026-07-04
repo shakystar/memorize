@@ -20,6 +20,7 @@ import {
   createCheckpoint,
   createHandoff,
   createTask,
+  updateTask,
 } from '../../src/services/task-service.js';
 import { closeAll } from '../../src/storage/db.js';
 import { readEvents } from '../../src/storage/event-store.js';
@@ -100,6 +101,7 @@ describe('sync golden over http relay — true-replica baseline', () => {
         sessionId: 'session_test_a',
         summary: 'Mid-session snapshot for golden test',
       });
+      await updateTask(projectId, task.id, { status: 'in_progress' }, 'user');
       await createHandoff({
         projectId,
         taskId: task.id,

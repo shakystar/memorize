@@ -89,3 +89,34 @@ describe('memorize task start (status transition to in_progress)', () => {
     expect((await readTask(projectId, taskId))?.status).toBe('done');
   });
 });
+
+describe('memorize task handoff (strict — requires a started task)', () => {
+  it('rejects handoff from a todo task (must start first)', async () => {
+    const { taskId } = await seedTask();
+    const result = runCli([
+      'task', 'handoff', '--task', taskId,
+      '--summary', 'x', '--next', 'y',
+    ]);
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain('todo -> handoff_ready');
+  });
+
+  it('accepts handoff after start (in_progress -> handoff_ready)', async () => {
+    const { projectId, taskId } = await seedTask();
+    expect(runCli(['task', 'start', taskId]).status).toBe(0);
+    const handoff = runCli([
+      'task', 'handoff', '--task', taskId,
+      '--summary', 'x', '--next', 'y',
+    ]);
+    expect(handoff.status).toBe(0);
+    expect((await readTask(projectId, taskId))?.status).toBe('handoff_ready');
+  });
+
+  it('allows an idempotent re-handoff from handoff_ready', async () => {
+    const { taskId } = await seedTask();
+    expect(runCli(['task', 'start', taskId]).status).toBe(0);
+    expect(runCli(['task', 'handoff', '--task', taskId, '--summary', 'a', '--next', 'b']).status).toBe(0);
+    const second = runCli(['task', 'handoff', '--task', taskId, '--summary', 'c', '--next', 'd']);
+    expect(second.status).toBe(0);
+  });
+});
