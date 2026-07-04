@@ -9,11 +9,15 @@ import { parseFlags } from '../parse-flags.js';
 
 /**
  * One human-output line per hit. A foreign (union-lane) hit is prefixed with
- * its writer id in brackets; a self hit keeps the exact legacy format so the
- * default `search` output is unchanged.
+ * its writer id in brackets; a self hit keeps the legacy format. The snippet's
+ * internal whitespace is collapsed to single spaces so a hit whose FTS snippet
+ * spans the newline-joined title/description/goal text stays on ONE physical
+ * row — otherwise the continuation lines orphan from their kind/id (and, for a
+ * foreign hit, from the provenance tag). Matches `memory list`'s rendering.
  */
 export function formatHitLine(hit: SearchHit): string {
-  const base = `${hit.kind}\t${hit.entityId}\t${hit.snippet}`;
+  const snippet = hit.snippet.replace(/\s+/g, ' ').trim();
+  const base = `${hit.kind}\t${hit.entityId}\t${snippet}`;
   return hit.sourceProjectId ? `[${hit.sourceProjectId}] ${base}` : base;
 }
 

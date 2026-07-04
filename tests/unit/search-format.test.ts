@@ -19,4 +19,28 @@ describe('formatHitLine', () => {
     const foreign: SearchHit = { ...selfHit, sourceProjectId: 'proj_bob' };
     expect(formatHitLine(foreign)).toBe('[proj_bob] task\ttask_1\tdo the thing');
   });
+
+  it('collapses a multi-line snippet to one line so the hit stays on a single row', () => {
+    // FTS snippets span the newline-joined title/description/goal text; left
+    // raw they wrap across physical lines, orphaning the continuation lines
+    // from their kind/id (and, for foreign hits, from the provenance tag).
+    const multiline: SearchHit = {
+      ...selfHit,
+      snippet: '[quokkazzz] bob migration\nforeign [quokkazzz] row\ng',
+    };
+    expect(formatHitLine(multiline)).toBe(
+      'task\ttask_1\t[quokkazzz] bob migration foreign [quokkazzz] row g',
+    );
+  });
+
+  it('collapses newlines for a foreign hit too, tag covering the whole snippet', () => {
+    const foreignMultiline: SearchHit = {
+      ...selfHit,
+      sourceProjectId: 'proj_bob',
+      snippet: 'line one\nline two',
+    };
+    expect(formatHitLine(foreignMultiline)).toBe(
+      '[proj_bob] task\ttask_1\tline one line two',
+    );
+  });
 });
