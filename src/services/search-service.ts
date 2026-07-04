@@ -205,6 +205,11 @@ export async function hybridSearch(
   const semantic = await semanticSearch(projectId, query, poolSize, embedder);
   if (semantic.length === 0) return ftsHits.slice(0, limit);
 
+  // Foreign (union-lane) hits have no local embeddings, so they surface via
+  // `ftsHits` only and never appear in `semantic` — they are never RRF-boosted.
+  // In hybrid mode a fused self hit can therefore outrank a strong-lexical
+  // foreign hit; this is the spec's documented non-goal (no foreign semantic
+  // ranking), not a bug.
   const fused = reciprocalRankFusion([
     ftsHits.map((hit) => hit.entityId),
     semantic.map((hit) => hit.entityId),

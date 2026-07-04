@@ -10,7 +10,13 @@ import {
   listValidMemories,
   rebuildProjectProjection,
 } from '../../src/services/projection-store.js';
-import { hybridSearch, searchProject } from '../../src/services/search-service.js';
+import { hashText, type Embedder } from '../../src/services/embeddings-service.js';
+import { upsertEmbedding } from '../../src/services/embeddings-store.js';
+import {
+  hybridSearch,
+  searchProject,
+  semanticSearch,
+} from '../../src/services/search-service.js';
 import { closeAll, getDb } from '../../src/storage/db.js';
 import { appendEvent } from '../../src/storage/event-store.js';
 
@@ -199,5 +205,47 @@ describe('projection lane selector (M2)', () => {
     const bob = union.find((h) => h.entityId === 'task_bob');
     expect(bob).toBeDefined();
     expect(bob!.sourceProjectId).toBe(FOREIGN);
+  });
+
+  it('hybridSearch preserves provenance through the RRF fusion + byId merge (embedder ON)', async () => {
+    // The embedder-off tests above all hit `hybridSearch`'s early return
+    // (`if (semantic.length === 0) return ftsHits.slice(0, limit)`) BEFORE the
+    // RRF/byId merge block runs. This test supplies a stub Embedder so the
+    // semantic list is non-empty and that merge block actually executes.
+    const stubEmbedder: Embedder = {
+      model: 'stub-embedder',
+      embed: async (texts) => texts.map(() => [1, 0, 0]),
+    };
+    // The semantic corpus (the `embeddings` table) is populated out-of-band by
+    // ensureEmbeddings and is self-only in this suite (no foreign embeddings
+    // exist — SoT: foreign memories have no local vectors). Seed one row for
+    // mem_self — the only self-lane, valid memory in this fixture — so
+    // `listEmbeddings(projectId, 'memory')` is non-empty.
+    upsertEmbedding(projectId, {
+      entityId: 'mem_self',
+      kind: 'memory',
+      model: stubEmbedder.model,
+      dim: 3,
+      vector: [1, 0, 0],
+      textHash: hashText('alpha self memory'),
+      createdAt: ts,
+    });
+
+    // Evidence the fusion path is actually reached: this is exactly the
+    // condition hybridSearch's early-return guard tests (search-service.ts,
+    // `if (semantic.length === 0) return ...`). A non-empty result here means
+    // hybridSearch's call to the same semanticSearch will also be non-empty,
+    // so the guard is false and control falls through to the RRF/byId block.
+    const semanticHits = await semanticSearch(projectId, 'alpha', 20, stubEmbedder);
+    expect(semanticHits.length).toBeGreaterThan(0);
+
+    const union = await hybridSearch(projectId, 'alpha', 20, stubEmbedder, 'union');
+    const byId = new Map(union.map((h) => [h.entityId, h]));
+
+    // Foreign hit's provenance survives RRF fusion + the byId merge.
+    expect(byId.get('task_bob')!.sourceProjectId).toBe(FOREIGN);
+    // A fused self hit carries no sourceProjectId key at all (absence = self,
+    // matching the existing tests' absence-assertion style).
+    expect('sourceProjectId' in byId.get('task_self')!).toBe(false);
   });
 });
