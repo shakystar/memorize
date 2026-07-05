@@ -11,7 +11,6 @@
 # only the explicitly whitelisted public docs below are committed.
 /docs/*
 !/docs/ARCHITECTURE.md
-!/docs/i18n/
 !/docs/functions/
 
 # Git worktrees (subagent workspaces)

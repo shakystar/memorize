@@ -33,7 +33,7 @@ failure rate), second half cycles the matrix.
 
 ## Usage
 
-Prereqs: node ≥ 22, git, claude CLI logged in (subscription OAuth). The
+Prereqs: node ≥ 22.9, git, claude CLI logged in (subscription OAuth). The
 inner session runs with `--dangerously-skip-permissions` inside the sandbox.
 
 Windows (PowerShell):

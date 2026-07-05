@@ -102,16 +102,16 @@ when it is absent, so no workflow change is needed when you add it.
 
 ## License and relicensing
 
-Memorize is released under
-[AGPL-3.0-or-later](../LICENSE).
+Memorize is released under the
+[MIT License](../LICENSE).
 
 By submitting a contribution (pull request, patch, issue with code, or
 any other form) to this repository, you agree that:
 
 1. You have the right to submit the contribution under
-   AGPL-3.0-or-later.
+   the MIT License.
 2. Your contribution is licensed to the project and its users under
-   AGPL-3.0-or-later.
+   the MIT License.
 3. You grant the project maintainer (shakystar) the right to
    **relicense the project, including your contribution, under a
    different license in the future** (for example, a more permissive
