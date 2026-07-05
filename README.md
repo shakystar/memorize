@@ -1,14 +1,14 @@
 <p align="center">
-  <img src="https://raw.githubusercontent.com/shakystar/memorize/main/.github/assets/hero-logo-readme-crow.png" alt="memorize: shared memory for AI coding agents" width="720">
+  <img src="https://github.com/user-attachments/assets/a674a964-d875-4439-87db-8c18ad8222da" alt="memorize: shared memory for AI coding agents" width="720">
 </p>
 
 <h1 align="center">Memorize</h1>
 
 <p align="center">
-  <a href="https://www.npmjs.com/package/@shakystar/memorize"><img src="https://img.shields.io/npm/v/%40shakystar%2Fmemorize" alt="npm"></a>
-  <a href="https://www.npmjs.com/package/@shakystar/memorize"><img src="https://img.shields.io/npm/dm/%40shakystar%2Fmemorize" alt="downloads"></a>
-  <a href="https://github.com/shakystar/memorize/actions/workflows/ci.yml"><img src="https://github.com/shakystar/memorize/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
   <a href="https://www.npmjs.com/package/@shakystar/memorize"><img src="https://img.shields.io/node/v/%40shakystar%2Fmemorize" alt="node"></a>
+  <a href="https://github.com/shakystar/memorize/actions/workflows/ci.yml"><img src="https://github.com/shakystar/memorize/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+  <a href="https://www.npmjs.com/package/@shakystar/memorize"><img src="https://img.shields.io/npm/dm/%40shakystar%2Fmemorize" alt="downloads"></a>
+  <a href="https://discord.com/channels/1523335804804661348"><img alt="Discord" src="https://img.shields.io/discord/1523335804804661348"></a>
   <a href="./LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue" alt="license"></a>
 </p>
 
@@ -17,8 +17,7 @@
   <a href="./docs/ARCHITECTURE.md">Architecture</a> ·
   <a href="./guides/AI_SETUP.md">Setup</a> ·
   <a href="https://github.com/shakystar/memorize/issues">Issues</a> ·
-  <a href="https://github.com/shakystar/memorize/discussions">Discussions</a> ·
-  <a href="./docs/i18n/README.ko.md">한국어</a>
+  <a href="https://github.com/shakystar/memorize/discussions">Discussions</a>
 </p>
 
 ---
@@ -39,7 +38,7 @@ Memorize records what your coding agent does — file writes, decisions, command
 
 ## Install
 
-Node.js 22.9 or newer is required. Always use the scoped name with npx — the unscoped `memorize` on npm is an unrelated package.
+Node.js 22.9 or newer is required.
 
 **Recommended — let your AI install it.** Memorize is built to be installed by your AI assistant, per project. Send your Claude Code or Codex session a single line:
 
@@ -57,9 +56,44 @@ npx @shakystar/memorize doctor
 
 **From source.** See [CONTRIBUTING.md](./.github/CONTRIBUTING.md) for the pnpm workspace setup and developer workflow.
 
-## How memorize compares
+## Usage
 
-Where memorize sits next to [agentmemory](https://github.com/rohitg00/agentmemory), the closest open-source alternative, and the built-in `CLAUDE.md` approach.
+
+```sh
+memorize doctor            # diagnose project and integration state
+memorize update            # upgrade the CLI and refresh integrations machine-wide
+memorize session activity  # what are my other sessions doing?
+memorize consolidate       # run one memory-consolidation boundary now
+memorize search <query>    # search project memory
+memorize project show      # print the bound project summary (JSON)
+```
+
+Every other command lives in [AGENT_GUIDE.md](./AGENT_GUIDE.md), which your AI reads when it needs the detail.
+
+> **Support tiers**: only `Claude Code` is the fully maintained target for now. The other harness integrations — Codex, opencode, Gemini CLI, pi, Hermes, and Cursor — are frozen: still installable, but no longer covered by conformance CI.
+
+> Any MCP-capable host can also use the generic [`memorize mcp`](./AGENT_GUIDE.md) server.
+
+## Collaborate through the Hub
+
+Memorize is local-first, but its bigger goal is **shared team memory**: the same append-only log syncs across a team so every teammate's agent opens from the same context. To achieve this...
+
+### 🧪 [**memorize-hub-shakystar.fly.dev**](https://memorize-hub-shakystar.fly.dev) is live! — join freely as a beta tester.
+
+The full workspace, role, and sync surface is in [AGENT_GUIDE.md](./AGENT_GUIDE.md).
+
+## Docs by goal
+
+| You want to… | Read |
+| --- | --- |
+| Install memorize in a project | [guides/AI_SETUP.md](./guides/AI_SETUP.md) |
+| Look up any command, flag, or failure mode | [AGENT_GUIDE.md](./AGENT_GUIDE.md) |
+| Understand the memory design | [docs/ARCHITECTURE.md](./docs/ARCHITECTURE.md) |
+| Contribute code | [CONTRIBUTING.md](./.github/CONTRIBUTING.md) |
+| Report a security issue | [SECURITY.md](./SECURITY.md) |
+
+
+## Comparison
 
 | | **memorize** | agentmemory | Built-in (`CLAUDE.md`) |
 | --- | --- | --- | --- |
@@ -87,37 +121,6 @@ Retrieval is scored on [LongMemEval-S](https://github.com/xiaowu0162/longmemeval
 
 These are retrieval-recall scores, not answer accuracy, and they test the search layer rather than the consolidation layer. Reproduce with `pnpm benchmark:retrieval bm25`.
 
-## Usage
-
-You rarely need these; your AI drives most of the interaction. The ones a human might reach for:
-
-```sh
-memorize doctor            # diagnose project and integration state
-memorize update            # upgrade the CLI and refresh integrations machine-wide
-memorize session activity  # what are my other sessions doing?
-memorize consolidate       # run one memory-consolidation boundary now
-memorize search <query>    # search project memory
-memorize project show      # print the bound project summary (JSON)
-```
-
-Every other command lives in [AGENT_GUIDE.md](./AGENT_GUIDE.md), which your AI reads when it needs the detail.
-
-> **Support tiers.** Claude Code is the first-class, fully maintained target. The other harness integrations — Codex, opencode, Gemini CLI, pi, Hermes, and Cursor — are frozen: still installable, but no longer covered by conformance CI. Any MCP-capable host can also use the generic [`memorize mcp`](./AGENT_GUIDE.md) server.
-
-## Status
-
-The 3.0 line is the local-first plus optional Hub line. Local stores remain authoritative for startup context. Hub state is used for remote routing, credentials, workspace membership, and same-account personal sync. The event log is append-only, migrations are versioned, and derived projections can be rebuilt from the log.
-
-## Docs by goal
-
-| You want to… | Read |
-| --- | --- |
-| Install memorize in a project | [guides/AI_SETUP.md](./guides/AI_SETUP.md) |
-| Look up any command, flag, or failure mode | [AGENT_GUIDE.md](./AGENT_GUIDE.md) |
-| Understand the memory design | [docs/ARCHITECTURE.md](./docs/ARCHITECTURE.md) |
-| Read this page in Korean | [docs/i18n/README.ko.md](./docs/i18n/README.ko.md) |
-| Contribute code | [CONTRIBUTING.md](./.github/CONTRIBUTING.md) |
-| Report a security issue | [SECURITY.md](./SECURITY.md) |
 
 ## Community
 

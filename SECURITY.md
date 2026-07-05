@@ -2,12 +2,12 @@
 
 ## Supported versions
 
-Memorize is still in a structured prototype phase, so only the latest `0.x` release gets security fixes. We'll widen the support window once `1.0.0` ships.
+Security fixes land on the latest published release. Older releases are not backported.
 
 | Version | Supported |
 | --- | --- |
-| latest `0.x` | Yes |
-| older `0.x` | No |
+| latest `3.x` | Yes |
+| older | No |
 
 ## Reporting a vulnerability
 

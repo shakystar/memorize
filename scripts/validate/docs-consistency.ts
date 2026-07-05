@@ -26,9 +26,7 @@ function fail(message: string): void {
   failures.push(message);
 }
 
-const I18N_READMES = [
-  'docs/i18n/README.ko.md',
-];
+const I18N_READMES: string[] = [];
 
 const ALL_DOCS = [
   'README.md',
