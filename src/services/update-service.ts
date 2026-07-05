@@ -42,7 +42,11 @@ export function getCurrentVersion(): string {
  */
 export function isNewerVersion(latest: string, current: string): boolean {
   const parse = (v: string): { core: number[]; pre: string[] } => {
-    const [core = '', ...preParts] = v.split('-');
+    // Strip SemVer build metadata (+…) first: it MUST NOT affect precedence
+    // (semver §10), and left in place it corrupts both the numeric core parse
+    // and the last prerelease identifier's numeric-vs-alphanumeric ranking.
+    const [withoutBuild = ''] = v.split('+');
+    const [core = '', ...preParts] = withoutBuild.split('-');
     return {
       core: core.split('.').map((n) => Number(n) || 0),
       pre: preParts.length > 0 ? preParts.join('-').split('.') : [],
