@@ -337,6 +337,50 @@ describe('runWatcherLoop', () => {
     expect(calls).toBe(5);
     expect(result).toEqual({ ticks: 0, exit: 'tick-failures' });
   });
+
+  it('contains a THROWING renewLock in the shared failure counter: 5 consecutive throws exit tick-failures without ever calling tick (Round-2 Important)', async () => {
+    let renewCalls = 0;
+    let tickCalls = 0;
+    const result = await runWatcherLoop(
+      { cwd: sandbox, projectId: PROJECT },
+      {
+        shouldExit: async () => false,
+        sleep: async () => {},
+        renewLock: async () => {
+          renewCalls += 1;
+          throw new Error(`renew boom ${renewCalls}`);
+        },
+        tick: async () => {
+          tickCalls += 1;
+          return { configured: true, pulled: 0, pushed: 0 };
+        },
+      },
+    );
+    expect(renewCalls).toBe(5);
+    expect(tickCalls).toBe(0);
+    expect(result).toEqual({ ticks: 0, exit: 'tick-failures' });
+  });
+
+  it('a THROWING renew followed by a real lock-lost (false, not a throw) exits lock-lost immediately — it is not folded into the failure counter (Round-2 Important)', async () => {
+    let renewCalls = 0;
+    const result = await runWatcherLoop(
+      { cwd: sandbox, projectId: PROJECT },
+      {
+        shouldExit: async () => false,
+        sleep: async () => {},
+        renewLock: async () => {
+          renewCalls += 1;
+          if (renewCalls === 1) throw new Error('transient renew hiccup');
+          return false; // genuine lock-lost signal — must exit immediately
+        },
+        tick: async () => ({ configured: true, pulled: 0, pushed: 0 }),
+      },
+    );
+    // One throw (counted, retried), then a clean "not us anymore" — exits
+    // lock-lost on the very next iteration, well before the 5-throw ceiling.
+    expect(renewCalls).toBe(2);
+    expect(result).toEqual({ ticks: 0, exit: 'lock-lost' });
+  });
 });
 
 describe('watcherTick', () => {
@@ -550,5 +594,27 @@ describe('spawnDetachedWatcher', () => {
       await spawnDetachedWatcher({ projectId: PROJECT, cwd: sandbox }, fakeSpawn),
     ).toBe(false);
     expect(spawnedArgs).toHaveLength(0);
+  });
+
+  it('spawns even when the holder pid is alive, if its lease has gone stale (Round-2 Important — PID-reuse reclaim)', async () => {
+    // The holder is OUR OWN process (genuinely alive), but its lease is far
+    // older than 2x the poll interval. Pre-fix, isPidAlive alone made the
+    // fast-path read this as "alive" forever — which is exactly what
+    // happens after a crash + Windows PID reuse by an unrelated long-lived
+    // process: no watcher would ever be spawned again. The fast-path must
+    // fall through to spawn so the child's atomic acquire can reclaim it.
+    await writeSyncState();
+    process.env[WATCHER_POLL_MS_ENV_VAR] = '10';
+    const longAgo = new Date(Date.now() - 60_000).toISOString();
+    await mkdir(join(watcherLockPath(PROJECT), '..'), { recursive: true });
+    await writeFile(
+      watcherLockPath(PROJECT),
+      JSON.stringify({ pid: process.pid, startedAt: longAgo, renewedAt: longAgo }),
+      'utf8',
+    );
+    expect(
+      await spawnDetachedWatcher({ projectId: PROJECT, cwd: sandbox }, fakeSpawn),
+    ).toBe(true);
+    expect(spawnedArgs).toHaveLength(1);
   });
 });

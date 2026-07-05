@@ -155,10 +155,20 @@ export async function renewWatcherLock(
 ): Promise<boolean> {
   const holder = await readWatcherLock(projectId);
   if (!holder || holder.pid !== pid) return false;
-  const body = JSON.stringify(
-    { pid, startedAt: holder.startedAt, renewedAt: nowIso() } satisfies WatcherLockInfo,
-  );
-  await writeFile(watcherLockPath(projectId), body, 'utf8');
+  const renewed: WatcherLockInfo = {
+    pid,
+    startedAt: holder.startedAt,
+    renewedAt: nowIso(),
+  };
+  // Minor fix: atomic rewrite (writeJson → write-file-atomic), not a raw
+  // writeFile — a contender reading this file mid-write would see a
+  // truncated body, parse it as "no holder", and evict a perfectly live
+  // watcher (a transient false eviction). Only this REWRITE of an
+  // already-held lock uses the atomic path; acquireWatcherLock's first
+  // creation still needs plain `wx` exclusive-create semantics, which
+  // writeJson does not offer. The JSON shape (pid/startedAt/renewedAt) is
+  // unchanged, so readWatcherLock's JSON.parse keeps working either way.
+  await writeJson(watcherLockPath(projectId), renewed);
   return true;
 }
 
@@ -377,37 +387,50 @@ export async function runWatcherLoop(
   let ticks = 0;
   let consecutiveFailures = 0;
   for (;;) {
-    if (
-      await shouldExit(options.cwd, options.projectId, {
-        startedAtMs: loopStartedAt,
-        graceMs: pollMs,
-      })
-    ) {
-      return { ticks, exit: 'idle-sessions' };
-    }
-
-    // Important-A: re-verify + renew our lease BEFORE doing any sync work
-    // this tick. A racer that judged us dead and took over stale (the
-    // double-acquire the finding describes), or a foreign pid that reused
-    // ours (Windows PID reuse after a crash), both show up here as "not us
-    // anymore" — exit immediately instead of continuing to poll a project
-    // another watcher now owns. Self-heals a double-acquire within one tick.
-    if (!(await renewLock(options.projectId))) {
-      process.stderr.write(
-        `WARN: watcher lock-lost for ${options.projectId}; exiting\n`,
-      );
-      return { ticks, exit: 'lock-lost' };
-    }
-
+    // Important-B: shouldExit, the Important-A lease renewal, AND the tick
+    // are ALL wrapped in one try/catch sharing consecutiveFailures. A
+    // transient FS throw from ANY of the three (Windows AV EBUSY/EPERM,
+    // SQLITE_BUSY — the renew write is a plain writeJson call, no more
+    // exempt from those than the tick's own FS/DB calls) must not kill the
+    // daemon outright; only sustained failure should. A `return` from inside
+    // this try (idle-sessions / lock-lost / not-configured / max-ticks) does
+    // NOT run the catch — only a THROW does — so the lock-lost and
+    // idle-sessions exits below stay immediate, un-retried signals; only
+    // genuine exceptions go through the failure counter.
     let result: WatcherTickResult;
     try {
+      if (
+        await shouldExit(options.cwd, options.projectId, {
+          startedAtMs: loopStartedAt,
+          graceMs: pollMs,
+        })
+      ) {
+        return { ticks, exit: 'idle-sessions' };
+      }
+
+      // Important-A: re-verify + renew our lease BEFORE doing any sync work
+      // this tick. A racer that judged us dead and took over stale (the
+      // double-acquire the finding describes), or a foreign pid that reused
+      // ours (Windows PID reuse after a crash), both show up here as "not us
+      // anymore" — exit immediately instead of continuing to poll a project
+      // another watcher now owns. Self-heals a double-acquire within one
+      // tick. This is a returned false, NOT a throw, from a healthy renew —
+      // it must keep exiting 'lock-lost' immediately rather than being
+      // folded into the failure counter below.
+      if (!(await renewLock(options.projectId))) {
+        process.stderr.write(
+          `WARN: watcher lock-lost for ${options.projectId}; exiting\n`,
+        );
+        return { ticks, exit: 'lock-lost' };
+      }
+
       result = await tick(options.projectId);
       consecutiveFailures = 0;
     } catch (error) {
       consecutiveFailures += 1;
       const message = error instanceof Error ? error.message : String(error);
       process.stderr.write(
-        `WARN: watcher tick failed (${consecutiveFailures}/${MAX_CONSECUTIVE_TICK_FAILURES}): ${message}\n`,
+        `WARN: watcher iteration failed (${consecutiveFailures}/${MAX_CONSECUTIVE_TICK_FAILURES}): ${message}\n`,
       );
       if (consecutiveFailures >= MAX_CONSECUTIVE_TICK_FAILURES) {
         return { ticks, exit: 'tick-failures' };
@@ -461,7 +484,15 @@ export async function spawnDetachedWatcher(
     const state = await readSyncState(ctx.projectId);
     if (!state?.syncEnabled || !state.syncTransport) return false;
     const holder = await readWatcherLock(ctx.projectId);
-    if (holder && isPidAlive(holder.pid)) return false;
+    // Important-A fast-path fix: pid-liveness ALONE is not enough here. This
+    // check is only a cheap optimization — acquireWatcherLock's atomic `wx`
+    // create + stale-takeover is the authoritative decision — but if it reads
+    // a lease-stale holder as "alive" (Windows PID reuse after a crash: the
+    // dead watcher's pid gets recycled by an unrelated long-lived process),
+    // it returns false and no child is ever spawned to run the atomic
+    // reclaim. A stale lease must fall through to spawn regardless of pid
+    // liveness so the child gets a chance to reclaim it.
+    if (holder && !isLeaseStale(holder) && isPidAlive(holder.pid)) return false;
     const cliEntry = fileURLToPath(new URL('../cli/index.js', import.meta.url));
     const child = spawnImpl(process.execPath, [cliEntry, 'watcher', 'run'], {
       cwd: ctx.cwd,
