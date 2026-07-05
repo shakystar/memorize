@@ -11,8 +11,10 @@ import {
   buildPushPayload,
   getQueueSnapshot,
   markPushed,
+  pullProject,
   updateSyncState,
 } from '../../src/services/sync-service.js';
+import type { SyncTransport } from '../../src/domain/sync-transport.js';
 import { readEvents } from '../../src/storage/event-store.js';
 import type { DomainEvent } from '../../src/domain/events.js';
 import { closeAll } from '../../src/storage/db.js';
@@ -127,5 +129,36 @@ describe('sync service', () => {
 
     const initialSnapshot = await getQueueSnapshot(project.id);
     expect(initialSnapshot.outboundPendingCount).toBeGreaterThan(0);
+  });
+
+  it('pullProject appends zero events when the remote has nothing new (Critical-2a)', async () => {
+    const project = await createProject({
+      title: 'No-op pull target',
+      rootPath: sandbox,
+    });
+    await updateSyncState(project.id, {
+      remoteProjectId: project.id,
+      syncEnabled: true,
+    });
+
+    const emptyTransport: SyncTransport = {
+      push: async () => ({ accepted: [], rejected: [] }),
+      pull: async () => ({ events: [] }),
+    };
+
+    const before = await readEvents(project.id);
+    const beforeState = await readSyncState(project.id);
+    expect(beforeState?.syncStatus).toBe('idle');
+
+    const result = await pullProject(project.id, emptyTransport);
+    expect(result).toEqual({ total: 0, inserted: 0 });
+
+    const after = await readEvents(project.id);
+    // No sync.state.updated for a 'syncing' flip on the way in, and none for
+    // an 'idle' flip on the way out — the pull found nothing, so it writes
+    // nothing. This is the fix for the watcher's per-tick churn (Critical-2)
+    // and the dead SoT-043 idle gate it caused.
+    expect(after.length).toBe(before.length);
+    expect((await readSyncState(project.id))?.syncStatus).toBe('idle');
   });
 });

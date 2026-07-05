@@ -248,8 +248,15 @@ export async function pullProject(
       `Cannot pull: project ${projectId} has no remoteProjectId. Push first to bind the remote.`,
     );
   }
-  await updateSyncState(projectId, { syncStatus: 'syncing' });
 
+  // Critical-2 / Important-C (SoT-043 watcher): pull is idempotent — autoPull
+  // deliberately does NOT gate on syncStatus the way autoPush does — so it no
+  // longer flips syncStatus to 'syncing' for the round trip. That flip used
+  // to append a sync.state.updated on the way in AND another on the way out
+  // of every pull, which (a) churns the log at the watcher's ~30s cadence
+  // forever, even when nothing changed, and (b) made a pull in flight look
+  // identical to a push in flight, starving autoPush's reentrancy guard.
+  // 'syncing' is now exclusively pushProject's signal.
   const response = await transport.pull({
     projectId,
     remoteProjectId: state.remoteProjectId,
@@ -266,9 +273,9 @@ export async function pullProject(
     // unusable projection AND burn the event ids, so a later keyed pull is then
     // dropped as a duplicate and the clone cannot self-repair.
     if (!state.encryptionKey && response.events.some((e) => isEncryptedEnvelope(e.payload))) {
-      // Leave syncStatus as-is (mirrors a transport.pull() failure above): the
-      // retry with the key sets it back to idle. Touching it here would append a
-      // sync.state.updated to a fresh clone's store before its project.created.
+      // This throw leaves syncStatus untouched — pull no longer flips it to
+      // 'syncing' up front, so there is nothing to unwind. A retry with the
+      // key runs the same path and reaches the idle guard below normally.
       throw new Error(
         `Cannot pull project ${projectId}: the remote sent encrypted payloads ` +
           `but no encryption key is configured. Provision the key first — clone ` +
@@ -290,7 +297,14 @@ export async function pullProject(
       : response;
     inserted = await applyPullResponse(projectId, decrypted);
   }
-  await updateSyncState(projectId, { syncStatus: 'idle' });
+
+  // Mirror pushProject's guard: only write a status transition when there is
+  // one to make. A no-op pull (nothing new; status already idle) appends
+  // ZERO sync.state.updated events — this is what stops the watcher's
+  // SoT-043 idle gate from always seeing a self-lane delta of its own making.
+  if (state.syncStatus !== 'idle') {
+    await updateSyncState(projectId, { syncStatus: 'idle' });
+  }
 
   return {
     total: response.events.length,

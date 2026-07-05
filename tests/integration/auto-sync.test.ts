@@ -117,9 +117,20 @@ describe('auto-sync (P3-b) — background propagation', () => {
       fileCfg,
     );
     const wm1 = (await readSyncState(projectA.id))?.lastPulledEventId;
+    const beforeCount = (await readEvents(projectA.id)).length;
     expect((await autoPull(projectA.id)).pulled).toBe(0); // nothing new
     const wm2 = (await readSyncState(projectA.id))?.lastPulledEventId;
     expect(wm2).toBe(wm1);
+
+    // Critical-2a: a no-op pull (status already idle, nothing new) must not
+    // append ANY events — including a sync.state.updated for the syncing/idle
+    // flip — this used to churn 2/tick on the watcher's ~30s cadence and
+    // defeat the SoT-043 idle push gate. (The log already carries one
+    // sync.state.updated from the earlier clone's real pull, so the
+    // assertion is "no NEW event landed", not "none exist at all".)
+    const afterEvents = await readEvents(projectA.id);
+    expect(afterEvents.length).toBe(beforeCount);
+    expect((await readSyncState(projectA.id))?.syncStatus).toBe('idle');
   });
 
   it('persisted transport survives a process boundary (no flag needed)', async () => {
