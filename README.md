@@ -1,8 +1,8 @@
+# Memorize - Shared Memory for AI Agents
+
 <p align="center">
   <img src="https://github.com/user-attachments/assets/a674a964-d875-4439-87db-8c18ad8222da" alt="memorize: shared memory for AI coding agents" width="720">
 </p>
-
-<h1 align="center">Memorize</h1>
 
 <p align="center">
   <a href="https://www.npmjs.com/package/@shakystar/memorize"><img src="https://img.shields.io/node/v/%40shakystar%2Fmemorize" alt="node"></a>
