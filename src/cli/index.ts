@@ -44,6 +44,9 @@ const handlers: Record<string, CommandHandler> = {
   // commands the Hub renders in its copy-paste quickstart blocks.
   clone: (args, ctx) => runProjectCommand(['clone', ...args], ctx),
   remote: (args, ctx) => runProjectCommand(['remote', ...args], ctx),
+  // `memorize connect <hub-url>` — auto-branches: fresh dir clones, bound
+  // project attaches a remote. clone/remote remain as explicit aliases.
+  connect: (args, ctx) => runProjectCommand(['connect', ...args], ctx),
   project: runProjectCommand,
   workspace: runWorkspaceCommand,
   projection: runProjectionCommand,
