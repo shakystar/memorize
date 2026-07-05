@@ -4,6 +4,7 @@ import path, { join } from 'node:path';
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
+import { CURRENT_SCHEMA_VERSION } from '../../src/domain/common.js';
 import { doctor } from '../../src/services/repair-service.js';
 import {
   createProject,
@@ -51,7 +52,74 @@ function seedObservations(projectId: string, tsList: string[]): void {
   });
 }
 
+/**
+ * Seed a REAL project.created directly (with distinctive metadata) but do NOT
+ * build the projection — reproduces the dropped-tables / interrupted-migration
+ * case where the genesis is present in the log yet the projection is unbuilt.
+ */
+function seedGenesis(
+  projectId: string,
+  ts: string,
+  overrides: { title: string; summary: string; goals: string[] },
+): void {
+  const db = getDb(projectId);
+  const payload = {
+    id: projectId,
+    schemaVersion: CURRENT_SCHEMA_VERSION,
+    createdAt: ts,
+    updatedAt: ts,
+    title: overrides.title,
+    summary: overrides.summary,
+    goals: overrides.goals,
+    status: 'active',
+    rootPath: '',
+    importedContextCount: 0,
+    activeWorkstreamIds: [],
+    activeTaskIds: [],
+    acceptedDecisionIds: [],
+    ruleIds: [],
+  };
+  db.prepare(
+    `INSERT INTO events
+       (id, schema_version, created_at, updated_at, type,
+        project_id, scope_type, scope_id, actor,
+        writer, source_project_id, payload)
+     VALUES (?, 1, ?, ?, 'project.created', ?, 'project', ?, 'claude',
+             'claude', ?, ?)`,
+  ).run(
+    'evt_genesis',
+    ts,
+    ts,
+    projectId,
+    projectId,
+    projectId,
+    JSON.stringify(payload),
+  );
+}
+
 describe('ensureProjectGenesis — genesis backfill', () => {
+  it('rebuilds from an existing genesis instead of clobbering it with synthetic defaults', async () => {
+    await bindProject(projectDir, PROJECT_ID);
+    // A real genesis is in the log, but the projection was never built.
+    seedGenesis(PROJECT_ID, '2026-07-01T11:33:45.000Z', {
+      title: 'Real Title Preserved',
+      summary: 'Real summary that must survive',
+      goals: ['keep this goal'],
+    });
+    expect(getProjectProjection(PROJECT_ID)).toBeUndefined();
+
+    await ensureProjectGenesis(PROJECT_ID);
+
+    // The projection is recovered from the existing genesis — NOT overwritten
+    // by a second synthetic project.created whose reconstructed defaults
+    // (basename title, empty goals/summary) would win under later-wins.
+    const project = getProjectProjection(PROJECT_ID);
+    expect(project?.title).toBe('Real Title Preserved');
+    expect(project?.summary).toBe('Real summary that must survive');
+    expect(project?.goals).toEqual(['keep this goal']);
+  });
+
+
   it('backfills project.created when events exist but genesis is missing, dated at the earliest event', async () => {
     await bindProject(projectDir, PROJECT_ID);
     seedObservations(PROJECT_ID, [

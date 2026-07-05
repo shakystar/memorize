@@ -59,6 +59,24 @@ export function getEarliestEventCreatedAt(
   return row?.t ?? undefined;
 }
 
+/**
+ * True when the log already holds a self-scoped `project.created` genesis for
+ * this project. Genesis backfill uses this to distinguish "no genesis, recover
+ * by synthesizing one" from "genesis present but projection unbuilt, recover by
+ * rebuilding" — the latter must NOT append a second same-id genesis, whose
+ * reconstructed defaults would win over the real metadata under later-wins.
+ */
+export function hasGenesisEvent(projectId: string): boolean {
+  const row = getDb(projectId)
+    .prepare(
+      `SELECT 1 FROM events
+        WHERE type = 'project.created' AND project_id = ?
+        LIMIT 1`,
+    )
+    .get(projectId) as { 1: number } | undefined;
+  return row !== undefined;
+}
+
 /** Map a DomainEvent onto the `events` table columns. payload is JSON text. */
 function insertEvent(db: Database.Database, event: DomainEvent): void {
   db.prepare(
