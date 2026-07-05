@@ -2,8 +2,6 @@
   <img src="https://github.com/user-attachments/assets/a674a964-d875-4439-87db-8c18ad8222da" alt="memorize: shared memory for AI coding agents" width="720">
 </p>
 
-<h1 align="center">Memorize</h1>
-
 <p align="center">
   <a href="https://www.npmjs.com/package/@shakystar/memorize"><img src="https://img.shields.io/node/v/%40shakystar%2Fmemorize" alt="node"></a>
   <a href="https://github.com/shakystar/memorize/actions/workflows/ci.yml"><img src="https://github.com/shakystar/memorize/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
