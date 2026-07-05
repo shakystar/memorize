@@ -224,7 +224,7 @@ If the user pastes an install error (from the one-line installer or the
 steps above), diagnose in THIS order. Each step's failure mode is
 distinct and the order avoids chasing symptoms:
 
-1. **Node present and >= 22?** `node -v`. If missing/old, the user must
+1. **Node present and >= 22.9?** `node -v`. If missing/old, the user must
    install from https://nodejs.org; do not work around it.
 2. **Global npm directory writable?** `npm root -g` then check write
    access. On stock Linux installs it is root-owned and `npm install -g`
