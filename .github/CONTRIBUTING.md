@@ -11,6 +11,8 @@ The project iterates fast, so expect design and APIs to move.
   [Discussions](https://github.com/shakystar/memorize/discussions).
   Bigger design directions (memory taxonomy, sync semantics) get
   hashed out there before they become issues.
+- **Quick questions and the easiest way to get started contributing**
+  are on [Discord](https://discord.com/channels/1523335804804661348).
 
 When in doubt, open a discussion first. It gets promoted to an issue
 once it has acceptance criteria.

@@ -502,7 +502,9 @@ only once someone is invited (a later slice).
   parses events). Identity binding is stored client-side only.
 - Requires a host credential for the Hub (`memorize auth login --remote-url
   <hub-url>` first). Idempotent: a project already workspace-bound is not
-  re-minted.
+  re-minted. A public hosted Hub is available at
+  https://memorize-hub-shakystar.fly.dev (open beta, free to join); `<hub-url>`
+  can point at it or at a self-hosted Hub.
 - `workspace status [--json]` prints the current binding (`wsp_`, role, whether
   the store is shared) or reports that the project is not workspace-bound.
 - The bind also persists the Hub URL as the project's http `syncTransport`, so a

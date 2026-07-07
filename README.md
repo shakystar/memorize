@@ -112,14 +112,14 @@ The full workspace, role, and sync surface is in [AGENT_GUIDE.md](./AGENT_GUIDE.
 
 ### Retrieval benchmark
 
-Retrieval is scored on [LongMemEval-S](https://github.com/xiaowu0162/longmemeval), a public 500-question memory benchmark. Each question buries its answer in one of roughly fifty past chat sessions; we load those sessions into memorize and check whether the right one comes back.
+Retrieval is scored on [LongMemEval-S](https://github.com/xiaowu0162/longmemeval), a public 500-question memory benchmark.
 
 | mode | recall@5 | recall@10 | recall@20 | ndcg@10 | mrr |
 | --- | --- | --- | --- | --- | --- |
 | lexical (BM25) | 0.966 | 0.986 | 0.994 | 0.896 | 0.911 |
 | hybrid (BM25 + bge-m3) | 0.978 | 0.994 | 1.000 | 0.925 | 0.932 |
 
-These are retrieval-recall scores, not answer accuracy, and they test the search layer rather than the consolidation layer. Reproduce with `pnpm benchmark:retrieval bm25`.
+These are retrieval-recall scores, not answer accuracy. Reproduce with `pnpm benchmark:retrieval bm25`.
 
 
 ## Community
@@ -128,5 +128,6 @@ Issues and discussions are open to everyone. Bug reports, design debates, and us
 
 - File bugs and concrete feature requests in [Issues](https://github.com/shakystar/memorize/issues).
 - Take design directions and open-ended ideas to [Discussions](https://github.com/shakystar/memorize/discussions).
+- Join the [Discord](https://discord.com/channels/1523335804804661348) to ask questions, follow development, and find the easiest on-ramp to contributing.
 
 See [CONTRIBUTING.md](./.github/CONTRIBUTING.md) for the developer workflow.
