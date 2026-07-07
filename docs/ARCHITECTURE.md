@@ -130,7 +130,7 @@ Parallel sessions in the same project share local work signals:
 
 ## Sync and Hub
 
-Hub sync is the canonical remote sync path.
+Hub sync is the canonical remote sync path. A public hosted Hub is live at https://memorize-hub-shakystar.fly.dev (open beta, free to join); you can also run your own.
 
 Use it when:
 

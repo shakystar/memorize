@@ -4,6 +4,8 @@
 
 Workspace sharing lets multiple accounts exchange project memory through a Hub workspace. The Hub mints a workspace store id that starts with `wsp_`.
 
+A public hosted Hub is live at https://memorize-hub-shakystar.fly.dev (open beta, free to join); the `<hub-url>` in the commands below can point at it or at your own Hub.
+
 ## Who
 
 Workspace members can read shared workspace memory. Owners can invite members, change roles, remove members, and retract another writer's memory when the owner-only rule applies.
