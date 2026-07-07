@@ -14,6 +14,31 @@ log layout or the public CLI surface.
 > entries by hand. See
 > [CONTRIBUTING.md](.github/CONTRIBUTING.md#releasing).
 
+## [3.1.0](https://github.com/shakystar/memorize/compare/v3.0.0...v3.1.0) (2026-07-07)
+
+
+### Features
+
+* **cli:** add `connect` verb (auto-branch clone/remote) ([#256](https://github.com/shakystar/memorize/issues/256)) ([c42e311](https://github.com/shakystar/memorize/commit/c42e311bce92b3904228d4026c8759e23e4e7f97))
+* **delegation:** cross-project task delegation slice 1 (SoT-041/042) ([#248](https://github.com/shakystar/memorize/issues/248)) ([32cb2d5](https://github.com/shakystar/memorize/commit/32cb2d5e33a10db02692c03455f74291789771e6))
+* **search:** search --union for on-demand union-lane retrieval + hit provenance (task mr52f9j0) ([#250](https://github.com/shakystar/memorize/issues/250)) ([a1faa03](https://github.com/shakystar/memorize/commit/a1faa036f8c3ebe2488109d6028598b3d781b5d4))
+* **sync:** session-bound watcher for mid-session delegation cadence (SoT-042/043) ([#249](https://github.com/shakystar/memorize/issues/249)) ([8c9b215](https://github.com/shakystar/memorize/commit/8c9b215dc0cf1932e119d8753959084bbaabc291))
+* **task:** make in_progress reachable — start verb + strict handoff (task_mr53pkwo) ([#254](https://github.com/shakystar/memorize/issues/254)) ([d2a6b5f](https://github.com/shakystar/memorize/commit/d2a6b5fcd07ea7d433ae1cadffc0c0945ff90634))
+* **update:** win32 mid-session self-update via shadow-loaded sqlite addon ([#253](https://github.com/shakystar/memorize/issues/253)) ([528d8a4](https://github.com/shakystar/memorize/commit/528d8a4aee1c021b9d2ce52c081483dc9ce6e938))
+* **workspace:** self-declare source stores for Hub member attribution ([#244](https://github.com/shakystar/memorize/issues/244)) ([5a0aba7](https://github.com/shakystar/memorize/commit/5a0aba777140721ada040aeed2c66b3cf4fb3278))
+
+
+### Bug Fixes
+
+* **auth:** open device-approval URL without cmd shell re-parse (codex [#231](https://github.com/shakystar/memorize/issues/231)) ([#257](https://github.com/shakystar/memorize/issues/257)) ([73e3922](https://github.com/shakystar/memorize/commit/73e392207678961123ae23507dfeac6bd9c44f94))
+* **genesis:** rebuild from an existing project.created instead of clobbering it (codex [#230](https://github.com/shakystar/memorize/issues/230)) ([#259](https://github.com/shakystar/memorize/issues/259)) ([70e6643](https://github.com/shakystar/memorize/commit/70e66431bae0a209110f60cd0bba24284eae572d))
+* **projection:** route legacy NULL-provenance union events to their own lane ([#247](https://github.com/shakystar/memorize/issues/247)) ([aeb9cff](https://github.com/shakystar/memorize/commit/aeb9cffdafe9bbe847e1c3a48d0e1336903dd2ec))
+* **search:** collapse multi-line snippets to one line in human output ([#251](https://github.com/shakystar/memorize/issues/251)) ([e31b6c9](https://github.com/shakystar/memorize/commit/e31b6c9edfccd8224a930698f91acdf37d6a24fd))
+* **task:** honor positional taskId in `task done`/`handoff` (task mr5p9ysa) ([#252](https://github.com/shakystar/memorize/issues/252)) ([af5b92b](https://github.com/shakystar/memorize/commit/af5b92ba0335998df3e06f44552b5f7945e363eb))
+* **update:** rank stable releases above same-version prereleases ([#246](https://github.com/shakystar/memorize/issues/246)) ([ec9640f](https://github.com/shakystar/memorize/commit/ec9640ffb1eec73ebb222379a654a2a0e47d4ed5))
+* **update:** strip SemVer build metadata before comparing prereleases (codex [#246](https://github.com/shakystar/memorize/issues/246)) ([#258](https://github.com/shakystar/memorize/issues/258)) ([dd10425](https://github.com/shakystar/memorize/commit/dd104251654d17b6ed4a7f52fef11e1a2e41b051))
+* **watcher:** harden session-bound watcher daemon — spawn ordering, idle-gate, lock lease, error containment (SoT-042/043) ([#260](https://github.com/shakystar/memorize/issues/260)) ([7c65b35](https://github.com/shakystar/memorize/commit/7c65b35ad3888a4d21208fd3b44563a1bb1e85eb))
+
 ## [3.0.0](https://github.com/shakystar/memorize/compare/v2.5.0...v3.0.0) (2026-07-03)
 
 
