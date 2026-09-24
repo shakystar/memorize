@@ -1,27 +1,21 @@
-# Memorize function pages
+# Memorize 기능별 문서
 
-These pages are draft source material for a future docs hub. They describe what Memorize does now. They are not a changelog.
+개발 당시 기능을 설명한 문서 초안이다. 개발·유지보수는 종료했으며 현재 구현·검증 범위는 [최종 상태](../final-status.md)를 먼저 확인한다. 변경 이력은 별도 CHANGELOG에 보존한다.
 
-Read in this order:
+## 읽는 순서
 
-1. [Project memory](./project-memory.md)
-2. [Personal memory](./personal-memory.md)
-3. [Workspace sharing](./workspace-sharing.md)
-4. [Sync and storage](./sync-and-storage.md)
-5. [Agent integration](./agent-integration.md)
+1. [프로젝트 기억](./project-memory.md)
+2. [개인 기억](./personal-memory.md)
+3. [워크스페이스 공유](./workspace-sharing.md)
+4. [동기화와 저장](./sync-and-storage.md)
+5. [에이전트 연동](./agent-integration.md)
 
-## Current surfaces
+## 기능의 경계
 
-- Project memory keeps project state across sessions.
-- Personal memory keeps account-scoped user facts across projects.
-- Workspace sharing lets members exchange project memory through a Hub workspace.
-- Sync and storage keep local startup authoritative while Hub handles remote coordination.
-- Agent integration wires Claude Code first, with frozen best-effort support for other harnesses.
+프로젝트 기억은 세션 간 프로젝트 상태를, 개인 기억은 프로젝트를 넘는 계정별 사용자 정보를 유지한다. 워크스페이스 공유는 Hub를 통해 구성원 사이의 프로젝트 기억을 교환한다. 세션 시작은 로컬 저장을 기준으로 하고 Hub는 원격 조정을 맡는다.
 
-## Reasoning rule
+개발 당시 Claude Code를 우선 지원했고 다른 어댑터는 동결 상태였다. 현재는 전체 프로젝트가 보존 상태다.
 
-Premise: startup context must work offline.
+## 설계 전제
 
-Premise: project, personal, and workspace data have different access boundaries.
-
-Result: Memorize stores each channel separately and merges them only when rendering local startup context.
+시작 맥락은 오프라인에서도 동작해야 한다. 프로젝트·개인·워크스페이스 데이터는 접근 경계가 다르다. 따라서 각 채널을 분리 저장하고 로컬 시작 맥락을 렌더링할 때 합친다.

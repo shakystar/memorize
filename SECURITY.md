@@ -1,49 +1,7 @@
-# Security Policy
+# 보안 유지보수 상태
 
-## Supported versions
+memorize는 개발을 종료한 보존용 저장소다. 지원 중인 버전, 정기 보안 업데이트, 응답·수정 기한을 약속하지 않는다. 과거의 지원 또는 대응 기한 안내를 대체한다.
 
-Security fixes land on the latest published release. Older releases are not backported.
+취약점 제보에 실제 토큰·개인정보·운영 데이터는 포함하지 않는다. 공개 이슈에 민감한 재현 자료를 올리지 말고, 필요한 경우 [관리자 프로필](https://github.com/shakystar)에서 비공개 연락 경로를 확인한다. 자체 운영 시 의존성·인증·배포 보안 검토는 운영자가 별도로 수행해야 한다.
 
-| Version | Supported |
-| --- | --- |
-| latest `3.x` | Yes |
-| older | No |
-
-## Reporting a vulnerability
-
-**Please do not open public GitHub issues for security problems.**
-
-Found something in Memorize? Report it privately through one of these channels:
-
-1. **GitHub Security Advisories** (preferred): [Report a vulnerability](https://github.com/shakystar/memorize/security/advisories/new).
-2. **Email**: open an issue asking for a private contact, or reach the maintainer at the address listed on the GitHub profile [shakystar](https://github.com/shakystar).
-
-Please include:
-
-- A clear description of the issue and its impact.
-- Steps to reproduce, or a minimal proof-of-concept.
-- The affected version(s) and platform.
-- A suggested mitigation, if you have one.
-
-## Response expectations
-
-- **Acknowledgement:** within 7 days of the initial report.
-- **Triage and severity assessment:** within 14 days.
-- **Fix or mitigation plan:** communicated within 30 days for high-severity issues. Lower-severity issues may be batched into the next regular release.
-- **Coordinated disclosure:** we agree on a disclosure timeline with the reporter before any public announcement. You get credit in the release notes unless you'd rather stay anonymous.
-
-## Scope
-
-In scope:
-
-- The `@shakystar/memorize` CLI and its published artifacts.
-- Code under `src/`, CLI launch wrappers, and installation/bootstrap flows.
-- Default configuration shipped with the project.
-
-Out of scope:
-
-- Vulnerabilities in upstream dependencies. Report those to the respective projects; we'll bump affected versions once they're fixed upstream.
-- Issues that require a compromised local machine or existing shell access to exploit.
-- Social engineering, physical attacks, and issues in third-party services (Claude, Codex, npm registry, GitHub) not caused by Memorize code.
-
-Thank you for helping keep Memorize and its users safe.
+검증 범위와 미완료 사항은 [최종 상태](./docs/final-status.md)를 참고한다.
