@@ -1,137 +1,42 @@
-# Harness conformance (Docker)
+# Docker 기반 에이전트 연동 검증
 
-> **FROZEN — no longer a CI gate.** memorize is now Claude Code-first. The
-> non-Claude harness integrations (codex/opencode/gemini/pi/hermes/cursor) are kept
-> in-tree and still install/run, but their support is **not guaranteed** and
-> they are **not** gated by CI any more — the `harness-conformance.yml` workflow
-> was removed. This harness is retained as a **manual** tool: a contributor
-> fixing or reviving a frozen harness should run it themselves
-> (`docker run --rm memorize-conformance <id>`) and paste the result in the PR.
-> Upstream-drift catching is now best-effort/community, not automated.
+**동결된 수동 검증 도구다.** 개발 당시 Claude Code 이외의 Codex·opencode·Gemini CLI·pi·Hermes·Cursor 연동은 CI 보장에서 제외됐고 `harness-conformance.yml`도 제거됐다. 현재는 전체 프로젝트의 유지보수가 종료됐다. 아래 결과는 당시 기록이며 현재 CLI 버전과의 호환성을 뜻하지 않는다.
 
-Repeatable, containerised verification that memorize's integration still works
-against the **real** agent-harness CLIs. This replaces manual dogfooding for the
-parts that can be automated and was historically the backbone of harness-
-compatibility maintenance: when an upstream harness changes its config schema,
-paths, or plugin API, a run here turns that silent drift into a visible failure.
+실제 에이전트 CLI에 Memorize를 설치해 훅·플러그인·MCP 연결과 수집 동작을 검증한다. Docker 이미지가 이 저장소를 빌드한 후 `npm i -g .`로 설치하므로, 설치되는 훅은 npm의 다른 배포물이 아닌 해당 빌드를 호출한다.
 
-## Tiers
+## 검증 단계
 
-| Tier | What | Needs a model? | Determinism |
-|---|---|---|---|
-| **A — install conformance** | Install the real harness CLI, run `memorize init`, assert the planted artifacts (MCP block, plugin/hook config, ground-rule file). | No | Deterministic |
-| **A' — plugin load** | Boot the harness (e.g. `opencode serve`) and check it loads memorize's plugin without a fatal error. | No (best-effort) | Mostly |
-| **B — live capture** | Drive the harness with a real prompt and assert memorize captured an observation. | **Yes** (provider key) | Non-deterministic → gated |
+| 단계 | 검사 | 모델 호출 |
+| --- | --- | --- |
+| A | 실제 CLI 설치 후 `memorize init`, MCP·훅·작업 규칙 파일 확인 | 없음 |
+| A′ | 플러그인 로드·기동 오류 확인 | 원칙적으로 없음, 가능한 CLI만 |
+| A″ | 설치된 명령과 합성 도구 입력을 통해 수집·주입 확인 | 없음 |
+| B | 실제 프롬프트로 파일 수정을 유도하고 기억 수집 확인 | 인증 키 필요, 비결정적 |
+| C | Cursor의 공개 훅 문서에 기대하는 계약 이름이 남아 있는지 검사 | 모델 없음, 네트워크 필요 |
 
-Tier A is the hard gate (fails the run). A'/B report and only fail when they
-actually execute (B is gated behind an env flag + key).
+A는 필수 실패 기준이다. 선택 단계는 실제 실행됐을 때 그 결과를 판정한다. 자동 실행 일정은 남아 있지 않다.
 
-## Run
+## 실행
 
-From the repo root:
+저장소 루트에서 실행한다.
 
 ```sh
 docker build -f docker/conformance/Dockerfile -t memorize-conformance .
-
-# Tier A + A' (no secrets):
+# 모델을 호출하지 않는 검증
 docker run --rm memorize-conformance opencode
-
-# Tier B too (live): pass the flag + your provider key into the container:
+# 실제 모델 검증: 호출 비용과 인증 설정을 별도로 확인
 docker run --rm -e OPENCODE_CONFORMANCE_LIVE=1 -e OPENAI_API_KEY=… \
   memorize-conformance opencode
 ```
 
-The image builds memorize from source and `npm i -g .`, so the planted
-plugins/hooks invoke THIS build (node-abs command form), not the published npm
-package — essential for verifying unreleased harness support.
+## 확장 시 계약
 
-## Add a harness
+`harnesses/<id>.sh`는 `install_harness`, `assert_artifacts`를 정의하고, 선택적으로 `plugin_load_check`, `live_capture_check`를 구현한다. `run.sh`가 공통 단계를 실행하며 ID는 `src/harness/registry.ts`에도 있어야 한다.
 
-Drop a `harnesses/<id>.sh` descriptor defining:
+## 보존된 검증 상태
 
-- `install_harness` — install the CLI; return non-zero if unavailable.
-- `assert_artifacts` — `ok`/`ko` the files `memorize init` should have written
-  for this harness (config path, plugin/hook file, ground-rule file).
-- `plugin_load_check` (optional) — boot the harness, detect plugin-load errors.
-- `live_capture_check` (optional, gated) — drive a real action, assert capture.
+- **opencode 1.17.11**: 당시 A·A′·A″·B에서 PASS=9. 실제 `write`→`Write`, `edit`→`Edit` 수집과 `read` 제외를 확인했다. `tool.execute.after` 입력은 `{ tool, sessionID, callID, args:{ filePath, content|oldString/newString }}`였다. `bash` 실제 호출과 `experimental.session.compacting` 종단 간 경로는 미검증이었다. B는 당시 Anthropic haiku를 사용했으며 `OPENCODE_MODEL`과 대응 키로 바꿀 수 있다.
+- **Hermes**: 합성 입력 중심. 기본 설치 감지는 임시 `~/.hermes`로 대체하며 실제 CLI는 `HERMES_CONFORMANCE_LIVE=1`일 때만 설치한다. `write_file`·`patch`, `terminal`, `pre_llm_call`의 `{"context": …}` 주입과 세션별 1회 주입 경계를 검사했다. 실제 CLI 기동·Nous 모델 호출과 외부 설정 변경 추적은 보장하지 않는다.
+- **Cursor**: 프로젝트별 `.cursor/hooks.json`, `.cursor/mcp.json`, AGENTS.md를 검사한다. 합성 단계는 생성된 훅 명령을 그대로 실행해 `Write`·`Shell` 수집과 `{"additional_context": …}` 주입을 확인한다. 실제 `cursor-agent -p` 단계에는 `CURSOR_API_KEY`가 필요하다. 공개 문서 검사에서는 `sessionStart`, `postToolUse`, `preCompact`, `sessionEnd`, 입력·출력 필드 이름을 확인한다. 로컬 CLI와 클라우드 에이전트의 세션 수명주기 차이를 검증 완료로 가정하지 않는다.
 
-`run.sh` is generic; it sources the descriptor and runs the tiers. The harness
-must already exist in `src/harness/registry.ts`.
-
-## Tiers (when each runs)
-
-These tiers no longer run automatically (the CI workflow was removed). Run them
-**manually** when touching or reviving a frozen harness:
-
-- Tier A, A', **A''** are model-free and deterministic. A'' feeds the MAPPED tool
-  payloads the plugin emits (`Write`/`Edit`/`shell`) to the real `memorize hook`
-  and asserts capture.
-- Tier B (live, model) needs a provider key; enable per harness with its
-  `<ID>_CONFORMANCE_LIVE=1` flag plus the matching key (see Run, above).
-
-## Status — opencode (validated against opencode 1.17.11 in CI)
-
-- Tiers A / A' / A'' / B all green (PASS=9). The live run confirmed opencode's
-  real tool names + payload shape: `write`→`Write`, `edit`→`Edit` (both
-  captured), `read` correctly ignored. opencode's `tool.execute.after` payload
-  is `{ tool, sessionID, callID, args:{ filePath, content|oldString/newString }}`.
-- Residual: opencode's `bash` tool name is assumed (not exercised live yet); the
-  synthetic tier covers the memorize side for `shell`. The compaction
-  (`experimental.session.compacting`) path is not yet exercised end-to-end.
-- Tier B currently uses Anthropic haiku; override with `OPENCODE_MODEL` + the
-  matching provider key.
-
-## Status — hermes (synthetic-only)
-
-Hermes (`yaml-shell-hooks` family) is validated by the deterministic tiers only.
-Its real CLI ships as a curl|bash installer that bundles its own
-uv+python+node runtime and needs a Nous provider key even to boot — impractical
-on every PR, and we hold no Nous key for a live run. So `install_harness` STUBS
-detection (`mkdir ~/.hermes`) unless `HERMES_CONFORMANCE_LIVE=1`, and the
-synthetic tier (A'') validates the memorize side end-to-end:
-
-- capture across Hermes tool names (`write_file`/`patch`→write, `terminal`→shell),
-- the `pre_llm_call` injection translating our context to Hermes's native
-  `{"context": …}` envelope, and
-- the once-per-session injection gate (a second `pre_llm_call` for the same
-  `session_id` must NOT re-inject — Hermes fires `pre_llm_call` every turn).
-
-Upstream config-schema drift is otherwise tracked manually. Mirrors Gemini's
-synthetic-first posture.
-
-## Status — cursor (install-artifact + synthetic only; live tier N/A)
-
-Cursor (`json-hooks-map` family, but PER-PROJECT) ships a **headless CLI agent**
-(`cursor-agent`), so it has the full tier ladder like opencode/gemini/pi — not
-artifacts-only. (An earlier note here wrongly called it GUI-only; corrected.)
-
-- **Tier A (install artifacts)** — the `.cursor/hooks.json` schema we write (the
-  four native events `sessionStart`/`postToolUse`/`preCompact`/`sessionEnd`), the
-  `.cursor/mcp.json` MCP block, and the AGENTS.md ground rule.
-- **Tier A'' (synthetic, FAITHFUL)** — runs every PR, model-free. Instead of a
-  hand-typed `memorize hook` proxy, it extracts and executes the **exact command
-  memorize wrote into `.cursor/hooks.json`**, the way Cursor's runtime drives it
-  (project-root cwd, documented payload on stdin), asserting capture across cursor
-  tool names (`Write` shared with Claude; `Shell` new) and the `sessionStart`
-  injection emitting cursor's native `{"additional_context": …}` envelope
-  (snake_case, top-level — not `hookSpecificOutput`). Proves the installed artifact
-  runs and honors the wire contract end to end.
-- **Tier B (live, gated)** — installs the real `cursor-agent`
-  (`curl https://cursor.com/install | bash`) and drives `cursor-agent -p` to make
-  it perform a file-write tool call, asserting memorize captured it via the
-  postToolUse hook. Needs `CURSOR_API_KEY` (headless auth); runs on
-  schedule/dispatch. A WRITE prompt is used (cursor-agent has full write access in
-  `-p` mode — no approval prompt; a shell prompt would block on y/n).
-- **Tier C (upstream-contract drift guard, gated + network-only)** — fetches
-  [cursor.com/docs/hooks](https://cursor.com/docs/hooks) and asserts every token
-  memorize hardcodes still appears (the four event names, `additional_context`,
-  the `Shell`/`Write` tool names, `tool_name`, `.cursor/hooks.json`). Catches an
-  upstream rename automatically. Complements tier B: cheap, keyless, and guards
-  the IDE/cloud surfaces tier B can't drive.
-
-**Open question tier B settles:** the docs confirm cursor's *cloud* agents fire
-`postToolUse` + `preCompact` but NOT `sessionStart`/`sessionEnd` (VM lifecycle).
-Whether the *local* `cursor-agent` fires the session-lifecycle hooks is
-undocumented, so tier B probes it (it reports whether a `cursor` session was
-minted) instead of assuming. The IDE itself is the primary target and is expected
-to fire all four; that is verified by hand once and then guarded by tier C.
+현재 상태와 전체 검증 한계는 [최종 상태](../../docs/final-status.md)를 참고한다.

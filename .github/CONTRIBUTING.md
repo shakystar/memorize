@@ -1,130 +1,22 @@
-# Contributing to Memorize
+# 소스 검증·포크 안내
 
-Thanks for your interest. Issues, discussions, and PRs are all welcome.
-The project iterates fast, so expect design and APIs to move.
+Memorize는 개발을 종료하고 기록을 보존하는 저장소다. 신규 이슈·PR 검토나 유지보수를 약속하지 않는다. 현재 소스는 [MIT 라이선스](../LICENSE)에 따라 포크·수정할 수 있다.
 
-## Where things go
+## 재현 명령
 
-- **Bug reports and concrete feature requests** go to
-  [Issues](https://github.com/shakystar/memorize/issues).
-- **Design debates, open-ended ideas, and questions** go to
-  [Discussions](https://github.com/shakystar/memorize/discussions).
-  Bigger design directions (memory taxonomy, sync semantics) get
-  hashed out there before they become issues.
-- **Quick questions and the easiest way to get started contributing**
-  are on [Discord](https://discord.com/channels/1523335804804661348).
-
-When in doubt, open a discussion first. It gets promoted to an issue
-once it has acceptance criteria.
-
-## Development workflow
-
-```bash
-pnpm install
-pnpm dev -- project show   # sanity check the CLI from source
-pnpm build                 # produce dist/ for the `memorize` bin
-pnpm qa:quick              # typecheck + lint + unit + smoke
+```sh
+pnpm install --frozen-lockfile
+pnpm build
+pnpm qa:quick
+pnpm check
 ```
 
-Before opening a PR, please run:
+테스트는 임시 `MEMORIZE_ROOT`를 사용한다. 실제 개인 기억 저장소에 테스트를 실행하지 않는다. 구현 기준·기존 CI 실패와 검증 한계는 [최종 상태](../docs/final-status.md)를 참고한다.
 
-```bash
-pnpm qa:full               # + integration + golden (CI runs the tests on 3 OSes)
-```
+## 보존한 설계 원칙
 
-Integration tests isolate state via `MEMORIZE_ROOT` in a temp dir, so
-never run them against your real `~/.memorize`.
+이벤트 로그를 원본으로 두며 과거 이벤트를 제자리에서 수정하지 않는다. 어댑터·도메인·서비스·저장 계층의 경계를 유지한다. 포크에서 동작을 바꾼다면 해당 동작의 회귀 검증과 변경 근거를 함께 남기는 것을 권장한다.
 
-## Development conventions
+## 릴리스 종료
 
-- Follow the existing module boundaries in `src/` (`adapters`,
-  `domain`, `projections`, `services`, `storage`).
-- **The event log is append-only** and projections are derived from it.
-  PRs must never mutate or delete past events.
-- Architectural complexity is evidence-gated: if you propose a retry
-  layer, a clock, or a cache, link the observed problem it solves.
-- Keep changes scoped, and prefer small, reviewable PRs.
-- New behavior needs tests (`tests/unit`, `tests/integration`,
-  `tests/golden`); bug fixes need a regression test.
-- Use Conventional-commit style messages (`feat(scope): ...`, `fix(scope): ...`).
-
-## Releasing
-
-Releasing is fully automated with
-[release-please](https://github.com/googleapis/release-please). The
-version is computed from Conventional Commits, never edited by hand.
-
-**Feature PRs must never touch `package.json` `version` or `CHANGELOG.md`.**
-A CI `version-guard` job fails any PR that bumps the version (except the
-bot's own `release-please--*` branch). Versioning intent travels in the
-commit type: `fix:` is a patch, `feat:` is a minor, and `feat!:` or
-`BREAKING CHANGE:` is a major.
-
-How a release happens:
-
-1. Feature PRs merge to `main` as usual. Nobody touches the version.
-2. release-please opens and keeps a **Release PR** updated (titled e.g.
-   `chore(main): release 2.4.0`) with the computed version and a
-   CHANGELOG draft built from the merged commits.
-3. To ship, optionally add a narrative preamble to the Release PR (edit
-   it last, since the bot regenerates it on new `main` commits), then
-   **merge the Release PR**.
-4. Merging it tags `vX.Y.Z`, creates the GitHub Release, and triggers the
-   `publish` job in `.github/workflows/release.yml`, which publishes
-   `@shakystar/memorize` to npm via **OIDC Trusted Publishing** (no
-   token, `--provenance` attached).
-
-Release timing stays a deliberate human act (merging the Release PR);
-only the mechanics are automated.
-
-**Dev-channel snapshots (`publish-dev`).** For pre-release lines under
-active development (e.g. the 3.0.0 milestones), a snapshot can be
-published without touching the stable channel: manually dispatch the
-Release workflow (`gh workflow run release.yml -f base=3.0.0`). The
-`publish-dev` job stamps `<base>-dev.<run_number>` in the runner only —
-no commit, tag, CHANGELOG entry, or release-please state — and publishes
-to the npm **`dev` dist-tag**, so `npm i @shakystar/memorize` (`latest`)
-is unaffected while `npm i @shakystar/memorize@dev` gets the snapshot.
-The job lives inside `release.yml` because npm Trusted Publishing binds
-the package to that single workflow path.
-
-**CI on the Release PR (optional, `RELEASE_PLEASE_TOKEN`).** A PR opened by
-the built-in `GITHUB_TOKEN` does not trigger other workflows, so the Release
-PR runs no CI by default. `main` is currently unprotected, so this is benign
-— the version/CHANGELOG bump is mechanical and the code it ships already
-passed CI on its feature PR. The day `main` gains **required status checks**,
-provision a token so the Release PR runs `ci.yml` like any other PR:
-
-1. Create a **fine-grained PAT** scoped to this repo with **Contents:
-   read/write** and **Pull requests: read/write** (or use a GitHub App token).
-2. Add it as the repository secret **`RELEASE_PLEASE_TOKEN`**.
-
-`release.yml` already prefers that secret and falls back to `GITHUB_TOKEN`
-when it is absent, so no workflow change is needed when you add it.
-
-## License and relicensing
-
-Memorize is released under the
-[MIT License](../LICENSE).
-
-By submitting a contribution (pull request, patch, issue with code, or
-any other form) to this repository, you agree that:
-
-1. You have the right to submit the contribution under
-   the MIT License.
-2. Your contribution is licensed to the project and its users under
-   the MIT License.
-3. You grant the project maintainer (shakystar) the right to
-   **relicense the project, including your contribution, under a
-   different license in the future** (for example, a more permissive
-   license, or dual-licensing for commercial use). This relicensing
-   right applies only to future releases; any release already published
-   under a given license remains available under that license.
-
-If you do not agree to these terms, please do not submit contributions.
-
-## Reporting issues
-
-Use [GitHub Issues](https://github.com/shakystar/memorize/issues).
-Include reproduction steps, expected vs actual behavior, and the output
-of `memorize doctor --json` when relevant.
+종료 문서 정리로 새 npm 버전을 발행하지 않는다. 기존 자동 릴리스 정의는 [실행되지 않는 보관 파일](../docs/archive/release-workflow.yml.disabled)로 옮겼다. 기존 버전·태그·CHANGELOG와 npm 배포물은 보존한다.
